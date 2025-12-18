@@ -25,7 +25,7 @@ under `modules/builder`.
 ```
 
 - Each directory under `modules/` is a **module**
-- Each module defines its build logic in `builder.cpp`
+- Each module defines its build logic in `builder_plugin.cpp`
 - All outputs are written under `artifacts/`, versioned per build
 
 ---
