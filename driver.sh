@@ -15,9 +15,9 @@ if [[ -z "$latest_builder_dir" || ! -x "$latest_builder_driver" ]]; then
   echo "${exec_command[@]}"
   "${exec_command[@]}"
 
-  exec_command=("$tmp_bin" . modules "$target_module" artifacts)
+  exec_command=("$tmp_bin" modules "$target_module" artifacts)
 else
-  exec_command=("$latest_builder_driver" . modules "$target_module" artifacts)
+  exec_command=("$latest_builder_driver" modules "$target_module" artifacts)
 fi
 
 [[ "$debug_flag" == "-g" ]] && exec_command=(gdb --args "${exec_command[@]}")

@@ -12,8 +12,7 @@ int main(int argc, char** argv) {
         }
 
         const auto target_module = std::string(argv[1]);
-        const auto root_dir = std::filesystem::path(".");
-        const auto modules_dir = root_dir / "modules";
+        const auto modules_dir = std::filesystem::path("modules");
         const auto module_name = std::string("builder");
         const auto artifacts_dir = std::filesystem::path("artifacts");
 
@@ -36,7 +35,7 @@ int main(int argc, char** argv) {
                 throw std::runtime_error(std::format("'{}' does not exist", builder_driver_binary.string()));
             }
 
-            const auto run_command = std::format("{} {} {} {} {}", builder_driver_binary.string(), root_dir.string(), modules_dir.string(), target_module, artifacts_dir.string());
+            const auto run_command = std::format("{} {} {} {}", builder_driver_binary.string(), modules_dir.string(), target_module, artifacts_dir.string());
             std::cout << run_command << std::endl;
             if (std::system(run_command.c_str()) != 0) {
                 throw std::runtime_error(std::format("failed to run '{}'", builder_driver_binary.string()));
@@ -44,7 +43,7 @@ int main(int argc, char** argv) {
         } else {
             const auto time_now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             const auto tmp_bin = std::filesystem::absolute(std::filesystem::temp_directory_path() / (builder_driver_name + "@" + std::to_string(time_now)));
-            const auto compile_command = std::format("clang++ -g -O3 -std=c++23 {}/*.cpp -I{} -o {}", builder_module_dir.string(), root_dir.string(), tmp_bin.string());
+            const auto compile_command = std::format("clang++ -g -O3 -std=c++23 {}/*.cpp -I$(dirname {}) -o {}", builder_module_dir.string(), modules_dir.string(), tmp_bin.string());
             std::cout << compile_command << std::endl;
             if (std::system(compile_command.c_str()) != 0) {
                 throw std::runtime_error(std::format("failed to compile '{}'", tmp_bin.string()));
@@ -54,7 +53,7 @@ int main(int argc, char** argv) {
                 throw std::runtime_error(std::format("'{}' was not created, something went wrong", tmp_bin.string()));
             }
 
-            const auto run_tmp_command = std::format("{} {} {} {} {}", tmp_bin.string(), root_dir.string(), modules_dir.string(), target_module, artifacts_dir.string());
+            const auto run_tmp_command = std::format("{} {} {} {}", tmp_bin.string(), modules_dir.string(), target_module, artifacts_dir.string());
             std::cout << run_tmp_command << std::endl;
             if (std::system(run_tmp_command.c_str()) != 0) {
                 std::filesystem::remove(tmp_bin);

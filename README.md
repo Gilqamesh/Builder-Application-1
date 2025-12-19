@@ -1,111 +1,62 @@
 # Builder-Application-1
 
-This repository is an **application workspace built on top of Builder**.
-It shows how Builder is used in practice to develop, compose, and run
-modules as applications.
-
-Builder itself is **not implemented here**. It is consumed as a module
-under `modules/builder`.
-
----
+A long-lived application workspace built on **Builder** to validate Builder as a proof of concept and to evolve modules as I learn new concepts, languages, tools, and practices. Modules stay focused with explicit dependencies. Builder itself is consumed as a module under [`modules/builder`](https://github.com/Gilqamesh/Builder); it is not implemented here.
 
 ## Repository structure
-
-```text
+```
 .
-├─ modules/
-│  ├─ builder/          # Builder module (reference, self-hosting)
-│  ├─ <module_a>/       # Application or library module
-│  ├─ <module_b>/
-│  └─ ...
-├─ artifacts/           # All build outputs (versioned)
-├─ *.sh                 # Helper scripts (build / run / debug)
-├─ main.cpp             # Bootstrap entrypoint
-└─ LICENSE              # MIT license
+├─ modules/               # builder/ (submodule) + application/library modules
+├─ artifacts/             # versioned build outputs
+├─ run_latest_driver.cpp  # bootstrap driver (C++)
+├─ driver.sh              # helper: build (if needed) + run a target module
+├─ binary.sh              # helper: run the latest-built binary for a module
+└─ LICENSE
+```
+- Each directory under `modules/` is a module.
+- Each module defines its build logic in `builder_plugin.cpp`.
+- Outputs are written to `artifacts/`, versioned per build.
+
+## Usage
+
+### Clone and init
+```bash
+git clone https://github.com/Gilqamesh/Builder-Application-1.git
+cd Builder-Application-1
+git submodule update --init --recursive
 ```
 
-- Each directory under `modules/` is a **module**
-- Each module defines its build logic in `builder_plugin.cpp`
-- All outputs are written under `artifacts/`, versioned per build
-
----
-
-## Module dependencies
-
-Each module declares its dependencies explicitly in a `deps.json` file:
-
-```json
-{
-    "builder_deps": [
-        "builder"
-    ],
-    "module_deps": [
-        "builder"
-    ]
-}
-```
-
-- `builder_deps`  
-  Modules required to *build* this module (build-time dependencies)
-
-- `module_deps`  
-  Modules required by the produced artifacts (link-time / runtime dependencies)
-
-Dependency resolution and validation are handled by Builder.
-
----
-
-## Building modules
-
-Modules are built by invoking the **latest available Builder artifact**.
-There are two equivalent entrypoints.
-
-### 1. Using helper scripts
-
-Shell scripts locate the most recent Builder build under
-`artifacts/builder/` and invoke it with the correct arguments.
-
-Example:
+### driver.sh — build and run a target module
+- Builds `builder_driver` if missing, then runs the requested module.
+- `-g` runs under `gdb`, attached to the latest `builder_driver` invocation for the target.
 ```bash
 ./driver.sh <target_module>
+./driver.sh <target_module> -g
 ```
 
-Some scripts support optional execution under `gdb`.
-
----
-
-### 2. Via the bootstrap program (`main.cpp`)
-
-`main.cpp` implements the bootstrap logic explicitly.
-
-#### Compile the bootstrap driver
-
+### binary.sh — run the latest-built binary for a module
+- Locates the newest artifact for `<target_module>` and executes `<binary_name>`.
 ```bash
-clang++ -std=c++23 main.cpp -o driver
+./binary.sh <target_module> <binary_name>
 ```
 
-#### Run
-
+### run_latest_driver.cpp — bootstrap driver (C++)
+- Same purpose as `driver.sh`, implemented in C++.
 ```bash
-./driver <target_module>
+clang++ -std=c++23 run_latest_driver.cpp -o run_latest_driver
+./run_latest_driver <target_module>
 ```
 
-Behavior:
-
-- If a Builder artifact already exists:
-  - it is executed directly
-- Otherwise:
-  - a temporary Builder binary is compiled from `modules/builder`
-  - run once to install itself into `artifacts/`
-  - then removed
-
-This guarantees that Builder can **self-install and self-upgrade** before
-being reused.
-
-The shell scripts mirror this logic for convenience.
-
----
+## Module dependencies
+Each module declares dependencies in `deps.json`:
+```json
+{
+  "builder_deps": ["builder"],
+  "module_deps": ["builder"]
+}
+```
+- `builder_deps`: modules required to build the module (build-time).
+- `module_deps`: modules required by produced artifacts (link-time / runtime).
+Builder validates and resolves dependencies.
 
 ## License
-
-MIT. See the `LICENSE` file for details.
+MIT. See `LICENSE`.
