@@ -5,7 +5,8 @@
 # include <string>
 
 class curl_t {
-    static std::filesystem::path download_file(const std::string& url, const std::filesystem::path& install_path);
+public:
+    static std::filesystem::path download(const std::string& url, const std::filesystem::path& install_path);
 };
 
 #endif // MODULES_CURL_H

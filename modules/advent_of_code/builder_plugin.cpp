@@ -24,7 +24,7 @@ BUILDER_EXTERN void builder__build_module(builder_ctx_t* ctx, const builder_api_
 
                 const auto cpp_stem = cpp_file_path.stem();
                 const auto binary_name = year_dir_stem.string() + "_" + problem_dir_stem.string() + "_" + cpp_stem.string();
-                builder_t::binary(ctx, api, { cpp_file_path }, {}, { binary_name }, { static_libs });
+                builder_t::binary(ctx, api, { cpp_file_path }, {}, { binary_name }, { static_libs }, {});
             }
         }
     }

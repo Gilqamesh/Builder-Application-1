@@ -2,3 +2,6 @@ functions
 artifacts
 a.out
 imgui.ini
+.toolchains
+modules/remote_home_energy_monitor/esp32/build
+modules/remote_home_energy_monitor/esp32/managed_components
