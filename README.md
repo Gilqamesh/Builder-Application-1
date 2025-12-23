@@ -1,62 +1,34 @@
 # Builder-Application-1
 
-A long-lived application workspace built on **Builder** to validate Builder as a proof of concept and to evolve modules as I learn new concepts, languages, tools, and practices. Modules stay focused with explicit dependencies. Builder itself is consumed as a module under [`modules/builder`](https://github.com/Gilqamesh/Builder); it is not implemented here.
+Long-lived application workspace built with **Builder**. Use it to try Builder quickly, explore modules, and produce artifacts in a clean, versioned way.
 
-## Repository structure
-```
-.
-├─ modules/               # builder/ (submodule) + application/library modules
-├─ artifacts/             # versioned build outputs
-├─ run_latest_driver.cpp  # bootstrap driver (C++)
-├─ driver.sh              # helper: build (if needed) + run a target module
-├─ binary.sh              # helper: run the latest-built binary for a module
-└─ LICENSE
-```
-- Each directory under `modules/` is a module.
-- Each module defines its build logic in `builder_plugin.cpp`.
-- Outputs are written to `artifacts/`, versioned per build.
+## Contents
 
-## Usage
+- [Quick start](#quick-start)
+- [Contributing](#contributing)
+- [Requirements](#requirements)
+- [License](#license)
 
-### Clone and init
+## Quick start
+1) **Build a module** (outputs go to `artifacts/`)
 ```bash
-git clone https://github.com/Gilqamesh/Builder-Application-1.git
-cd Builder-Application-1
-git submodule update --init --recursive
+./build.sh <module_name>
 ```
 
-### driver.sh — build and run a target module
-- Builds `builder_driver` if missing, then runs the requested module.
-- `-g` runs under `gdb`, attached to the latest `builder_driver` invocation for the target.
+2) **Run the module's latest binary** (passes any extra args through)
 ```bash
-./driver.sh <target_module>
-./driver.sh <target_module> -g
+./run.sh <module_name> <binary_name> [args...]
 ```
 
-### binary.sh — run the latest-built binary for a module
-- Locates the newest artifact for `<target_module>` and executes `<binary_name>`.
-```bash
-./binary.sh <target_module> <binary_name>
-```
+## Contributing
+Issues and pull requests are welcome. Please describe:
+- What changed and why.
+- How you tested (commands/output).
+- Any user-facing impact.
 
-### run_latest_driver.cpp — bootstrap driver (C++)
-- Same purpose as `driver.sh`, implemented in C++.
-```bash
-clang++ -std=c++23 run_latest_driver.cpp -o run_latest_driver
-./run_latest_driver <target_module>
-```
-
-## Module dependencies
-Each module declares dependencies in `deps.json`:
-```json
-{
-  "builder_deps": ["builder"],
-  "module_deps": ["builder"]
-}
-```
-- `builder_deps`: modules required to build the module (build-time).
-- `module_deps`: modules required by produced artifacts (link-time / runtime).
-Builder validates and resolves dependencies.
+## Requirements
+- POSIX-like environment with a C++23 `clang++` compiler.
+- Standard Unix toolchain available in PATH.
 
 ## License
-MIT. See `LICENSE`.
+MIT — see `LICENSE`.
