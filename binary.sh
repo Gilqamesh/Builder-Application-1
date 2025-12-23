@@ -7,7 +7,7 @@ binary_name=$2
 args="${3:-}"
 
 latest_target_module=$(printf "%s\n" artifacts/"$target_module"/"$target_module"@* | sort | tail -n1)
-binary="$latest_target_module/$binary_name"
+binary="$latest_target_module/link_module/$binary_name"
 
 echo ${binary} ${args}
 exec "$binary" ${args}
