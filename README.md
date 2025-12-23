@@ -10,12 +10,19 @@ Long-lived application workspace built with **Builder**. Use it to try Builder q
 - [License](#license)
 
 ## Quick start
-1) **Build a module** (outputs go to `artifacts/`)
+1. **Clone and initialize submodules**
+   ```bash
+   git clone https://github.com/Gilqamesh/Builder-Application-1.git
+   cd Builder-Application-1
+   git submodule update --init --recursive
+   ```
+
+2) **Build a module** (outputs go to `artifacts/`)
 ```bash
 ./build.sh <module_name>
 ```
 
-2) **Run the module's latest binary** (passes any extra args through)
+3) **Run the module's latest binary** (passes any extra args through)
 ```bash
 ./run.sh <module_name> <binary_name> [args...]
 ```
@@ -27,8 +34,8 @@ Issues and pull requests are welcome. Please describe:
 - Any user-facing impact.
 
 ## Requirements
-- POSIX-like environment with a C++23 `clang++` compiler.
-- Standard Unix toolchain available in PATH.
+
+- Same as for the `Builder` module
 
 ## License
 MIT — see `LICENSE`.
