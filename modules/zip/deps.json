@@ -1,8 +1,4 @@
 {
-    "builder_deps": [
-        "builder"
-    ],
-    "module_deps": [
-        "zip"
+    "deps": [
     ]
 }

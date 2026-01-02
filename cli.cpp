@@ -5,7 +5,7 @@
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << std::format("usage: {} <module-name> [binary-relative-to-module]", argv[0]) << std::endl;
+        std::cerr << std::format("usage: {} <module-name> [binary-relative-to-module + args...]", argv[0]) << std::endl;
         return 1;
     }
 
@@ -55,13 +55,17 @@ int main(int argc, char** argv) {
 
             const auto module_binaries_path = module_artifact_latest_versioned_dir / "module";
             const auto binary_path = module_binaries_path / binary_relative_to_module;
-            const auto binary = std::format("./{}", binary_path.string());
-            if (!std::filesystem::exists(binary)) {
-                throw std::runtime_error(std::format("binary '{}' does not exist", binary));
+            if (!std::filesystem::exists(binary_path)) {
+                throw std::runtime_error(std::format("binary '{}' does not exist", binary_path.string()));
             }
 
-            std::cout << binary << std::endl;
-            std::system(binary.c_str());
+            std::string binary_command = "./" + binary_path.string();
+            for (int i = 3; i < argc; ++i) {
+                binary_command += " " + std::string(argv[i]);
+            }
+
+            std::cout << binary_command << std::endl;
+            std::system(binary_command.c_str());
         }
     } catch (std::exception& e) {
         std::cerr << std::format("{}: {}", argv[0], e.what()) << std::endl;
