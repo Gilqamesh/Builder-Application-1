@@ -1,8 +1,8 @@
-functions
 artifacts
-a.out
+cli
+builder_cli
 imgui.ini
 .toolchains
-builder_driver
+functions
 modules/remote_home_energy_monitor/esp32/build
 modules/remote_home_energy_monitor/esp32/managed_components
