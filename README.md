@@ -14,8 +14,8 @@ Long-lived PoC workspace of **Builder**.
 1. **Clone and initialize submodules**
 
    ```bash
-   git clone https://github.com/Gilqamesh/Builder-Example.git
-   cd Builder-Example
+   git clone https://github.com/Gilqamesh/Builder-Application-1.git
+   cd Builder-Application-1
    git submodule update --init --recursive
    ```
 
@@ -40,8 +40,6 @@ Issues and pull requests are welcome. Please describe:
 
 ## Requirements
 
-- C++23 compiler
-- Unix environment
 - Requirements of [Builder](https://github.com/Gilqamesh/Builder)
 
 ## License
