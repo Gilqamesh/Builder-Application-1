@@ -1,6 +1,6 @@
 # Builder-Application-1
 
-Long-lived application workspace built with **Builder**. Use it to try Builder quickly, explore modules, and produce artifacts in a clean, versioned way.
+Long-lived PoC workspace of **Builder**.
 
 ## Contents
 
@@ -10,22 +10,27 @@ Long-lived application workspace built with **Builder**. Use it to try Builder q
 - [License](#license)
 
 ## Quick start
+
 1. **Clone and initialize submodules**
+
    ```bash
-   git clone https://github.com/Gilqamesh/Builder-Application-1.git
-   cd Builder-Application-1
+   git clone https://github.com/Gilqamesh/Builder-Example.git
+   cd Builder-Example
    git submodule update --init --recursive
    ```
 
-2) **Build a module** (outputs go to `artifacts/`)
-```bash
-./build.sh <module_name>
-```
+2. **Compile cli.cpp**
 
-3) **Run the module's latest binary** (passes any extra args through)
-```bash
-./run.sh <module_name> <binary_name> [args...]
-```
+   ```bash
+   clang++ -std=c++23 cli.cpp -o cli
+   ```
+
+3. **Run cli on the target module, optionally running the module's produced binary as a post-step**
+
+   ```bash
+   ./cli F # builds module F, i.e., runs its builder_plugin.cpp implementation
+   ./cli F f_static # also run 'f_static' under latest installed binaries directory 
+   ```
 
 ## Contributing
 Issues and pull requests are welcome. Please describe:
@@ -35,7 +40,9 @@ Issues and pull requests are welcome. Please describe:
 
 ## Requirements
 
-- Same as for the `Builder` module
+- C++23 compiler
+- Unix environment
+- Requirements of [Builder](https://github.com/Gilqamesh/Builder)
 
 ## License
-MIT — see `LICENSE`.
+MIT - see `LICENSE`.
