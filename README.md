@@ -25,11 +25,11 @@ Long-lived PoC workspace of **Builder**.
    clang++ -std=c++23 cli.cpp -o cli
    ```
 
-3. **Run cli on the target module, optionally running the module's produced binary as a post-step**
+3. **Run cli on the target module with optional arguments pass-through**
 
    ```bash
-   ./cli F # builds module F, i.e., runs its builder_plugin.cpp implementation
-   ./cli F f_static # also run 'f_static' under latest installed binaries directory 
+   ./cli F # builds module F, i.e., runs its builder.cpp implementation
+   ./cli F f_shared # also run the produced `f_shared` binary of the `F` module
    ```
 
 ## Contributing
