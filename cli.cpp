@@ -21,10 +21,16 @@ int main(int argc, char** argv) {
 
         const auto builder_dir = modules_dir / "builder";
 
-        const auto builder_cli_path = builder_dir / "cli";
+        const auto root_dir = modules_dir.parent_path().empty() ? "." : modules_dir.parent_path();
+
         const auto builder_cli_src_path = builder_dir / "cli.cpp";
 
-        const auto root_dir = modules_dir.parent_path().empty() ? "." : modules_dir.parent_path();
+        const auto builder_version_zero_artifact_dir = artifacts_dir / "builder" / "builder@0";
+        const auto builder_version_zero_library_type = "shared";
+        const auto builder_version_zero_build_dir = builder_version_zero_artifact_dir / "build" / builder_version_zero_library_type;
+        const auto builder_version_zero_export_dir = builder_version_zero_artifact_dir / "export" / builder_version_zero_library_type;
+        const auto builder_version_zero_import_dir = builder_version_zero_artifact_dir / "import";
+        const auto builder_version_zero_cli_path = builder_version_zero_import_dir / "cli";
 
         {
             const auto cli = std::filesystem::canonical("/proc/self/exe");
@@ -71,22 +77,29 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (!std::filesystem::exists(builder_cli_path) || std::filesystem::last_write_time(builder_cli_path) < std::filesystem::last_write_time(builder_cli_src_path)) {
-            const auto compile_cli_command = std::format("make -C \"{}\" cli", builder_dir.string());
+        if (!std::filesystem::exists(builder_version_zero_cli_path) || std::filesystem::last_write_time(builder_version_zero_cli_path) < std::filesystem::last_write_time(builder_cli_src_path)) {
+            const auto compile_cli_command = std::format(
+                "make -C \"{}\" BUILD_DIR=\"{}\" EXPORT_DIR=\"{}\" IMPORT_DIR=\"{}\" LIBRARY_TYPE=\"{}\"",
+                builder_dir.string(),
+                std::filesystem::absolute(builder_version_zero_build_dir).string(),
+                std::filesystem::absolute(builder_version_zero_export_dir).string(),
+                std::filesystem::absolute(builder_version_zero_import_dir).string(),
+                builder_version_zero_library_type
+            );
             std::cout << compile_cli_command << std::endl;
             const int compile_cli_command_result = std::system(compile_cli_command.c_str());
             if (compile_cli_command_result) {
-                throw std::runtime_error(std::format("failed to compile '{}', command exited with code '{}'", builder_cli_path.string(), compile_cli_command_result));
+                throw std::runtime_error(std::format("failed to compile '{}', command exited with code '{}'", builder_version_zero_cli_path.string(), compile_cli_command_result));
             }
         }
 
-        if (!std::filesystem::exists(builder_cli_path)) {
-            throw std::runtime_error(std::format("expected '{}' to exist but it does not", builder_cli_path.string()));
+        if (!std::filesystem::exists(builder_version_zero_cli_path)) {
+            throw std::runtime_error(std::format("expected '{}' to exist but it does not", builder_version_zero_cli_path.string()));
         }
 
         std::string exec_command;
         std::vector<std::string> exec_string_args;
-        exec_string_args.push_back(builder_cli_path.string());
+        exec_string_args.push_back(builder_version_zero_cli_path.string());
         exec_string_args.push_back(modules_dir.string());
         exec_string_args.push_back(module_dir.string());
         exec_string_args.push_back(artifacts_dir.string());
@@ -104,8 +117,8 @@ int main(int argc, char** argv) {
         exec_args.push_back(nullptr);
 
         std::cout << exec_command << std::endl;
-        if (execv(builder_cli_path.c_str(), exec_args.data()) == -1) {
-            throw std::runtime_error(std::format("failed to execv '{}': {}", builder_cli_path.string(), std::strerror(errno)));
+        if (execv(builder_version_zero_cli_path.c_str(), exec_args.data()) == -1) {
+            throw std::runtime_error(std::format("failed to execv '{}': {}", builder_version_zero_cli_path.string(), std::strerror(errno)));
         }
     } catch (std::exception& e) {
         std::cerr << std::format("{}: {}", argv[0], e.what()) << std::endl;
