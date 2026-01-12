@@ -1,5 +1,7 @@
-#include <function_id.h>
+#include <modules/function_id/function_id.h>
+
 #include <stdexcept>
+#include <format>
 
 bool function_id_t::operator==(const function_id_t& other) const {
     return ns == other.ns && name == other.name && creation_time == other.creation_time;
@@ -18,13 +20,13 @@ function_id_t function_id_t::from_string(const std::string& str) {
 
     const size_t ns_end = str.find("::");
     if (ns_end == std::string::npos) {
-        throw std::runtime_error("invalid function_id string: " + str);
+        throw std::runtime_error(std::format("function_id_t::from_string: invalid function_id string: {}", str));
     }
     result.ns = str.substr(0, ns_end);
 
     const size_t name_end = str.rfind('@');
     if (name_end == std::string::npos) {
-        throw std::runtime_error("invalid function_id string: " + str);
+        throw std::runtime_error(std::format("function_id_t::from_string: invalid function_id string: {}", str));
     }
     result.name = str.substr(ns_end + 2, name_end - (ns_end + 2));
 

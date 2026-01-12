@@ -1,9 +1,3 @@
 {
-    "builder_deps": [
-        "builder"
-    ],
-    "module_deps": [
-        "curl",
-        "zip"
-    ]
+    "deps": []
 }

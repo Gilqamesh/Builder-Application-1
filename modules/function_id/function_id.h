@@ -1,11 +1,10 @@
-#ifndef FUNCTION_ID
-# define FUNCTION_ID
+#ifndef BUILDER_PROJECT_FUNCTION_ID_FUNCTION_ID_H
+# define BUILDER_PROJECT_FUNCTION_ID_FUNCTION_ID_H
 
-#include <chrono>
-#include <cstdint>
-#include <format>
-#include <functional>
-#include <string>
+# include <chrono>
+# include <cstdint>
+# include <format>
+# include <string>
 
 struct function_id_t {
     std::string ns;
@@ -43,4 +42,4 @@ struct std::formatter<function_id_t> {
     }
 };
 
-#endif // FUNCTION_ID
+#endif // BUILDER_PROJECT_FUNCTION_ID_FUNCTION_ID_H
