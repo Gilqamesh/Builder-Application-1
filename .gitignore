@@ -1,6 +1,4 @@
 artifacts
-cli
-builder_cli
 imgui.ini
 .toolchains
 functions
