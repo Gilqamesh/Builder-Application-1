@@ -23,7 +23,11 @@ BUILDER_EXTERN void builder__export_interface(const builder_t* builder, library_
         }
     );
 
-    builder->install_interface(builder->source_dir() / relative_path_t("google_test.h"), library_type);
+    builder->install_interface(
+        builder->source_dir() / relative_path_t("google_test.h"),
+        relative_path_t("google_test.h"),
+        library_type
+    );
 }
 
 BUILDER_EXTERN void builder__export_libraries(const builder_t* builder, library_type_t library_type) {
@@ -39,7 +43,11 @@ BUILDER_EXTERN void builder__export_libraries(const builder_t* builder, library_
                 relative_path_t("libgtest_main.a")
             };
             for (const auto& gtest_static_lib : gtest_static_libs) {
-                builder->install_library(builder->libraries_build_dir(library_type) / gtest_static_lib, library_type);
+                builder->install_library(
+                    builder->libraries_build_dir(library_type) / gtest_static_lib,
+                    gtest_static_lib,
+                    library_type
+                );
             }
         } break ;
         case library_type_t::SHARED: {
@@ -54,7 +62,11 @@ BUILDER_EXTERN void builder__export_libraries(const builder_t* builder, library_
                 relative_path_t("libgtest.so.1.15.0")
             };
             for (const auto& gtest_shared_lib : gtest_shared_libs) {
-                builder->install_library(builder->libraries_build_dir(library_type) / gtest_shared_lib, library_type);
+                builder->install_library(
+                    builder->libraries_build_dir(library_type) / gtest_shared_lib,
+                    gtest_shared_lib,
+                    library_type
+                );
             }
         } break ;
         default: throw std::runtime_error(std::format("builder__export_libraries: unknown library_type {}", static_cast<int>(library_type)));
