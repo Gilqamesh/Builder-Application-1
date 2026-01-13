@@ -5,7 +5,7 @@ BUILDER_EXTERN void builder__export_libraries(const builder_t* builder, library_
 }
 
 BUILDER_EXTERN void builder__import_libraries(const builder_t* builder) {
-    for (const auto& entry : std::filesystem::directory_iterator(builder->src_dir())) {
+    for (const auto& entry : std::filesystem::directory_iterator(builder->source_dir())) {
         if (!entry.is_directory()) {
             continue ;
         }

@@ -1,5 +1,5 @@
-#include <modules/google_test/google_test.h>
-#include <modules/function_id/function_id.h>
+#include <google_test/google_test.h>
+#include <function_id/function_id.h>
 
 TEST(FunctionIdTest, RoundTripsToString) {
     function_id_t id {

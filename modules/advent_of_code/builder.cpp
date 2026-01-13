@@ -13,13 +13,13 @@ BUILDER_EXTERN void builder__import_libraries(const builder_t* builder) {
     const auto input_files = filesystem_t::find(builder, filesystem_t::filename("input"), filesystem_t::descend_all);
 
     for (const auto& src_file : src_files) {
-        auto rel = builder->src_dir().relative(src_file);
+        auto rel = builder->source_dir().relative(src_file);
         rel.extension("");
         cpp_compiler_t::create_binary(builder, { src_file }, {}, LIBRARY_TYPE_STATIC, rel);
     }
 
     for (const auto& input_file : input_files) {
-        const auto dst = builder->import_dir() / builder->src_dir().relative(input_file);
+        const auto dst = builder->import_dir() / builder->source_dir().relative(input_file);
         const auto parent = dst.parent();
         if (!filesystem_t::exists(parent)) {
             filesystem_t::create_directories(parent);

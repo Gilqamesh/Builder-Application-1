@@ -66,10 +66,10 @@ static void write_stamp(const fs::path& src, const fs::path& stamp) {
 
 static void build_esp32(builder_ctx_t* ctx, const builder_api_t* api, const char* /*static_libs*/) {
     const fs::path modules_dir  = api->modules_dir(ctx);
-    const fs::path src_dir      = fs::absolute(api->src_dir(ctx));
+    const fs::path source_dir   = fs::absolute(api->source_dir(ctx));
     const fs::path artifact_dir = api->artifact_dir(ctx);
 
-    const fs::path esp32_dir  = src_dir / "esp32";
+    const fs::path esp32_dir  = source_dir / "esp32";
     const fs::path artifacts = artifact_dir / "esp32";
     fs::create_directories(artifacts);
 
@@ -172,10 +172,10 @@ static void build_esp32(builder_ctx_t* ctx, const builder_api_t* api, const char
 // ---------- server artifact ----------
 
 static void build_server(builder_ctx_t* ctx, const builder_api_t* api, const char* /*static_libs*/) {
-    const fs::path src_dir      = fs::absolute(api->src_dir(ctx));
+    const fs::path source_dir   = fs::absolute(api->source_dir(ctx));
     const fs::path artifact_dir = api->artifact_dir(ctx);
 
-    const fs::path server_src  = src_dir / "server";
+    const fs::path server_src  = source_dir / "server";
     const fs::path artifacts   = artifact_dir / "server";
     const fs::path venv        = artifacts / "venv";
 

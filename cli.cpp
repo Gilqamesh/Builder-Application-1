@@ -2,7 +2,6 @@
 #include <iostream>
 #include <string>
 #include <filesystem>
-#include <source_location>
 #include <vector>
 
 #include <unistd.h>
@@ -10,31 +9,57 @@
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << std::format("usage: {} <module-name> [builder-cli-args...]", argv[0]) << std::endl;
+        std::cerr << std::format("usage: {} <target-module-name> [builder-cli-args...]", argv[0]) << std::endl;
         return 1;
     }
 
     try {
-        const auto modules_dir = std::filesystem::path("modules");
-        const auto module_dir = std::filesystem::path(argv[1]);
-        const auto artifacts_dir = std::filesystem::path("artifacts");
+        const auto modules_dir = std::filesystem::absolute("modules").lexically_normal();
+        const auto target_module_name = std::filesystem::path(argv[1]);
+        const auto artifacts_dir = std::filesystem::absolute("artifacts").lexically_normal();
+        const auto root_dir = std::filesystem::absolute(modules_dir.parent_path()).lexically_normal();
+        const auto builder_module_name = "builder";
+        const auto build_relative_dir = "build";
+        const auto install_relative_dir = "install";
+        const auto builder_library_type = "shared";
 
-        const auto builder_dir = modules_dir / "builder";
+        uint64_t latest_builder_version = 0;
+        const auto builder_artifacts_dir = artifacts_dir / builder_module_name;
+        if (std::filesystem::exists(builder_artifacts_dir)) {
+            for (const auto& entry : std::filesystem::directory_iterator(builder_artifacts_dir)) {
+                if (!entry.is_directory()) {
+                    continue ;
+                }
+                const auto path = entry.path();
+                const auto filename = path.filename();
+                const auto at_pos = filename.string().find('@');
+                if (at_pos == std::string::npos) {
+                    continue ;
+                }
 
-        const auto root_dir = modules_dir.parent_path().empty() ? "." : modules_dir.parent_path();
+                const auto version_str = filename.string().substr(at_pos + 1);
+                const uint64_t version = std::stoull(version_str);
+                latest_builder_version = std::max(latest_builder_version, version);
+            }
+        }
 
-        const auto builder_cli_src_path = builder_dir / "cli.cpp";
-
-        const auto builder_version_zero_artifact_dir = artifacts_dir / "builder" / "builder@0";
-        const auto builder_version_zero_library_type = "shared";
-        const auto builder_version_zero_build_dir = builder_version_zero_artifact_dir / "build" / builder_version_zero_library_type;
-        const auto builder_version_zero_export_dir = builder_version_zero_artifact_dir / "export" / builder_version_zero_library_type;
-        const auto builder_version_zero_import_dir = builder_version_zero_artifact_dir / "import";
-        const auto builder_version_zero_cli_path = builder_version_zero_import_dir / "cli";
+        const auto builder_artifact_dir = std::filesystem::absolute(artifacts_dir / builder_module_name / std::format("{}@{}", builder_module_name, latest_builder_version)).lexically_normal();
+        const auto builder_source_dir = std::filesystem::absolute(modules_dir / builder_module_name).lexically_normal();
+        const auto builder_interface_dir = std::filesystem::absolute(builder_artifact_dir / "interface").lexically_normal();
+        const auto builder_interface_build_dir = std::filesystem::absolute(builder_interface_dir / build_relative_dir).lexically_normal();
+        const auto builder_interface_install_dir = std::filesystem::absolute(builder_interface_dir / install_relative_dir).lexically_normal();
+        const auto builder_libraries_dir = std::filesystem::absolute(builder_artifact_dir / "libraries").lexically_normal();
+        const auto builder_libraries_build_dir = std::filesystem::absolute(builder_libraries_dir / builder_library_type / build_relative_dir).lexically_normal();
+        const auto builder_libraries_install_dir = std::filesystem::absolute(builder_libraries_dir / builder_library_type / install_relative_dir).lexically_normal();
+        const auto builder_import_dir = std::filesystem::absolute(builder_artifact_dir / "import").lexically_normal();
+        const auto builder_import_build_dir = std::filesystem::absolute(builder_import_dir / build_relative_dir).lexically_normal();
+        const auto builder_import_install_dir = std::filesystem::absolute(builder_import_dir / install_relative_dir).lexically_normal();
+        const auto builder_cli_src_path = std::filesystem::absolute(builder_source_dir / "cli.cpp").lexically_normal();
+        const auto builder_cli_path = std::filesystem::absolute(builder_import_install_dir / "cli").lexically_normal();
 
         {
             const auto cli = std::filesystem::canonical("/proc/self/exe");
-            const auto cli_src = root_dir / std::filesystem::path(std::source_location::current().file_name()).filename();
+            const auto cli_src = root_dir / "cli.cpp";
 
             std::error_code ec;
             const auto cli_last_write_time = std::filesystem::last_write_time(cli, ec);
@@ -71,37 +96,50 @@ int main(int argc, char** argv) {
                 exec_args.push_back(nullptr);
 
                 std::cout << exec_command << std::endl;
-                if (execv(cli.c_str(), exec_args.data()) == -1) {
+                if (execv(exec_args[0], exec_args.data()) == -1) {
                     throw std::runtime_error(std::format("failed to execv updated '{}': {}", cli.string(), std::strerror(errno)));
                 }
             }
         }
 
-        if (!std::filesystem::exists(builder_version_zero_cli_path) || std::filesystem::last_write_time(builder_version_zero_cli_path) < std::filesystem::last_write_time(builder_cli_src_path)) {
+        if (!std::filesystem::exists(builder_cli_path) || (std::filesystem::last_write_time(builder_cli_path) < std::filesystem::last_write_time(builder_cli_src_path))) {
+            const auto make_target = "import_libraries";
             const auto compile_cli_command = std::format(
-                "make -C \"{}\" BUILD_DIR=\"{}\" EXPORT_DIR=\"{}\" IMPORT_DIR=\"{}\" LIBRARY_TYPE=\"{}\"",
-                builder_dir.string(),
-                std::filesystem::absolute(builder_version_zero_build_dir).string(),
-                std::filesystem::absolute(builder_version_zero_export_dir).string(),
-                std::filesystem::absolute(builder_version_zero_import_dir).string(),
-                builder_version_zero_library_type
+                "make -C \"{}\" {}"
+                " SOURCE_DIR=\"{}\""
+                " LIBRARY_TYPE=\"{}\""
+                " INTERFACE_BUILD_DIR=\"{}\""
+                " INTERFACE_INSTALL_DIR=\"{}\""
+                " LIBRARIES_BUILD_DIR=\"{}\""
+                " LIBRARIES_INSTALL_DIR=\"{}\""
+                " IMPORT_BUILD_DIR=\"{}\""
+                " IMPORT_INSTALL_DIR=\"{}\"",
+                builder_source_dir.string(), make_target,
+                builder_source_dir.string(),
+                builder_library_type,
+                builder_interface_build_dir.string(),
+                builder_interface_install_dir.string(),
+                builder_libraries_build_dir.string(),
+                builder_libraries_install_dir.string(),
+                builder_import_build_dir.string(),
+                builder_import_install_dir.string()
             );
             std::cout << compile_cli_command << std::endl;
             const int compile_cli_command_result = std::system(compile_cli_command.c_str());
             if (compile_cli_command_result) {
-                throw std::runtime_error(std::format("failed to compile '{}', command exited with code '{}'", builder_version_zero_cli_path.string(), compile_cli_command_result));
+                throw std::runtime_error(std::format("failed to compile '{}', command exited with code '{}'", builder_cli_path.string(), compile_cli_command_result));
             }
         }
 
-        if (!std::filesystem::exists(builder_version_zero_cli_path)) {
-            throw std::runtime_error(std::format("expected '{}' to exist but it does not", builder_version_zero_cli_path.string()));
+        if (!std::filesystem::exists(builder_cli_path)) {
+            throw std::runtime_error(std::format("expected '{}' to exist but it does not", builder_cli_path.string()));
         }
 
         std::string exec_command;
         std::vector<std::string> exec_string_args;
-        exec_string_args.push_back(builder_version_zero_cli_path.string());
+        exec_string_args.push_back(builder_cli_path.string());
         exec_string_args.push_back(modules_dir.string());
-        exec_string_args.push_back(module_dir.string());
+        exec_string_args.push_back(target_module_name.string());
         exec_string_args.push_back(artifacts_dir.string());
         for (int i = 2; i < argc; ++i) {
             exec_string_args.push_back(argv[i]);
@@ -117,8 +155,8 @@ int main(int argc, char** argv) {
         exec_args.push_back(nullptr);
 
         std::cout << exec_command << std::endl;
-        if (execv(builder_version_zero_cli_path.c_str(), exec_args.data()) == -1) {
-            throw std::runtime_error(std::format("failed to execv '{}': {}", builder_version_zero_cli_path.string(), std::strerror(errno)));
+        if (execv(exec_args[0], exec_args.data()) == -1) {
+            throw std::runtime_error(std::format("failed to execv '{}': {}", builder_cli_path.string(), std::strerror(errno)));
         }
     } catch (std::exception& e) {
         std::cerr << std::format("{}: {}", argv[0], e.what()) << std::endl;
