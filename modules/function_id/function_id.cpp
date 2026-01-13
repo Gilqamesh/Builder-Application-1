@@ -36,4 +36,3 @@ function_id_t function_id_t::from_string(const std::string& str) {
 
     return result;
 }
-
