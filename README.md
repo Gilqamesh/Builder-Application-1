@@ -1,42 +1,46 @@
-# Builder-Application-1
+# Builder-Application
 
-Long-lived PoC workspace of **Builder**.
+Long-lived application workspace of **Builder**.
 
 ## Contents
 
 - [Quick start](#quick-start)
-- [Contributing](#contributing)
+- [Notable modules](#notable-modules)
 - [Requirements](#requirements)
 - [License](#license)
 
 ## Quick start
 
-1. **Clone and initialize submodules**
+1. **Clone the workspace**
 
    ```bash
-   git clone https://github.com/Gilqamesh/Builder-Application-1.git
+   git clone <repo-url> Builder-Application-1
    cd Builder-Application-1
-   git submodule update --init --recursive
    ```
 
-2. **Compile cli.cpp**
+2. **Bootstrap the Builder CLI**
 
    ```bash
-   clang++ -std=c++23 cli.cpp -o cli
+   make -f foundation/m03gagbhst621faiop1rztfkqp_builder_cli/bootstrap.mk
    ```
 
-3. **Run cli on the target module with optional arguments pass-through**
+3. **Run a module with optional arguments pass-through**
 
    ```bash
-   ./cli F # builds module F, i.e., runs its builder.cpp implementation
-   ./cli F f_shared # also run the produced `f_shared` binary of the `F` module
+   ./cli <module-name> [<args>...]
+   ```
+   ```bash
+   ./cli m03ge9zyrjajugagmp61034qhi_module_dependency_ir_svg_renderer m03ge9ij4lbns2mq6722cd8654_function_visualizer out.svg
+   ```
+   ```bash
+   ./cli m03gagbht5685jfnokvj7crv2c_create_module tools some_module_name
    ```
 
-## Contributing
-Issues and pull requests are welcome. Please describe:
-- What changed and why.
-- How you tested (commands/output).
-- Any user-facing impact.
+## Notable modules
+
+- `m03gagbht5685jfnokvj7crv2c_create_module` - creates a new module in a workspace.
+- `m03ge9zyrjajugagmp61034qhi_module_dependency_ir_svg_renderer` - renders a module dependency graph to SVG.
+- `m03ge9ij4lbns2mq6722cd8654_function_visualizer` - infinitely zoomable prototype to visualize m03ge9ij46lc986vpdamnc2fka_function_ir.
 
 ## Requirements
 

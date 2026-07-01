@@ -1,7 +1,4 @@
 artifacts
+cli
 imgui.ini
-.toolchains
 functions
-modules/remote_home_energy_monitor/esp32/build
-modules/remote_home_energy_monitor/esp32/managed_components
-modules/interval_map

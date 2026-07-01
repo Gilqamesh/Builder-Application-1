@@ -1,0 +1,11 @@
+{
+    "module_dependencies": [
+        "m03gagbhsp2drqq3gkop8pzfrm_workspace_graph",
+        "m03ge9sciyp8y22mzr4nme82tm_module_dependency_ir"
+    ],
+    "builder_dependencies": [
+        "m03gagbhsujjf63n0w3r2w4q6h_build_phases",
+        "m03gagbhsnusi43zogoacgj2ez_filesystem",
+        "m03gagbhsp2drqq3gkop8pzfrm_workspace_graph"
+    ]
+}
