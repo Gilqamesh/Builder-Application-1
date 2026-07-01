@@ -253,6 +253,8 @@ public:
      */
     std::vector<const module_t*> modules() const;
 
+    std::vector<module_name_t> module_names() const;
+
     /**
      * Module dependency closure as strongly connected component groups in dependency-to-dependent topological order.
      */
