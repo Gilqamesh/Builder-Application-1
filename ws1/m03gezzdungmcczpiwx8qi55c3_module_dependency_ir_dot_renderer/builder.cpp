@@ -23,12 +23,7 @@ extern "C" void phase__library(const m03gagbhsujjf63n0w3r2w4q6h_build_phases::li
 }
 
 extern "C" void phase__binary(const m03gagbhsujjf63n0w3r2w4q6h_build_phases::binary_phase_t* phase) {
-    const auto sources = phase->install<m03gagbhsujjf63n0w3r2w4q6h_build_phases::source_phase_t>();
-    const auto cli = phase->build_cli(
-        { phase->build(sources.root() / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t(m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::CLI_CPP)) },
-        {}
-    );
-    phase->install_cli(cli);
+    phase->install_cli({});
 }
 
 } // namespace m03gezzdungmcczpiwx8qi55c3_module_dependency_ir_dot_renderer

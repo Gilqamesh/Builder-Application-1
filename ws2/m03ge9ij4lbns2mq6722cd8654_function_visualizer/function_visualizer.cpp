@@ -508,7 +508,7 @@ void draw() {
     EndDrawing();
 }
 
-int run() {
+void exec() {
     window.left = 0.0f;
     window.top = 0.0f;
     window.right = 1600.0f;
@@ -556,12 +556,6 @@ int run() {
     }
     editor.deinit();
     CloseWindow();
-
-    return 0;
 }
 
 } // namespace m03ge9ij4lbns2mq6722cd8654_function_visualizer
-
-int main() {
-    return m03ge9ij4lbns2mq6722cd8654_function_visualizer::run();
-}
