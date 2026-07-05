@@ -47,4 +47,8 @@ Long-lived application workspace of **Builder**.
 - Requirements of [Builder](https://github.com/Gilqamesh/Builder)
 
 ## License
-MIT - see `LICENSE`.
+MIT - see [LICENSE](LICENSE).
+
+This repository includes Builder bootstrap/foundation modules copied or adapted
+from [Builder](https://github.com/Gilqamesh/Builder), also licensed under MIT.
+The shared MIT copyright and permission notice is preserved in [LICENSE](LICENSE).

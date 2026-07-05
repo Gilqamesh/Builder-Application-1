@@ -1,0 +1,18 @@
+#ifndef M03GAGBHTAHG11WZN32IDILZTE_MODULE_DEPENDENCY_IR_FROM_WORKSPACE_GRAPH_MODULE_GRAPH_H
+# define M03GAGBHTAHG11WZN32IDILZTE_MODULE_DEPENDENCY_IR_FROM_WORKSPACE_GRAPH_MODULE_GRAPH_H
+
+# include <m03gagbhsp2drqq3gkop8pzfrm_workspace_graph/workspace_graph.h>
+# include <m03ge9sciyp8y22mzr4nme82tm_module_dependency_ir/module_dependency_ir.h>
+
+namespace m03gagbhtahg11wzn32idilzte_module_dependency_ir_from_workspace_graph {
+
+/**
+ * Converts discovered modules in workspace_graph to dependency IR.
+ */
+m03ge9sciyp8y22mzr4nme82tm_module_dependency_ir::module_dependency_ir_t from_workspace_graph(
+    const m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::workspace_graph_t& workspace_graph
+);
+
+} // namespace m03gagbhtahg11wzn32idilzte_module_dependency_ir_from_workspace_graph
+
+#endif // M03GAGBHTAHG11WZN32IDILZTE_MODULE_DEPENDENCY_IR_FROM_WORKSPACE_GRAPH_MODULE_GRAPH_H
