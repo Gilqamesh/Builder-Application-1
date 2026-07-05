@@ -11,17 +11,17 @@ Long-lived application workspace of **Builder**.
 
 ## Quick start
 
-1. **Clone the workspace**
+1. **Clone the repository**
 
    ```bash
-   git clone <repo-url> Builder-Application-1
+   git clone https://github.com/Gilqamesh/Builder-Application-1.git Builder-Application-1
    cd Builder-Application-1
    ```
 
 2. **Bootstrap the Builder CLI**
 
    ```bash
-   make -f foundation/m03gagbhst621faiop1rztfkqp_builder_cli/bootstrap.mk
+   make -f ws0/m03gagbhst621faiop1rztfkqp_builder_cli/bootstrap.mk
    ```
 
 3. **Run a module with optional arguments pass-through**
