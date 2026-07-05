@@ -1,4 +1,4 @@
-#include <m03gagbht7wqhtdg9hwdpmfn5o_download/download.h>
+#include "download.h"
 
 #include <m03gagbhsnusi43zogoacgj2ez_filesystem/filesystem.h>
 
@@ -13,8 +13,8 @@ int main(int argc, char** argv) {
     }
 
     try {
-        const auto output = m03gagbht7wqhtdg9hwdpmfn5o_download::fetch(
-            m03gagbht7wqhtdg9hwdpmfn5o_download::source_lock_t {
+        const auto output = download::fetch(
+            download::source_lock_t {
                 .url = argv[1],
                 .sha256 = argv[2]
             },

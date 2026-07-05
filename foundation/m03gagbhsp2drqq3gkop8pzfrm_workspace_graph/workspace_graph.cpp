@@ -2,6 +2,7 @@
 
 #include <m03gagbhsnusi43zogoacgj2ez_filesystem/filesystem.h>
 #include <m03gagbhsqfsqblhwvelrou7nc_json/external/json.hpp>
+#include <m03gagbht2l61mj6qitacwbmea_byte_stream/byte_stream.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -68,24 +69,98 @@ static void path_env(const char* name, const m03gagbhsnusi43zogoacgj2ez_filesyst
     }
 }
 
-module_name_t::module_name_t(std::string_view name):
-    m_name(name)
+module_name_t::module_name_t(std::string_view unique_name):
+    m_unique_name(unique_name)
 {
-    if (m_name.empty()) {
-        throw std::runtime_error("m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t: module name must not be empty");
+    if (unique_name.size() <= first_friendly_name_char_pos) {
+        throw std::invalid_argument(std::format("m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t: module name must be at least {} characters long", first_friendly_name_char_pos));
+    }
+
+    if (unique_name[m_pos] != 'm') {
+        throw std::invalid_argument(std::format("m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t: module name '{}' must contain 'm' at position {}", unique_name, m_pos));
+    }
+
+    if (unique_name[underscore_pos] != '_') {
+        throw std::invalid_argument(std::format("m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t: module name '{}' must contain '_' at position {}", unique_name, underscore_pos));
+    }
+
+    const auto base36_decoded_uuidv7 = base36_uuidv7_bytes(std::string_view(unique_name).substr(base36_decoded_uuidv7_start, base36_converted_uuidv7_size));
+    const auto uuidv7 = m03gagbhtft23yhjwpp881tfmc_uuid::uuid(std::span<const std::byte>(base36_decoded_uuidv7));
+    const auto got_version = uuidv7.version();
+    const auto expected_version = 7;
+    if (got_version != expected_version) {
+        throw std::invalid_argument(std::format("m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t: module name '{}' contains UUIDv7 with version {}, expected {}", unique_name, got_version, expected_version));
+    }
+
+    for (const char c : std::string_view(unique_name).substr(first_friendly_name_char_pos)) {
+        if (c != '_' && !std::isalnum(static_cast<unsigned char>(c))) {
+            throw std::invalid_argument(std::format("m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t: module name '{}' contains invalid character '{}'", unique_name, c));
+        }
     }
 }
 
-const std::string& module_name_t::string() const {
-    return m_name;
+module_name_t module_name_t::from_friendly_name(std::string_view friendly_name) {
+    if (friendly_name.empty()) {
+        throw std::invalid_argument("m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t::from_friendly_name: friendly name must not be empty");
+    }
+
+    for (const char c : friendly_name) {
+        if (c != '_' && !std::isalnum(static_cast<unsigned char>(c))) {
+            throw std::invalid_argument(std::format("m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t::from_friendly_name: friendly name '{}' contains invalid character '{}'", friendly_name, c));
+        }
+    }
+
+    const auto uuidv7 = m03gagbhtft23yhjwpp881tfmc_uuid::uuid::generate(7);
+    auto base36_encoded_uuidv7 = m03gagbht2l61mj6qitacwbmea_byte_stream::byte_stream_t(uuidv7.bytes()).to_radix(36);
+    if (base36_encoded_uuidv7.size() < base36_converted_uuidv7_size) {
+        base36_encoded_uuidv7 = std::string(base36_converted_uuidv7_size - base36_encoded_uuidv7.size(), '0') + base36_encoded_uuidv7;
+    }
+    if (base36_encoded_uuidv7.size() != base36_converted_uuidv7_size) {
+        throw std::logic_error(std::format("m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t::from_friendly_name: base36-encoded UUIDv7 '{}' is not {} characters long", base36_encoded_uuidv7, base36_converted_uuidv7_size));
+    }
+
+    const auto validated_name = module_name_t::validated_name_t{std::format("m{}_{}", base36_encoded_uuidv7, friendly_name)};
+    return module_name_t(validated_name);
 }
 
-const char* module_name_t::c_str() const {
-    return m_name.c_str();
+const std::string& module_name_t::unique_name() const {
+    return m_unique_name;
+}
+
+std::string module_name_t::friendly_name() const {
+    return m_unique_name.substr(first_friendly_name_char_pos);
+}
+
+m03gagbhtft23yhjwpp881tfmc_uuid::uuid module_name_t::uuid() const {
+    const auto base36_decoded_uuidv7 = base36_uuidv7_bytes(std::string_view(m_unique_name).substr(base36_decoded_uuidv7_start, base36_converted_uuidv7_size));
+    return m03gagbhtft23yhjwpp881tfmc_uuid::uuid(std::span<const std::byte>(base36_decoded_uuidv7));
 }
 
 bool module_name_t::operator==(const module_name_t& other) const {
-    return m_name == other.m_name;
+    return m_unique_name == other.m_unique_name;
+}
+
+module_name_t::module_name_t(module_name_t::validated_name_t validated_name) noexcept:
+    m_unique_name(std::move(validated_name.name))
+{
+}
+
+std::array<std::byte, 16> module_name_t::base36_uuidv7_bytes(std::string_view view) const {
+    const auto base36_decoded_uuidv7 = m03gagbht2l61mj6qitacwbmea_byte_stream::byte_stream_t::from_radix(view, 36);
+
+    std::array<std::byte, 16> result{};
+
+    if (result.size() < base36_decoded_uuidv7.size()) {
+        throw std::invalid_argument(std::format("m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t::base36_uuidv7_bytes: base36-decoded UUIDv7 '{}' is wider than {} bytes", base36_decoded_uuidv7, result.size()));
+    }
+
+    std::copy(
+        base36_decoded_uuidv7.bytes().begin(),
+        base36_decoded_uuidv7.bytes().end(),
+        result.begin() + static_cast<std::ptrdiff_t>(result.size() - base36_decoded_uuidv7.size())
+    );
+
+    return result;
 }
 
 static m03gagbhsnusi43zogoacgj2ez_filesystem::path_t workspace_root() {
@@ -383,11 +458,11 @@ const module_name_t& module_t::name() const {
 }
 
 m03gagbhsnusi43zogoacgj2ez_filesystem::path_t module_t::source_dir() const {
-    return m_workspace->graph().root() / m_workspace->relative_path() / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t(m_name.string());
+    return m_workspace->graph().root() / m_workspace->relative_path() / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t(m_name.unique_name());
 }
 
 m03gagbhsnusi43zogoacgj2ez_filesystem::path_t module_t::artifact_base_dir() const {
-    return m_workspace->graph().artifact_root() / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t(m_name.string());
+    return m_workspace->graph().artifact_root() / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t(m_name.unique_name());
 }
 
 m03gagbhsnusi43zogoacgj2ez_filesystem::path_t module_t::artifact_dir() const {
@@ -417,7 +492,7 @@ static bool module_less(const module_t* lhs, const module_t* rhs) {
         return lhs->workspace().order_position() < rhs->workspace().order_position();
     }
 
-    return lhs->name().string() < rhs->name().string();
+    return lhs->name().unique_name() < rhs->name().unique_name();
 }
 
 std::vector<module_t*> workspace_t::modules() const {
@@ -528,7 +603,7 @@ std::vector<module_name_t> workspace_graph_t::module_names() const {
     }
 
     std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.string() < rhs.string();
+        return lhs.unique_name() < rhs.unique_name();
     });
 
     return result;
@@ -553,7 +628,7 @@ module_t* workspace_graph_t::discover_module_impl(module_name_t module_name) {
         return discovered_module;
     }
 
-    const auto module_directory = root() / workspace_relative_path / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t(module_name.string());
+    const auto module_directory = root() / workspace_relative_path / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t(module_name.unique_name());
     const auto module_version = version_t(module_directory);
     auto module = new module_t(*workspace, module_name, module_version);
 

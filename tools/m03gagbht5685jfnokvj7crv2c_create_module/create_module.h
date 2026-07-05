@@ -9,22 +9,11 @@
 namespace m03gagbht5685jfnokvj7crv2c_create_module {
 
 /**
- * Generated module name and directory.
+ * Creates a boilerplate module under workspace directory with the given friendly name.
+ *
+ * @return The path to the created module directory.
  */
-struct created_module_t {
-    std::string name;
-    m03gagbhsnusi43zogoacgj2ez_filesystem::path_t directory;
-};
-
-/**
- * Returns a module name with a generated prefix and validated slug.
- */
-std::string make_module_name(std::string_view name);
-
-/**
- * Creates a boilerplate module under workspace and returns its name and path.
- */
-created_module_t create(std::string_view workspace, std::string_view name);
+m03gagbhsnusi43zogoacgj2ez_filesystem::path_t create(std::string_view workspace, std::string_view friendly_name);
 
 } // namespace m03gagbht5685jfnokvj7crv2c_create_module
 

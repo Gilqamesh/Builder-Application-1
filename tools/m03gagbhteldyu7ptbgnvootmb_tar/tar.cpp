@@ -10,7 +10,7 @@
 # error M03GAGBHTELDYU7PTBGNVOOTMB_TAR_TAR_PATH must be defined by the owning builder
 #endif
 
-namespace m03gagbhteldyu7ptbgnvootmb_tar {
+namespace tar {
 
 static m03gagbhsnusi43zogoacgj2ez_filesystem::path_t host_tar_path() {
     const auto result = m03gagbhsnusi43zogoacgj2ez_filesystem::path_t(M03GAGBHTELDYU7PTBGNVOOTMB_TAR_TAR_PATH);
@@ -26,15 +26,15 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t tar(
     const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& install_tar_path
 ) {
     if (install_tar_path.extension() != ".tar") {
-        throw std::runtime_error(std::format("m03gagbhteldyu7ptbgnvootmb_tar::tar: install path '{}' must have .tar extension", install_tar_path));
+        throw std::runtime_error(std::format("tar::tar: install path '{}' must have .tar extension", install_tar_path));
     }
 
     if (m03gagbhsnusi43zogoacgj2ez_filesystem::exists(install_tar_path)) {
-        throw std::runtime_error(std::format("m03gagbhteldyu7ptbgnvootmb_tar::tar: install path '{}' already exists", install_tar_path));
+        throw std::runtime_error(std::format("tar::tar: install path '{}' already exists", install_tar_path));
     }
 
     if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(dir) || !m03gagbhsnusi43zogoacgj2ez_filesystem::is_directory(dir)) {
-        throw std::runtime_error(std::format("m03gagbhteldyu7ptbgnvootmb_tar::tar: input '{}' is not a directory", dir));
+        throw std::runtime_error(std::format("tar::tar: input '{}' is not a directory", dir));
     }
 
     const auto parent_install_tar_path = install_tar_path.parent();
@@ -57,7 +57,7 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t tar(
         m03gagbhsvr0m5w15urj0o291m_process::create_and_wait_checked(m03gagbhsvr0m5w15urj0o291m_process::command_t { .args = process_args });
 
         if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(install_tar_path) || !m03gagbhsnusi43zogoacgj2ez_filesystem::is_regular_file(install_tar_path)) {
-            throw std::runtime_error(std::format("m03gagbhteldyu7ptbgnvootmb_tar::tar: expected output '{}' to exist as a regular file", install_tar_path));
+            throw std::runtime_error(std::format("tar::tar: expected output '{}' to exist as a regular file", install_tar_path));
         }
     } catch (...) {
         m03gagbhsnusi43zogoacgj2ez_filesystem::remove(install_tar_path);
@@ -72,15 +72,15 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t untar(
     const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& install_dir
 ) {
     if (tar_path.extension() != ".tar") {
-        throw std::runtime_error(std::format("m03gagbhteldyu7ptbgnvootmb_tar::untar: tar path '{}' must have .tar extension", tar_path));
+        throw std::runtime_error(std::format("tar::untar: tar path '{}' must have .tar extension", tar_path));
     }
 
     if (m03gagbhsnusi43zogoacgj2ez_filesystem::exists(install_dir) && !m03gagbhsnusi43zogoacgj2ez_filesystem::is_directory(install_dir)) {
-        throw std::runtime_error(std::format("m03gagbhteldyu7ptbgnvootmb_tar::untar: install path '{}' exists and is not a directory", install_dir));
+        throw std::runtime_error(std::format("tar::untar: install path '{}' exists and is not a directory", install_dir));
     }
 
     if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(tar_path) || !m03gagbhsnusi43zogoacgj2ez_filesystem::is_regular_file(tar_path)) {
-        throw std::runtime_error(std::format("m03gagbhteldyu7ptbgnvootmb_tar::untar: tar path '{}' does not exist or is not a regular file", tar_path));
+        throw std::runtime_error(std::format("tar::untar: tar path '{}' does not exist or is not a regular file", tar_path));
     }
 
     const bool created_install_dir = !m03gagbhsnusi43zogoacgj2ez_filesystem::exists(install_dir);
@@ -108,4 +108,4 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t untar(
     return install_dir;
 }
 
-} // namespace m03gagbhteldyu7ptbgnvootmb_tar
+} // namespace tar

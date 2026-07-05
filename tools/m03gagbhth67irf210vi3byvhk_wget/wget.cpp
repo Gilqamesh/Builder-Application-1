@@ -10,12 +10,12 @@
 # error M03GAGBHTH67IRF210VI3BYVHK_WGET_WGET_PATH must be defined by the owning builder
 #endif
 
-namespace m03gagbhth67irf210vi3byvhk_wget {
+namespace wget {
 
 static m03gagbhsnusi43zogoacgj2ez_filesystem::path_t wget_path() {
     const auto result = m03gagbhsnusi43zogoacgj2ez_filesystem::path_t(M03GAGBHTH67IRF210VI3BYVHK_WGET_WGET_PATH);
     if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(result) || !m03gagbhsnusi43zogoacgj2ez_filesystem::is_regular_file(result)) {
-        throw std::runtime_error(std::format("m03gagbhth67irf210vi3byvhk_wget::download: host tool '{}' does not exist or is not a regular file", result));
+        throw std::runtime_error(std::format("wget::download: host tool '{}' does not exist or is not a regular file", result));
     }
 
     return result;
@@ -26,11 +26,11 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t download(
     const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& install_path
 ) {
     if (url.empty()) {
-        throw std::runtime_error("m03gagbhth67irf210vi3byvhk_wget::download: URL must not be empty");
+        throw std::runtime_error("wget::download: URL must not be empty");
     }
 
     if (m03gagbhsnusi43zogoacgj2ez_filesystem::exists(install_path)) {
-        throw std::runtime_error(std::format("m03gagbhth67irf210vi3byvhk_wget::download: install path '{}' already exists", install_path));
+        throw std::runtime_error(std::format("wget::download: install path '{}' already exists", install_path));
     }
 
     const auto parent = install_path.parent();
@@ -49,7 +49,7 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t download(
         });
 
         if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(install_path)) {
-            throw std::runtime_error(std::format("m03gagbhth67irf210vi3byvhk_wget::download: expected downloaded file '{}' to exist but it does not", install_path));
+            throw std::runtime_error(std::format("wget::download: expected downloaded file '{}' to exist but it does not", install_path));
         }
     } catch (...) {
         m03gagbhsnusi43zogoacgj2ez_filesystem::remove(install_path);
@@ -59,4 +59,4 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t download(
     return install_path;
 }
 
-} // namespace m03gagbhth67irf210vi3byvhk_wget
+} // namespace wget

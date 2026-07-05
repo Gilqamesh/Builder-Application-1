@@ -11,12 +11,12 @@
 # error M03GAGBHTBUSAQIDRTW6LNUGR4_SHA256SUM_SHA256SUM_PATH must be defined by the owning builder
 #endif
 
-namespace m03gagbhtbusaqidrtw6lnugr4_sha256sum {
+namespace sha256sum {
 
 static m03gagbhsnusi43zogoacgj2ez_filesystem::path_t sha256sum_path() {
     const auto result = m03gagbhsnusi43zogoacgj2ez_filesystem::path_t(M03GAGBHTBUSAQIDRTW6LNUGR4_SHA256SUM_SHA256SUM_PATH);
     if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(result) || !m03gagbhsnusi43zogoacgj2ez_filesystem::is_regular_file(result)) {
-        throw std::runtime_error(std::format("m03gagbhtbusaqidrtw6lnugr4_sha256sum::verify: host tool '{}' does not exist or is not a regular file", result));
+        throw std::runtime_error(std::format("sha256sum::verify: host tool '{}' does not exist or is not a regular file", result));
     }
 
     return result;
@@ -25,7 +25,7 @@ static m03gagbhsnusi43zogoacgj2ez_filesystem::path_t sha256sum_path() {
 static void validate_expected_sha256(const std::string& expected_sha256) {
     if (expected_sha256.size() != 64) {
         throw std::runtime_error(std::format(
-            "m03gagbhtbusaqidrtw6lnugr4_sha256sum::verify: expected SHA-256 '{}' must be 64 lowercase hexadecimal characters",
+            "sha256sum::verify: expected SHA-256 '{}' must be 64 lowercase hexadecimal characters",
             expected_sha256
         ));
     }
@@ -33,7 +33,7 @@ static void validate_expected_sha256(const std::string& expected_sha256) {
     for (const auto c : expected_sha256) {
         if (!(('0' <= c && c <= '9') || ('a' <= c && c <= 'f'))) {
             throw std::runtime_error(std::format(
-                "m03gagbhtbusaqidrtw6lnugr4_sha256sum::verify: expected SHA-256 '{}' must be 64 lowercase hexadecimal characters",
+                "sha256sum::verify: expected SHA-256 '{}' must be 64 lowercase hexadecimal characters",
                 expected_sha256
             ));
         }
@@ -47,12 +47,12 @@ static void write_checksum_file(
 ) {
     std::ofstream ofs(checksum_path.string(), std::ios::binary | std::ios::trunc);
     if (!ofs) {
-        throw std::runtime_error(std::format("m03gagbhtbusaqidrtw6lnugr4_sha256sum::verify: failed to write checksum file '{}'", checksum_path));
+        throw std::runtime_error(std::format("sha256sum::verify: failed to write checksum file '{}'", checksum_path));
     }
 
     ofs << expected_sha256 << "  " << path.string() << "\n";
     if (!ofs) {
-        throw std::runtime_error(std::format("m03gagbhtbusaqidrtw6lnugr4_sha256sum::verify: failed to write checksum file '{}'", checksum_path));
+        throw std::runtime_error(std::format("sha256sum::verify: failed to write checksum file '{}'", checksum_path));
     }
 }
 
@@ -60,12 +60,12 @@ void verify(const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& path, const std
     validate_expected_sha256(expected_sha256);
 
     if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(path) || !m03gagbhsnusi43zogoacgj2ez_filesystem::is_regular_file(path)) {
-        throw std::runtime_error(std::format("m03gagbhtbusaqidrtw6lnugr4_sha256sum::verify: path '{}' does not exist or is not a regular file", path));
+        throw std::runtime_error(std::format("sha256sum::verify: path '{}' does not exist or is not a regular file", path));
     }
 
     const auto checksum_path = path + ".sha256";
     if (m03gagbhsnusi43zogoacgj2ez_filesystem::exists(checksum_path)) {
-        throw std::runtime_error(std::format("m03gagbhtbusaqidrtw6lnugr4_sha256sum::verify: checksum path '{}' already exists", checksum_path));
+        throw std::runtime_error(std::format("sha256sum::verify: checksum path '{}' already exists", checksum_path));
     }
 
     try {
@@ -85,4 +85,4 @@ void verify(const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& path, const std
     }
 }
 
-} // namespace m03gagbhtbusaqidrtw6lnugr4_sha256sum
+} // namespace sha256sum

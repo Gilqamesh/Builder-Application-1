@@ -11,7 +11,7 @@
 # error M03GAGBHT9A02HX1QRV2QFGNP7_GZIP_GZIP_PATH must be defined by the owning builder
 #endif
 
-namespace m03gagbht9a02hx1qrv2qfgnp7_gzip {
+namespace gzip {
 
 static m03gagbhsnusi43zogoacgj2ez_filesystem::path_t host_gzip_path() {
     const auto result = m03gagbhsnusi43zogoacgj2ez_filesystem::path_t(M03GAGBHT9A02HX1QRV2QFGNP7_GZIP_GZIP_PATH);
@@ -27,15 +27,15 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t gzip(
     const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& install_gzip_path
 ) {
     if (install_gzip_path.extension() != ".gz") {
-        throw std::runtime_error(std::format("m03gagbht9a02hx1qrv2qfgnp7_gzip::gzip: install path '{}' must have .gz extension", install_gzip_path));
+        throw std::runtime_error(std::format("gzip::gzip: install path '{}' must have .gz extension", install_gzip_path));
     }
 
     if (m03gagbhsnusi43zogoacgj2ez_filesystem::exists(install_gzip_path)) {
-        throw std::runtime_error(std::format("m03gagbht9a02hx1qrv2qfgnp7_gzip::gzip: install path '{}' already exists", install_gzip_path));
+        throw std::runtime_error(std::format("gzip::gzip: install path '{}' already exists", install_gzip_path));
     }
 
     if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(file) || !m03gagbhsnusi43zogoacgj2ez_filesystem::is_regular_file(file)) {
-        throw std::runtime_error(std::format("m03gagbht9a02hx1qrv2qfgnp7_gzip::gzip: input '{}' is not a regular file", file));
+        throw std::runtime_error(std::format("gzip::gzip: input '{}' is not a regular file", file));
     }
 
     const auto parent = install_gzip_path.parent();
@@ -65,7 +65,7 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t gzip(
         });
 
         if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(temporary_output)) {
-            throw std::runtime_error(std::format("m03gagbht9a02hx1qrv2qfgnp7_gzip::gzip: expected temporary output '{}' to exist but it does not", temporary_output));
+            throw std::runtime_error(std::format("gzip::gzip: expected temporary output '{}' to exist but it does not", temporary_output));
         }
 
         m03gagbhsnusi43zogoacgj2ez_filesystem::rename_strict(temporary_output, install_gzip_path);
@@ -83,15 +83,15 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t ungzip(
     const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& install_file
 ) {
     if (gzip_path.extension() != ".gz") {
-        throw std::runtime_error(std::format("m03gagbht9a02hx1qrv2qfgnp7_gzip::ungzip: gzip path '{}' must have .gz extension", gzip_path));
+        throw std::runtime_error(std::format("gzip::ungzip: gzip path '{}' must have .gz extension", gzip_path));
     }
 
     if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(gzip_path) || !m03gagbhsnusi43zogoacgj2ez_filesystem::is_regular_file(gzip_path)) {
-        throw std::runtime_error(std::format("m03gagbht9a02hx1qrv2qfgnp7_gzip::ungzip: input '{}' is not a regular file", gzip_path));
+        throw std::runtime_error(std::format("gzip::ungzip: input '{}' is not a regular file", gzip_path));
     }
 
     if (m03gagbhsnusi43zogoacgj2ez_filesystem::exists(install_file)) {
-        throw std::runtime_error(std::format("m03gagbht9a02hx1qrv2qfgnp7_gzip::ungzip: install file '{}' already exists", install_file));
+        throw std::runtime_error(std::format("gzip::ungzip: install file '{}' already exists", install_file));
     }
 
     const auto parent = install_file.parent();
@@ -121,7 +121,7 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t ungzip(
         });
 
         if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(temporary_output)) {
-            throw std::runtime_error(std::format("m03gagbht9a02hx1qrv2qfgnp7_gzip::ungzip: expected temporary output '{}' to exist but it does not", temporary_output));
+            throw std::runtime_error(std::format("gzip::ungzip: expected temporary output '{}' to exist but it does not", temporary_output));
         }
 
         m03gagbhsnusi43zogoacgj2ez_filesystem::rename_strict(temporary_output, install_file);
@@ -134,4 +134,4 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t ungzip(
     return install_file;
 }
 
-} // namespace m03gagbht9a02hx1qrv2qfgnp7_gzip
+} // namespace gzip

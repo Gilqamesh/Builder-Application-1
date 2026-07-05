@@ -3,7 +3,7 @@
 
 # include <m03gagbhsnusi43zogoacgj2ez_filesystem/filesystem.h>
 
-namespace m03gagbht9a02hx1qrv2qfgnp7_gzip {
+namespace gzip {
 
 /**
  * Compresses file into a new .gz file and returns install_gzip_path.
@@ -21,7 +21,7 @@ m03gagbhsnusi43zogoacgj2ez_filesystem::path_t ungzip(
     const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& install_file
 );
 
-} // namespace m03gagbht9a02hx1qrv2qfgnp7_gzip
+} // namespace gzip
 
 
 #endif // M03GAGBHT9A02HX1QRV2QFGNP7_GZIP_GZIP_H

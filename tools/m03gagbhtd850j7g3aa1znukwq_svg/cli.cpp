@@ -1,4 +1,4 @@
-#include <m03gagbhtd850j7g3aa1znukwq_svg/svg.h>
+#include "svg.h"
 
 #include <m03gagbhsnusi43zogoacgj2ez_filesystem/filesystem.h>
 
@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
     }
 
     try {
-        const auto output = m03gagbhtd850j7g3aa1znukwq_svg::render_png(
+        const auto output = svg::render_png(
             m03gagbhsnusi43zogoacgj2ez_filesystem::path_t(argv[1]),
             m03gagbhsnusi43zogoacgj2ez_filesystem::path_t(argv[2])
         );

@@ -9,7 +9,7 @@
 # include <utility>
 # include <vector>
 
-namespace m03gagbht3svcx3ign454lfup3_cmake {
+namespace cmake {
 
 /**
  * Configures source_dir into build_dir with the given CMake -D values.
@@ -32,7 +32,7 @@ void build(const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& build_dir, std::
  */
 void install(const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& build_dir);
 
-} // namespace m03gagbht3svcx3ign454lfup3_cmake
+} // namespace cmake
 
 
 #endif // M03GAGBHT3SVCX3IGN454LFUP3_CMAKE_CMAKE_H

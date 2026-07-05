@@ -10,7 +10,7 @@
 # error M03GAGBHT3SVCX3IGN454LFUP3_CMAKE_CMAKE_PATH must be defined by the owning builder
 #endif
 
-namespace m03gagbht3svcx3ign454lfup3_cmake {
+namespace cmake {
 
 void configure(
     const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& source_dir,
@@ -18,7 +18,7 @@ void configure(
     const std::vector<std::pair<std::string, std::string>>& define_key_values
 ) {
     if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(source_dir)) {
-        throw std::runtime_error(std::format("m03gagbht3svcx3ign454lfup3_cmake::configure: source_dir '{}' does not exist", source_dir));
+        throw std::runtime_error(std::format("cmake::configure: source_dir '{}' does not exist", source_dir));
     }
 
     if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(build_dir)) {
@@ -41,7 +41,7 @@ void configure(
 
 void build(const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& build_dir, std::optional<std::size_t> n_jobs) {
     if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(build_dir)) {
-        throw std::runtime_error(std::format("m03gagbht3svcx3ign454lfup3_cmake::build: build_dir '{}' does not exist", build_dir));
+        throw std::runtime_error(std::format("cmake::build: build_dir '{}' does not exist", build_dir));
     }
 
     std::vector<m03gagbhsvr0m5w15urj0o291m_process::process_arg_t> process_args;
@@ -60,7 +60,7 @@ void build(const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& build_dir, std::
 
 void install(const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& build_dir) {
     if (!m03gagbhsnusi43zogoacgj2ez_filesystem::exists(build_dir)) {
-        throw std::runtime_error(std::format("m03gagbht3svcx3ign454lfup3_cmake::install: build_dir '{}' does not exist", build_dir));
+        throw std::runtime_error(std::format("cmake::install: build_dir '{}' does not exist", build_dir));
     }
 
     m03gagbhsvr0m5w15urj0o291m_process::create_and_wait_checked(m03gagbhsvr0m5w15urj0o291m_process::command_t {
@@ -72,4 +72,4 @@ void install(const m03gagbhsnusi43zogoacgj2ez_filesystem::path_t& build_dir) {
     });
 }
 
-} // namespace m03gagbht3svcx3ign454lfup3_cmake
+} // namespace cmake
