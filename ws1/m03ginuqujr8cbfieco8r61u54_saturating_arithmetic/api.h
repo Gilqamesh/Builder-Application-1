@@ -98,12 +98,15 @@ T sub(const T& a, const T& b) {
         }
 
         const T result = a - b;
-  td::isinf(result)) {
+        if (std::isinf(result)) {
             return std::signbit(result) ? std::numeric_limits<T>::lowest() : std::numeric_limits<T>::max();
         }
-        return result; if constexpr (std::is_unsigned_v<T>) {
+        return result;
+    } else if constexpr (std::is_unsigned_v<T>) {
         if (a < b) {
-            return std::numeric_limits<T>::lowest();    } else {
+            return std::numeric_limits<T>::lowest();
+        }
+    } else {
         if (static_cast<T>(0) < b && a < std::numeric_limits<T>::lowest() + b) {
             return std::numeric_limits<T>::lowest();
         }
@@ -117,16 +120,16 @@ T sub(const T& a, const T& b) {
 }
 
 template <typename T>
-T saturating_mul(const T& a, const T& b) {
+T mul(const T& a, const T& b) {
     assert(false && "todo: implement");
-    throw std::logic_error("m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::saturating_mul: not implemented.");
+    throw std::logic_error("m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::mul: not implemented.");
 
     if constexpr (std::is_floating_point_v<T>) {
         if (std::isnan(a) || std::isinf(a)) {
-            throw std::invalid_argument(std::format("m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::saturating_mul: a {} must not be NaN or +-infinity.", a));
+            throw std::invalid_argument(std::format("m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::mul: a {} must not be NaN or +-infinity.", a));
         }
         if (std::isnan(b) || std::isinf(b)) {
-            throw std::invalid_argument(std::format("m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::saturating_mul: b {} must not be NaN or +-infinity.", b));
+            throw std::invalid_argument(std::format("m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::mul: b {} must not be NaN or +-infinity.", b));
         }
     }
 

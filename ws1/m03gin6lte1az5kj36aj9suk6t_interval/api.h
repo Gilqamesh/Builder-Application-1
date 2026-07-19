@@ -26,7 +26,7 @@ public:
     /**
      * @brief Constructs an empty interval [0, 0).
      */
-    interval_t();
+    interval_t() noexcept;
 
     /**
      * @brief Constructs an interval with the given bounds.
@@ -44,13 +44,11 @@ public:
      */
     void bounds(const T& start, const T& end);
 
-    const T& start() const;
-    const T& end() const;
+    const T& start() const noexcept;
+    const T& end() const noexcept;
 
     /**
      * @brief Adds a value to both bounds using saturating arithmetic.
-     * 
-     * If the addition would overflow or underflow, the result is clamped to the maximum or minimum value of the type.
      * 
      * @throws std::invalid_argument if value is NaN or +-infinity for floating point types.
      */
@@ -59,8 +57,6 @@ public:
     /**
      * @brief Subtracts a value from both bounds using saturating arithmetic.
      * 
-     * If the subtraction would overflow or underflow, the result is clamped to the maximum or minimum value of the type.
-     * 
      * @throws std::invalid_argument if value is NaN or +-infinity for floating point types.
      */
     interval_t& operator-=(const T& value);
@@ -68,16 +64,12 @@ public:
     /**
      * @brief Returns a new interval that is the result of adding a value to both bounds using saturating arithmetic.
      * 
-     * If the addition would overflow or underflow, the result is clamped to the maximum or minimum value of the type.
-     * 
      * @throws std::invalid_argument if value is NaN or +-infinity for floating point types.
      */
     interval_t operator+(const T& value) const;
 
     /**
      * @brief Returns a new interval that is the result of subtracting a value from both bounds using saturating arithmetic.
-     * 
-     * If the subtraction would overflow or underflow, the result is clamped to the maximum or minimum value of the type.
      * 
      * @throws std::invalid_argument if value is NaN or +-infinity for floating point types.
      */
@@ -118,21 +110,21 @@ public:
     /**
      * @brief Returns true if the interval is empty (start == end).
      */
-    bool is_empty() const;
+    bool is_empty() const noexcept;
 
     /**
      * @brief Returns true if the interval contains the given value.
      * 
      * Empty intervals do not contain any values.
      */
-    bool contains(const T& value) const;
+    bool contains(const T& value) const noexcept;
 
     /**
      * @brief Returns true if the interval overlaps with another interval.
      * 
      * Empty intervals do not overlap with any intervals.
      */
-    bool overlaps(const interval_t& other) const;
+    bool overlaps(const interval_t& other) const noexcept;
 
     /**
      * @brief Returns the length of the interval (end - start).
@@ -151,7 +143,7 @@ private:
 namespace m03gin6lte1az5kj36aj9suk6t_interval {
 
 template <typename T>
-interval_t<T>::interval_t():
+interval_t<T>::interval_t() noexcept:
     m_start(static_cast<T>(0)),
     m_end(static_cast<T>(0))
 {
@@ -190,12 +182,12 @@ void interval_t<T>::bounds(const T& start, const T& end) {
 }
 
 template <typename T>
-const T& interval_t<T>::start() const {
+const T& interval_t<T>::start() const noexcept {
     return m_start;
 }
 
 template <typename T>
-const T& interval_t<T>::end() const {
+const T& interval_t<T>::end() const noexcept {
     return m_end;
 }
 
@@ -302,17 +294,17 @@ interval_t<T> interval_t<T>::intersect(const interval_t<T>& other) const {
 }
 
 template <typename T>
-bool interval_t<T>::is_empty() const {
+bool interval_t<T>::is_empty() const noexcept {
     return m_start == m_end;
 }
 
 template <typename T>
-bool interval_t<T>::contains(const T& value) const {
+bool interval_t<T>::contains(const T& value) const noexcept {
     return m_start <= value && value < m_end;
 }
 
 template <typename T>
-bool interval_t<T>::overlaps(const interval_t<T>& other) const {
+bool interval_t<T>::overlaps(const interval_t<T>& other) const noexcept {
     return m_start < other.m_end && other.m_start < m_end;
 }
 
