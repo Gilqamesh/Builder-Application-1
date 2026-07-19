@@ -4,6 +4,7 @@
 # include <cmath>
 
 # include <algorithm>
+# include <array>
 # include <limits>
 # include <numeric>
 # include <type_traits>
@@ -44,8 +45,10 @@ public:
      */
     void bounds(const T& start, const T& end);
 
-    const T& start() const noexcept;
-    const T& end() const noexcept;
+    std::array<T, 2>::const_iterator begin() const noexcept;
+    std::array<T, 2>::const_iterator end() const noexcept;
+
+    const T& operator[](std::size_t index) const noexcept;
 
     /**
      * @brief Adds a value to both bounds using saturating arithmetic.
@@ -134,25 +137,29 @@ public:
     T length() const;
 
 private:
-    T m_start;
-    T m_end;
+    std::array<T, 2> m_data;
 };
 
 } // namespace m03gin6lte1az5kj36aj9suk6t_interval
+
+namespace std {
+
+template <typename T>
+struct std::formatter<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>>;
+
+} // namespace std
 
 namespace m03gin6lte1az5kj36aj9suk6t_interval {
 
 template <typename T>
 interval_t<T>::interval_t() noexcept:
-    m_start(static_cast<T>(0)),
-    m_end(static_cast<T>(0))
+    m_data{}
 {
 }
 
 template <typename T>
 interval_t<T>::interval_t(const T& start, const T& end):
-    m_start(start),
-    m_end(end)
+    m_data{start, end}
 {
     if (end < start) {
         throw std::invalid_argument("interval_t: end must be greater than or equal to start.");
@@ -177,18 +184,23 @@ void interval_t<T>::bounds(const T& start, const T& end) {
         }
     }
 
-    m_start = start;
-    m_end = end;
+    m_data[0] = start;
+    m_data[1] = end;
 }
 
 template <typename T>
-const T& interval_t<T>::start() const noexcept {
-    return m_start;
+std::array<T, 2>::const_iterator interval_t<T>::begin() const noexcept {
+    return m_data.begin();
 }
 
 template <typename T>
-const T& interval_t<T>::end() const noexcept {
-    return m_end;
+std::array<T, 2>::const_iterator interval_t<T>::end() const noexcept {
+    return m_data.end();
+}
+
+template <typename T>
+const T& interval_t<T>::operator[](std::size_t index) const noexcept {
+    return m_data[index];
 }
 
 template <typename T>
@@ -199,8 +211,8 @@ interval_t<T>& interval_t<T>::operator+=(const T& value) {
         }
     }
 
-    m_start = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::add(m_start, value);
-    m_end = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::add(m_end, value);
+    m_data[0] = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::add(m_data[0], value);
+    m_data[1] = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::add(m_data[1], value);
     return *this;
 }
 
@@ -212,8 +224,8 @@ interval_t<T>& interval_t<T>::operator-=(const T& value) {
         }
     }
 
-    m_start = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::sub(m_start, value);
-    m_end = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::sub(m_end, value);
+    m_data[0] = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::sub(m_data[0], value);
+    m_data[1] = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::sub(m_data[1], value);
     return *this;
 }
 
@@ -239,10 +251,10 @@ T interval_t<T>::clamp(const T& value) const {
         }
     }
 
-    if (value < m_start) {
-        return m_start;
-    } else if (m_end < value) {
-        return m_end;
+    if (value < m_data[0]) {
+        return m_data[0];
+    } else if (m_data[1] < value) {
+        return m_data[1];
     }
     return value;
 }
@@ -255,11 +267,11 @@ interval_t<T> interval_t<T>::inflate(const T& value) const {
         }
     }
 
-    const T new_start = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::sub(m_start, value);
-    const T new_end = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::add(m_end, value);
+    const T new_start = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::sub(m_data[0], value);
+    const T new_end = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::add(m_data[1], value);
 
     if (new_end < new_start) {
-        const T mid = std::midpoint(m_start, m_end);
+        const T mid = std::midpoint(m_data[0], m_data[1]);
         return interval_t<T>(mid, mid);
     }
 
@@ -274,11 +286,11 @@ interval_t<T> interval_t<T>::deflate(const T& value) const {
         }
     }
 
-    const T new_start = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::add(m_start, value);
-    const T new_end = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::sub(m_end, value);
+    const T new_start = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::add(m_data[0], value);
+    const T new_end = m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::sub(m_data[1], value);
 
     if (new_end < new_start) {
-        const T mid = std::midpoint(m_start, m_end);
+        const T mid = std::midpoint(m_data[0], m_data[1]);
         return interval_t<T>(mid, mid);
     }
 
@@ -288,31 +300,55 @@ interval_t<T> interval_t<T>::deflate(const T& value) const {
 template <typename T>
 interval_t<T> interval_t<T>::intersect(const interval_t<T>& other) const {
     interval_t<T> result = *this;
-    result.m_start = std::max(result.m_start, other.m_start);
-    result.m_end = std::max(result.m_start, std::min(result.m_end, other.m_end));
+    result.m_data[0] = std::max(result.m_data[0], other.m_data[0]);
+    result.m_data[1] = std::max(result.m_data[0], std::min(result.m_data[1], other.m_data[1]));
     return result;
 }
 
 template <typename T>
 bool interval_t<T>::is_empty() const noexcept {
-    return m_start == m_end;
+    return m_data[0] == m_data[1];
 }
 
 template <typename T>
 bool interval_t<T>::contains(const T& value) const noexcept {
-    return m_start <= value && value < m_end;
+    return m_data[0] <= value && value < m_data[1];
 }
 
 template <typename T>
 bool interval_t<T>::overlaps(const interval_t<T>& other) const noexcept {
-    return m_start < other.m_end && other.m_start < m_end;
+    return m_data[0] < other.m_data[1] && other.m_data[0] < m_data[1];
 }
 
 template <typename T>
 T interval_t<T>::length() const {
-    return m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::sub(m_end, m_start);
+    return m03ginuqujr8cbfieco8r61u54_saturating_arithmetic::sub(m_data[1], m_data[0]);
 }
 
 } // namespace m03gin6lte1az5kj36aj9suk6t_interval
+
+namespace std {
+
+template <typename T>
+struct std::formatter<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid interval_t format specifier");
+        }
+
+        return it;
+    }
+
+    auto format(const m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>& interval, auto& ctx) const {
+        auto out = ctx.out();
+
+        out = std::format_to(out, "[{}, {})", interval[0], interval[1]);
+
+        return out;
+    }
+};
+
+} // namespace std
 
 #endif // M03GIN6LTE1AZ5KJ36AJ9SUK6T_INTERVAL_MODULE_H

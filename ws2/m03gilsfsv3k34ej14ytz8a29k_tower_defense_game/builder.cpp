@@ -18,8 +18,6 @@ extern "C" void phase__library(const m03gagbhsujjf63n0w3r2w4q6h_build_phases::li
             phase->build(sources.root() / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t("camera.cpp")),
             phase->build(sources.root() / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t("game.cpp")),
             phase->build(sources.root() / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t("map.cpp")),
-            phase->build(sources.root() / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t("rect.cpp")),
-            phase->build(sources.root() / m03gagbhsnusi43zogoacgj2ez_filesystem::relative_path_t("vec2.cpp"))
         },
         {}
     );

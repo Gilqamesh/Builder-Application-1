@@ -10,6 +10,7 @@
 # include <initializer_list>
 # include <algorithm>
 # include <stdexcept>
+# include <format>
 
 # include <boost/container_hash/hash.hpp>
 
@@ -156,6 +157,9 @@ private:
 } // namespace m03ginwy24ng8o487c4beoms6l_vector
 
 namespace std {
+
+template <typename T, std::size_t N>
+struct std::formatter<m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>>;
 
 template <typename T, std::size_t N>
 struct hash<m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>>;
@@ -417,6 +421,34 @@ vector_t<T, N> vector_t<T, N>::operator/(U value) const {
 } // namespace m03ginwy24ng8o487c4beoms6l_vector
 
 namespace std {
+
+template <typename T, std::size_t N>
+struct std::formatter<m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>> {
+
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid vector_t format specifier");
+        }
+
+        return it;
+    }
+
+    auto format(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& vector, auto& ctx) const {
+        auto out = ctx.out();
+
+        out = std::format_to(out, "{{ ");
+        for (std::size_t i = 0; i < N; ++i) {
+            if (i > 0) {
+                out = std::format_to(out, ", ");
+            }
+            out = std::format_to(out, "{}", vector[i]);
+        }
+        out = std::format_to(out, " }}");
+
+        return out;
+    }
+};
 
 template <typename T, std::size_t N>
 struct hash<m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>> {

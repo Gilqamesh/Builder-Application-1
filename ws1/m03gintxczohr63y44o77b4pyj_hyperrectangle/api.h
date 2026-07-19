@@ -42,23 +42,46 @@ public:
     hyperrectangle_t(std::initializer_list<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>> list);
 
     /**
+     * @brief Constructs a hyperrectangle with the given corner and opposite corner.
+     * 
+     * @throws std::invalid_argument if any element of the corner or opposite corner is NaN or +-infinity for floating point types.
+     */
+    hyperrectangle_t(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& corner, const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& opposite_corner);
+
+    /**
+     * @brief Returns the corner of the hyperrectangle.
+     */
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> corner() const noexcept;
+
+    /**
+     * @brief Returns the opposite corner of the hyperrectangle.
+     */
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> opposite_corner() const noexcept;
+
+    /**
      * @brief Sets the intervals of the hyperrectangle.
      */
     void bounds(const std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>& intervals) noexcept;
+
+    std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::const_iterator begin() const noexcept;
+    std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::const_iterator end() const noexcept;
+
+    std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::iterator begin() noexcept;
+    std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::iterator end() noexcept;
 
     /**
      * @brief Returns a reference to the interval at the given index.
      * 
      * Does no bound checking.
      */
-    m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>& operator[](std::size_t index);
+    m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>& operator[](std::size_t index) noexcept;
 
     /**
      * @brief Returns a const reference to the interval at the given index.
      * 
      * Does no bound checking.
      */
-    const m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>& operator[](std::size_t index) const;
+    const m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>& operator[](std::size_t index) const noexcept;
 
     /**
      * @brief Adds a vector to the hyperrectangle using saturating arithmetic.
@@ -105,11 +128,25 @@ public:
     hyperrectangle_t inflate(const T& value) const;
 
     /**
+     * @brief Inflates the hyperrectangle by the given values in each dimension using saturating arithmetic.
+     * 
+     * @throws std::invalid_argument if any element of the vector is NaN or +-infinity for floating point types.
+     */
+    hyperrectangle_t inflate(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& values) const;
+
+    /**
      * @brief Deflates the hyperrectangle by the given value in all dimensions using saturating arithmetic.
      * 
      * @throws std::invalid_argument if value is NaN or +-infinity for floating point types.
      */
     hyperrectangle_t deflate(const T& value) const;
+
+    /**
+     * @brief Deflates the hyperrectangle by the given values in each dimension using saturating arithmetic.
+     * 
+     * @throws std::invalid_argument if any element of the vector is NaN or +-infinity for floating point types.
+     */
+    hyperrectangle_t deflate(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& values) const;
 
     /**
      * @brief Returns the intersection of this hyperrectangle with another hyperrectangle.
@@ -134,18 +171,22 @@ public:
     bool overlaps(const hyperrectangle_t& other) const;
 
     /**
-     * @brief Returns the volume of the hyperrectangle.
-     * 
-     * The volume is the product of the lengths of the intervals in each dimension.
-     * Can overflow.
+     * @brief Returns the lengths of the hyperrectangle in each dimension.
      */
-    T volume() const;
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> lengths() const;
 
 private:
     std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N> m_intervals;
 };
 
 } // namespace m03gintxczohr63y44o77b4pyj_hyperrectangle
+
+namespace std {
+
+template <typename T, std::size_t N>
+struct std::formatter<m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<T, N>>;
+
+} // namespace std
 
 namespace m03gintxczohr63y44o77b4pyj_hyperrectangle {
 
@@ -168,17 +209,62 @@ hyperrectangle_t<T, N>::hyperrectangle_t(std::initializer_list<m03gin6lte1az5kj3
 }
 
 template <typename T, std::size_t N>
+hyperrectangle_t<T, N>::hyperrectangle_t(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& corner, const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& opposite_corner) {
+    for (std::size_t i = 0; i < N; ++i) {
+        m_intervals[i] = m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>(corner[i], opposite_corner[i]);
+    }
+}
+
+template <typename T, std::size_t N>
+m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> hyperrectangle_t<T, N>::corner() const noexcept {
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> result;
+    for (std::size_t i = 0; i < N; ++i) {
+        result[i] = m_intervals[i][0];
+    }
+    return result;
+}
+
+template <typename T, std::size_t N>
+m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> hyperrectangle_t<T, N>::opposite_corner() const noexcept {
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> result;
+    for (std::size_t i = 0; i < N; ++i) {
+        result[i] = m_intervals[i][1];
+    }
+    return result;
+}
+
+template <typename T, std::size_t N>
 void hyperrectangle_t<T, N>::bounds(const std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>& intervals) noexcept {
     m_intervals = intervals;
 }
 
 template <typename T, std::size_t N>
-m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>& hyperrectangle_t<T, N>::operator[](std::size_t index) {
+std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::const_iterator hyperrectangle_t<T, N>::begin() const noexcept {
+    return m_intervals.begin();
+}
+
+template <typename T, std::size_t N>
+std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::const_iterator hyperrectangle_t<T, N>::end() const noexcept {
+    return m_intervals.end();
+}
+
+template <typename T, std::size_t N>
+std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::iterator hyperrectangle_t<T, N>::begin() noexcept {
+    return m_intervals.begin();
+}
+
+template <typename T, std::size_t N>
+std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::iterator hyperrectangle_t<T, N>::end() noexcept {
+    return m_intervals.end();
+}
+
+template <typename T, std::size_t N>
+m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>& hyperrectangle_t<T, N>::operator[](std::size_t index) noexcept {
     return m_intervals[index];
 }
 
 template <typename T, std::size_t N>
-const m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>& hyperrectangle_t<T, N>::operator[](std::size_t index) const {
+const m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>& hyperrectangle_t<T, N>::operator[](std::size_t index) const noexcept {
     return m_intervals[index];
 }
 
@@ -231,10 +317,28 @@ hyperrectangle_t<T, N> hyperrectangle_t<T, N>::inflate(const T& value) const {
 }
 
 template <typename T, std::size_t N>
+hyperrectangle_t<T, N> hyperrectangle_t<T, N>::inflate(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& values) const {
+    std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N> inflated_intervals;
+    for (std::size_t i = 0; i < N; ++i) {
+        inflated_intervals[i] = m_intervals[i].inflate(values[i]);
+    }
+    return hyperrectangle_t<T, N>(inflated_intervals);
+}
+
+template <typename T, std::size_t N>
 hyperrectangle_t<T, N> hyperrectangle_t<T, N>::deflate(const T& value) const {
     std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N> deflated_intervals;
     for (std::size_t i = 0; i < N; ++i) {
         deflated_intervals[i] = m_intervals[i].deflate(value);
+    }
+    return hyperrectangle_t<T, N>(deflated_intervals);
+}
+
+template <typename T, std::size_t N>
+hyperrectangle_t<T, N> hyperrectangle_t<T, N>::deflate(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& values) const {
+    std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N> deflated_intervals;
+    for (std::size_t i = 0; i < N; ++i) {
+        deflated_intervals[i] = m_intervals[i].deflate(values[i]);
     }
     return hyperrectangle_t<T, N>(deflated_intervals);
 }
@@ -279,17 +383,46 @@ bool hyperrectangle_t<T, N>::overlaps(const hyperrectangle_t<T, N>& other) const
 }
 
 template <typename T, std::size_t N>
-T hyperrectangle_t<T, N>::volume() const {
-    T vol = static_cast<T>(1);
-    for (const auto& interval : m_intervals) {
-        if (interval.is_empty()) {
-            return static_cast<T>(0);
-        }
-        vol *= interval.length();
+m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> hyperrectangle_t<T, N>::lengths() const {
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> result;
+    for (std::size_t i = 0; i < N; ++i) {
+        result[i] = m_intervals[i].length();
     }
-    return vol;
+    return result;
 }
 
 } // namespace m03gintxczohr63y44o77b4pyj_hyperrectangle
+
+namespace std {
+
+template <typename T, std::size_t N>
+struct std::formatter<m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<T, N>> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid hyperrectangle_t format specifier");
+        }
+
+        return it;
+    }
+
+    auto format(const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<T, N>& hyperrectangle, auto& ctx) const {
+        auto out = ctx.out();
+
+        out = std::format_to(out, "{{ ");
+        for (std::size_t i = 0; i < N; ++i) {
+            if (i > 0) {
+                out = std::format_to(out, ", ");
+            }
+            const auto& interval = hyperrectangle[i];
+            out = std::format_to(out, "{}", interval);
+        }
+        out = std::format_to(out, " }}");
+
+        return out;
+    }
+};
+
+} // namespace std
 
 #endif // M03GINTXCZOHR63Y44O77B4PYJ_HYPERRECTANGLE_H
