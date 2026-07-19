@@ -15,6 +15,7 @@
 namespace m03gf09la5rvbh6kk4vvt1qawv_module_shell {
 
 static std::multimap<std::string, m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t> module_names_by_friendly_name;
+static std::unordered_map<std::string, m03gagbhsp2drqq3gkop8pzfrm_workspace_graph::module_name_t> module_name_by_module_unique_name;
 
 char* character_name_generator(const char* text, int state) {
     static auto it = module_names_by_friendly_name.end();
@@ -92,7 +93,13 @@ static std::vector<std::string> parse_tokens(std::string input) {
             throw std::runtime_error(std::format("Unexpected whitespace in input"));
         }
 
-        tokens.emplace_back(input.substr(start, end - start));
+        auto token = input.substr(start, end - start);
+        auto it = module_names_by_friendly_name.find(token);
+        if (it != module_names_by_friendly_name.end()) {
+            const auto& [_, module_name] = *it;
+            token = module_name.unique_name();
+        }
+        tokens.emplace_back(token);
     }
 
     return tokens;
@@ -105,6 +112,7 @@ void run() {
         const auto module_names = workspace_graph.module_names();
         for (const auto& module_name : module_names) {
             module_names_by_friendly_name.emplace(module_name.friendly_name(), module_name);
+            module_name_by_module_unique_name.emplace(module_name.unique_name(), module_name);
         }
     }
 
@@ -133,8 +141,8 @@ void run() {
         }
 
         try {
-            auto it = module_names_by_friendly_name.find(tokens[0]);
-            if (it != module_names_by_friendly_name.end()) {
+            auto it = module_name_by_module_unique_name.find(tokens[0]);
+            if (it != module_name_by_module_unique_name.end()) {
                 const auto& [_, module_name] = *it;
                 m03gagbhst621faiop1rztfkqp_builder_cli::create_and_wait_checked(
                     module_name,

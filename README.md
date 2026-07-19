@@ -39,6 +39,7 @@ Long-lived application workspace of **Builder**.
 ## Notable modules
 
 - `m03gagbht5685jfnokvj7crv2c_create_module` - creates a new module in a workspace.
+- `m03gf09la5rvbh6kk4vvt1qawv_module_shell` - interactive shell for running modules by friendly name.
 - `m03ge9zyrjajugagmp61034qhi_module_dependency_ir_svg_renderer` - renders a module dependency graph to SVG.
 - `m03ge9ij4lbns2mq6722cd8654_function_visualizer` - infinitely zoomable prototype to visualize m03ge9ij46lc986vpdamnc2fka_function_ir.
 
