@@ -1,7 +1,7 @@
 #ifndef M03GINWY24NG8O487C4BEOMS6L_VECTOR_MODULE_H
 # define M03GINWY24NG8O487C4BEOMS6L_VECTOR_MODULE_H
 
-#include <cmath>
+# include <cmath>
 
 # include <array>
 # include <functional>
