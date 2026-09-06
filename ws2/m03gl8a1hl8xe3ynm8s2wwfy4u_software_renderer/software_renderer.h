@@ -58,11 +58,11 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
  * an unwritten color preserves color while still permitting depth writes.
  * There is no blending.
  */
-template <typename Profiler = profiling::disabled_profiler_t>
+template <typename profiler_type_t = profiling::disabled_profiler_t>
 class software_renderer_t {
 public:
     /** @brief Copies attachment views; later changes to the supplied view do not rebind this renderer. */
-    explicit software_renderer_t(framebuffer_t framebuffer) requires (!Profiler::enabled);
+    explicit software_renderer_t(framebuffer_t framebuffer) requires (!profiler_type_t::enabled);
 
     /**
      * @brief Borrows the shared profiler with its explicitly registered renderer regions.
@@ -71,7 +71,7 @@ public:
      * rendering. The profiler and its capture storage outlive renderer operations.
      * Enabled and disabled renderer policies can coexist in the same executable.
      */
-    software_renderer_t(framebuffer_t framebuffer, Profiler& profiler, const regions_t& regions) requires (Profiler::enabled);
+    software_renderer_t(framebuffer_t framebuffer, profiler_type_t& profiler, const regions_t& regions) requires (profiler_type_t::enabled);
 
     software_renderer_t(const software_renderer_t&) = delete;
     software_renderer_t& operator=(const software_renderer_t&) = delete;
@@ -126,28 +126,28 @@ private:
 
     framebuffer_t m_framebuffer;
     scratch_t m_scratch;
-    [[no_unique_address]] std::conditional_t<Profiler::enabled, std::pair<Profiler&, regions_t>, Profiler> m_profiling;
+    [[no_unique_address]] std::conditional_t<profiler_type_t::enabled, std::pair<profiler_type_t&, regions_t>, profiler_type_t> m_profiling;
 };
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
 
 namespace std {
 
-template <typename Profiler>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::software_renderer_t<Profiler>>;
+template <typename profiler_type_t>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::software_renderer_t<profiler_type_t>>;
 
 } // namespace std
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
-template <typename Profiler>
-software_renderer_t<Profiler>::software_renderer_t(framebuffer_t framebuffer) requires (!Profiler::enabled):
+template <typename profiler_type_t>
+software_renderer_t<profiler_type_t>::software_renderer_t(framebuffer_t framebuffer) requires (!profiler_type_t::enabled):
     m_framebuffer(framebuffer)
 {
 }
 
-template <typename Profiler>
-software_renderer_t<Profiler>::software_renderer_t(framebuffer_t framebuffer, Profiler& profiler, const regions_t& regions) requires (Profiler::enabled):
+template <typename profiler_type_t>
+software_renderer_t<profiler_type_t>::software_renderer_t(framebuffer_t framebuffer, profiler_type_t& profiler, const regions_t& regions) requires (profiler_type_t::enabled):
     m_framebuffer(framebuffer),
     m_profiling(profiler, regions)
 {
@@ -158,27 +158,27 @@ software_renderer_t<Profiler>::software_renderer_t(framebuffer_t framebuffer, Pr
     }
 }
 
-template <typename Profiler>
-framebuffer_t& software_renderer_t<Profiler>::framebuffer() noexcept {
+template <typename profiler_type_t>
+framebuffer_t& software_renderer_t<profiler_type_t>::framebuffer() noexcept {
     return m_framebuffer;
 }
 
-template <typename Profiler>
-const framebuffer_t& software_renderer_t<Profiler>::framebuffer() const noexcept {
+template <typename profiler_type_t>
+const framebuffer_t& software_renderer_t<profiler_type_t>::framebuffer() const noexcept {
     return m_framebuffer;
 }
 
-template <typename Profiler>
-void software_renderer_t<Profiler>::clear_color(rgba8_t color) {
+template <typename profiler_type_t>
+void software_renderer_t<profiler_type_t>::clear_color(rgba8_t color) {
     [[maybe_unused]] auto clear_scope = scope<clear_metrics_t>(region_t::clear_color);
     std::ranges::fill(m_framebuffer.pixels(), color);
-    if constexpr (Profiler::enabled) {
+    if constexpr (profiler_type_t::enabled) {
         clear_scope.metrics().m_color_writes = m_framebuffer.pixels().size();
     }
 }
 
-template <typename Profiler>
-void software_renderer_t<Profiler>::clear_color(const camera_t& camera, rgba8_t color) {
+template <typename profiler_type_t>
+void software_renderer_t<profiler_type_t>::clear_color(const camera_t& camera, rgba8_t color) {
     [[maybe_unused]] auto clear_scope = scope<clear_metrics_t>(region_t::clear_color);
     const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
     if (bounds.empty()) {
@@ -188,14 +188,14 @@ void software_renderer_t<Profiler>::clear_color(const camera_t& camera, rgba8_t 
     for (auto y = bounds.m_first_y; y < bounds.m_end_y; ++y) {
         const auto offset = std::size_t(y + bounds.m_y) * std::size_t(bounds.m_width) + std::size_t(bounds.m_first_x + bounds.m_x);
         std::ranges::fill(pixels.subspan(offset, std::size_t(bounds.m_end_x - bounds.m_first_x)), color);
-        if constexpr (Profiler::enabled) {
+        if constexpr (profiler_type_t::enabled) {
             clear_scope.metrics().m_color_writes += std::size_t(bounds.m_end_x - bounds.m_first_x);
         }
     }
 }
 
-template <typename Profiler>
-void software_renderer_t<Profiler>::clear_depth(float depth) {
+template <typename profiler_type_t>
+void software_renderer_t<profiler_type_t>::clear_depth(float depth) {
     [[maybe_unused]] auto clear_scope = scope<clear_metrics_t>(region_t::clear_depth);
     if (m_framebuffer.pixels().empty()) {
         return;
@@ -204,13 +204,13 @@ void software_renderer_t<Profiler>::clear_depth(float depth) {
         throw std::invalid_argument("software_renderer_t::clear_depth requires a depth attachment");
     }
     std::ranges::fill(m_framebuffer.depth(), depth_clear_value(depth));
-    if constexpr (Profiler::enabled) {
+    if constexpr (profiler_type_t::enabled) {
         clear_scope.metrics().m_depth_writes = m_framebuffer.depth().size();
     }
 }
 
-template <typename Profiler>
-void software_renderer_t<Profiler>::clear_depth(const camera_t& camera, float depth) {
+template <typename profiler_type_t>
+void software_renderer_t<profiler_type_t>::clear_depth(const camera_t& camera, float depth) {
     [[maybe_unused]] auto clear_scope = scope<clear_metrics_t>(region_t::clear_depth);
     const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
     if (bounds.empty()) {
@@ -224,14 +224,14 @@ void software_renderer_t<Profiler>::clear_depth(const camera_t& camera, float de
     for (auto y = bounds.m_first_y; y < bounds.m_end_y; ++y) {
         const auto offset = std::size_t(y + bounds.m_y) * std::size_t(bounds.m_width) + std::size_t(bounds.m_first_x + bounds.m_x);
         std::ranges::fill(samples.subspan(offset, std::size_t(bounds.m_end_x - bounds.m_first_x)), depth);
-        if constexpr (Profiler::enabled) {
+        if constexpr (profiler_type_t::enabled) {
             clear_scope.metrics().m_depth_writes += std::size_t(bounds.m_end_x - bounds.m_first_x);
         }
     }
 }
 
-template <typename Profiler>
-void software_renderer_t<Profiler>::draw(
+template <typename profiler_type_t>
+void software_renderer_t<profiler_type_t>::draw(
     const camera_t& camera,
     const render_item_t& render_item
 ) {
@@ -280,7 +280,7 @@ void software_renderer_t<Profiler>::draw(
         }
     }
 
-    if constexpr (Profiler::enabled) {
+    if constexpr (profiler_type_t::enabled) {
         preparation.close();
     }
     [[maybe_unused]] auto vertices = scope<vertex_metrics_t>(region_t::vertices);
@@ -302,7 +302,7 @@ void software_renderer_t<Profiler>::draw(
         for (const auto& input : program.vertex_interface().inputs()) {
             set_vertex_input(io, input, streams[input.index], attributes[input.index], vertex_index);
         }
-        if constexpr (Profiler::enabled) {
+        if constexpr (profiler_type_t::enabled) {
             ++vertices.metrics().m_invocations;
         }
         program.run(bindings, io);
@@ -321,7 +321,7 @@ void software_renderer_t<Profiler>::draw(
         });
     }
 
-    if constexpr (Profiler::enabled) {
+    if constexpr (profiler_type_t::enabled) {
         vertices.close();
     }
     auto rasterization = scope<raster_metrics_t>(region_t::rasterization);
@@ -453,10 +453,10 @@ void software_renderer_t<Profiler>::draw(
     }
 }
 
-template <typename Profiler>
+template <typename profiler_type_t>
 template <typename T>
-auto software_renderer_t<Profiler>::scope(region_t region) {
-    if constexpr (Profiler::enabled) {
+auto software_renderer_t<profiler_type_t>::scope(region_t region) {
+    if constexpr (profiler_type_t::enabled) {
         return m_profiling.first.template scope<T>(m_profiling.second.m_ids[static_cast<std::size_t>(region)]);
     } else {
         return m_profiling.template scope<T>({});
@@ -467,8 +467,8 @@ auto software_renderer_t<Profiler>::scope(region_t region) {
 
 namespace std {
 
-template <typename Profiler>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::software_renderer_t<Profiler>> {
+template <typename profiler_type_t>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::software_renderer_t<profiler_type_t>> {
     constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
         if (it != ctx.end() && *it != '}') {
@@ -477,7 +477,7 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::software_renderer
         return it;
     }
 
-    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::software_renderer_t<Profiler>& renderer, auto& ctx) const {
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::software_renderer_t<profiler_type_t>& renderer, auto& ctx) const {
         auto out = ctx.out();
 
         out = std::format_to(out, "{{ ");

@@ -129,12 +129,12 @@ Status: unstarted.
 ## 6. Measurement and incremental optimization
 
 Status: profiling and an initial optimized baseline are implemented and validated;
-algorithmic optimization is unstarted. See [the measurement path](../performance/README.md)
-and [baseline evidence](../performance/baseline.md).
+algorithmic optimization is unstarted. See [the measurement path](profiling.md)
+and [baseline evidence](profiling-baseline.md).
 
 - Outcome: each optimization delivery demonstrates its effect through repeatable measurements while preserving rendering correctness.
 - Measurement ownership: [`profiling`](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md) owns nested timing/counter collection and deferred report traversal. The renderer owns its metrics and template-policy integration. Its benchmark driver owns workloads, repeated-run summaries, and comparisons; applications own shared profiler instances and capture storage.
-- Metrics: track median and high-percentile elapsed render time and process peak RSS across stable headless workloads. The driver records precise timing and memory scopes. Keep these scopes consistent across deliveries and optimize all measured dependency implementations.
+- Metrics: track median and high-percentile elapsed render time and process peak RSS across stable headless workloads. The benchmark records precise timing and memory scopes. Keep these scopes consistent across deliveries. Current Builder runs use its default build; dependency-wide optimization and a new optimized baseline remain deferred.
 - Comparisons: record workload, resolution, rendering settings, hardware, build configuration, and source revision. Report absolute results, percentage changes, and run-to-run variation against both the previous delivery and the established baseline. New feature workloads establish their own baselines.
 - Delivery process: use measured results to select each bounded optimization. Every delivery includes the same comparison report and correctness evidence, making improvements, regressions, and tradeoffs visible. Specific optimization techniques remain undecided until measurements justify them.
 - Acceptance criteria: repeated runs establish measurement variability, and each optimization delivery has comparable before/after results with passing correctness validation.
@@ -414,10 +414,24 @@ The dedicated headless benchmark compiles the renderer and performance-relevant
 dependencies, including `software_shader` and texture sampling, with `-O2`.
 Native Clang and optimized GNU public validation passed, as did the mixed-payload,
 disabled assembly, missing-formatter, and consumer presentation checks.
-[The baseline report](../performance/baseline.md) records exact commands, source
-identity, empirical results, and limitations; [raw samples](../performance/baseline.json)
-are preserved. Changes remain in the working tree; no implementation commit was
-created. No algorithmic optimization delivery is claimed.
+[The baseline report](profiling-baseline.md) records exact commands, source
+identity, empirical results, and limitations; [raw samples](profiling-baseline.json)
+are preserved. The profiling implementation was committed as `1aee3733`. No algorithmic
+optimization delivery is claimed.
+
+### Profiling benchmark migration — 2026-09-06
+
+The benchmark is registered through the renderer's existing Builder producer API,
+with the demo target preserved. C++ owns workload execution and statistics; Builder
+owns its build. Documentation and the original baseline now reside in `docs/`, and
+the standalone Python driver has been removed. Profiler constructor overloads and
+descriptive template naming preserve the existing capture and renderer contracts.
+
+Native public validation, independent summary checks, constructor/formatter/compiler
+checks, target reuse, and both graphical smoke checks passed. See the
+[migration validation record](profiling-migration.md) for exact commands and limits.
+The original optimized raw baseline is unchanged. General dependency optimization
+and a new optimized baseline remain deferred. These changes are in the working tree.
 
 ## Deferred scope
 

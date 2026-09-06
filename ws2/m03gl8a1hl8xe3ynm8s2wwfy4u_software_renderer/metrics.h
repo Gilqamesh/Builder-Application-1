@@ -54,8 +54,8 @@ enum class region_t { clear_color, clear_depth, draw, preparation, vertices, ras
 struct regions_t {
     std::array<profiling::region_id_t, 6> m_ids;
 
-    template <typename Profiler>
-    explicit regions_t(Profiler& profiler);
+    template <typename profiler_type_t>
+    explicit regions_t(profiler_type_t& profiler);
 };
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
@@ -81,8 +81,8 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::regions_t>;
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
-template <typename Profiler>
-regions_t::regions_t(Profiler& profiler) {
+template <typename profiler_type_t>
+regions_t::regions_t(profiler_type_t& profiler) {
     constexpr std::array<std::string_view, 6> names {
         "renderer.clear_color", "renderer.clear_depth", "renderer.draw",
         "renderer.preparation", "renderer.vertices", "renderer.rasterization"

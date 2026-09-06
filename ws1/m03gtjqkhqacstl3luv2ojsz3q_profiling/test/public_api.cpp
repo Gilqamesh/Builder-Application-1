@@ -5,11 +5,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <new>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 
 namespace profiling = m03gtjqkhqacstl3luv2ojsz3q_profiling;
 
@@ -176,8 +178,8 @@ void test_overflow() {
 }
 
 struct failing_report_t {
-    template <typename Metrics>
-    void operator()(std::ostream&, std::span<const profiling::record_t<Metrics>>, std::span<const std::string>, std::size_t) const {
+    template <typename metrics_type_t>
+    void operator()(std::ostream&, std::span<const profiling::record_t<metrics_type_t>>, std::span<const std::string>, std::size_t) const {
         throw std::logic_error("report destination failed");
     }
 };
@@ -195,6 +197,36 @@ void test_report_failure() {
     }
     rejects([&] { profiler.report(std::cout); });
     require(profiler.records().size() == 1 && *profiler.records()[0].m_metrics == 42);
+}
+
+struct explicit_report_t {
+    std::unique_ptr<std::size_t> m_calls;
+
+    explicit explicit_report_t(std::unique_ptr<std::size_t> calls): m_calls(std::move(calls)) {}
+
+    template <typename metrics_type_t>
+    void operator()(std::ostream& out, std::span<const profiling::record_t<metrics_type_t>> records, std::span<const std::string> regions, std::size_t omitted) const {
+        ++*m_calls;
+        profiling::text_report_t {}(out, records, regions, omitted);
+    }
+};
+
+void test_explicit_report() {
+    using report_profiler_t = profiling::profiler_t<std::size_t, explicit_report_t>;
+    static_assert(!std::is_constructible_v<report_profiler_t, std::span<report_profiler_t::record_type_t>>);
+    static_assert(std::is_constructible_v<report_profiler_t, std::span<report_profiler_t::record_type_t>, explicit_report_t>);
+    std::array<report_profiler_t::record_type_t, 1> storage;
+    auto calls = std::make_unique<std::size_t>(0);
+    const auto* observed_calls = calls.get();
+    report_profiler_t profiler(storage, explicit_report_t(std::move(calls)));
+    const auto region = profiler.register_region("explicit report");
+    profiler.start();
+    { auto scope = profiler.scope<std::size_t>(region); scope.metrics() = 29; }
+    require(*observed_calls == 0);
+    std::ostringstream out;
+    profiler.report(out);
+    profiler.report(out);
+    require(*observed_calls == 2 && out.str().find(" 29") != std::string::npos);
 }
 
 void test_timing_only() {
@@ -244,6 +276,7 @@ int main() {
         profiling::test_disabled_and_independent();
         profiling::test_timing_only();
         profiling::test_report_failure();
+        profiling::test_explicit_report();
         std::cout << "profiling public validation passed\n";
         return 0;
     } catch (const std::exception& error) {

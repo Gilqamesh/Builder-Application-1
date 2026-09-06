@@ -266,7 +266,7 @@ float depth_clear_value(float depth);
 
 bool depth_passes(comparison_t comparison, float incoming, float stored);
 
-template <typename Scope>
+template <typename scope_type_t>
 void shade_sample(
     const material_t& material,
     const raster_bounds_t& bounds,
@@ -278,10 +278,10 @@ void shade_sample(
     bool front_facing,
     std::span<const varying_entry_t> inputs,
     software_shader::fragment_io_t& io,
-    Scope& scope
+    scope_type_t& scope
 );
 
-template <typename Scope>
+template <typename scope_type_t>
 void rasterize_point(
     const material_t& material,
     const raster_bounds_t& bounds,
@@ -289,10 +289,10 @@ void rasterize_point(
     const pipeline_vertex_view_t& vertex,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    Scope& scope
+    scope_type_t& scope
 );
 
-template <typename Scope>
+template <typename scope_type_t>
 void rasterize_line(
     const material_t& material,
     const raster_bounds_t& bounds,
@@ -302,10 +302,10 @@ void rasterize_line(
     clipping_workspace_t& clipping,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    Scope& scope
+    scope_type_t& scope
 );
 
-template <typename Scope>
+template <typename scope_type_t>
 void rasterize_triangle(
     const material_t& material,
     const raster_bounds_t& bounds,
@@ -316,12 +316,12 @@ void rasterize_triangle(
     raster_workspace_t& workspace,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    Scope& scope
+    scope_type_t& scope
 );
 
 // The renderer and validation consume the same pre-shading coverage events.
-template <typename Emit>
-void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, Emit&& emit, std::int64_t first_x = 0, std::int64_t first_y = 0);
+template <typename emit_type_t>
+void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, emit_type_t&& emit, std::int64_t first_x = 0, std::int64_t first_y = 0);
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
 
@@ -422,7 +422,7 @@ T require_vertex_output(
     return *output;
 }
 
-template <typename Scope>
+template <typename scope_type_t>
 void shade_sample(
     const material_t& material,
     const raster_bounds_t& bounds,
@@ -434,7 +434,7 @@ void shade_sample(
     bool front_facing,
     std::span<const varying_entry_t> inputs,
     software_shader::fragment_io_t& io,
-    Scope& scope
+    scope_type_t& scope
 ) {
     if (x < bounds.m_first_x || y < bounds.m_first_y || bounds.m_end_x <= x || bounds.m_end_y <= y) {
         return;
@@ -451,12 +451,12 @@ void shade_sample(
         front_facing
     );
     set_fragment_inputs(io, inputs);
-    if constexpr (Scope::enabled) {
+    if constexpr (scope_type_t::enabled) {
         ++scope.metrics().m_invocations;
     }
     material.program()->run(material.bindings(), io);
     if (io.discarded()) {
-        if constexpr (Scope::enabled) {
+        if constexpr (scope_type_t::enabled) {
             ++scope.metrics().m_discards;
         }
         return;
@@ -466,27 +466,27 @@ void shade_sample(
         const auto comparison = material.depth_compare();
         const bool passes = comparison == comparison_t::always || (comparison != comparison_t::never && depth_passes(comparison, depth, framebuffer.depth()[index]));
         if (!passes) {
-            if constexpr (Scope::enabled) {
+            if constexpr (scope_type_t::enabled) {
                 ++scope.metrics().m_depth_rejections;
             }
             return;
         }
         if (material.depth_write()) {
             framebuffer.depth()[index] = depth;
-            if constexpr (Scope::enabled) {
+            if constexpr (scope_type_t::enabled) {
                 ++scope.metrics().m_depth_writes;
             }
         }
     }
     if (const auto color = io.color()) {
         framebuffer.pixels()[index] = to_rgba8(*color);
-        if constexpr (Scope::enabled) {
+        if constexpr (scope_type_t::enabled) {
             ++scope.metrics().m_color_writes;
         }
     }
 }
 
-template <typename Scope>
+template <typename scope_type_t>
 void rasterize_point(
     const material_t& material,
     const raster_bounds_t& bounds,
@@ -494,7 +494,7 @@ void rasterize_point(
     const pipeline_vertex_view_t& vertex,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    Scope& scope
+    scope_type_t& scope
 ) {
     if (!inside_clip_volume(vertex)) {
         return;
@@ -533,7 +533,7 @@ void rasterize_point(
     }
 }
 
-template <typename Scope>
+template <typename scope_type_t>
 void rasterize_line(
     const material_t& material,
     const raster_bounds_t& bounds,
@@ -543,7 +543,7 @@ void rasterize_line(
     clipping_workspace_t& clipping,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    Scope& scope
+    scope_type_t& scope
 ) {
     const auto clipped_index = clip_line(first, second, clipping);
     if (!clipped_index) {
@@ -595,7 +595,7 @@ void rasterize_line(
     }
 }
 
-template <typename Scope>
+template <typename scope_type_t>
 void rasterize_triangle(
     const material_t& material,
     const raster_bounds_t& bounds,
@@ -606,7 +606,7 @@ void rasterize_triangle(
     raster_workspace_t& workspace,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    Scope& scope
+    scope_type_t& scope
 ) {
     prepare_triangle(first, second, third, bounds.m_view_width, bounds.m_view_height, workspace);
     if (workspace.m_empty) {
@@ -637,8 +637,8 @@ void rasterize_triangle(
     }, bounds.m_first_x, bounds.m_first_y);
 }
 
-template <typename Emit>
-void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, Emit&& emit, std::int64_t clip_first_x, std::int64_t clip_first_y) {
+template <typename emit_type_t>
+void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, emit_type_t&& emit, std::int64_t clip_first_x, std::int64_t clip_first_y) {
     if (workspace.m_empty) {
         return;
     }

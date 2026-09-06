@@ -1,12 +1,16 @@
 # Initial profiling baseline — 2026-09-06
 
+Historical evidence from `1aee3733`, retained during migration to the
+[Builder benchmark](profiling.md). Commands below describe the original run;
+the standalone Python driver has since been removed. Raw observations are unchanged.
+
 This establishes the optimized renderer baseline and the cost of enabling the
 new profiling policy. Renderer algorithms are unchanged. It is not a comparison
 with an earlier algorithmic optimization delivery.
 
-[Raw observations and metadata](baseline.json) preserve every sample, per-run
-medians, nearest-rank p95, maxima, and module revisions. The [driver](run.py) and
-[usage](README.md) reproduce the build and measurement procedure.
+[Raw observations and metadata](profiling-baseline.json) preserve every sample, per-run
+medians, nearest-rank p95, maxima, and module revisions. The [original driver at 1aee3733](https://github.com/Gilqamesh/Builder-Modules/blob/1aee3733/ws2/m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/performance/run.py) and
+[original usage at 1aee3733](https://github.com/Gilqamesh/Builder-Modules/blob/1aee3733/ws2/m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/performance/README.md) reproduce the build and measurement procedure.
 
 ## Build and measurement scope
 

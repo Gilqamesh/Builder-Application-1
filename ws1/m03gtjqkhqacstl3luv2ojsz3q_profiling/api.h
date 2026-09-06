@@ -31,11 +31,11 @@ struct region_id_t {
  * @brief Stores one scope; its index in the capture is its record identity.
  *
  * Durations are inclusive, monotonic elapsed time in nanoseconds, not CPU usage.
- * Parents precede children. Metrics are committed when the scope closes, including
+ * Parents precede children. metrics_type_t are committed when the scope closes, including
  * partial metrics during unwinding. Timing-only scopes have no metrics value.
  * An incomplete child set makes self time unavailable, preserving inclusive time.
  */
-template <typename Metrics>
+template <typename metrics_type_t>
 struct record_t {
     std::optional<std::size_t> m_parent;
     std::size_t m_region = 0;
@@ -45,18 +45,18 @@ struct record_t {
     std::chrono::nanoseconds m_children_elapsed {};
     bool m_children_complete = true;
     bool m_unwinding = false;
-    std::optional<Metrics> m_metrics;
+    std::optional<metrics_type_t> m_metrics;
 
     std::optional<std::chrono::nanoseconds> self() const noexcept;
 };
 
 /** @brief Writes hierarchy and timing, delegating typed payloads to std::formatter. */
 struct text_report_t {
-    template <typename Metrics>
-    void operator()(std::ostream& out, std::span<const record_t<Metrics>> records, std::span<const std::string> regions, std::size_t omitted) const;
+    template <typename metrics_type_t>
+    void operator()(std::ostream& out, std::span<const record_t<metrics_type_t>> records, std::span<const std::string> regions, std::size_t omitted) const;
 };
 
-template <typename Metrics = std::monostate, typename Report = text_report_t, typename Clock = std::chrono::steady_clock>
+template <typename metrics_type_t = std::monostate, typename report_type_t = text_report_t, typename clock_type_t = std::chrono::steady_clock>
 class profiler_t;
 
 /**
@@ -66,11 +66,11 @@ class profiler_t;
  * The profiler and its storage outlive the guard. Payload construction, movement,
  * destruction, and producer counter updates must not allocate or throw.
  */
-template <typename Metrics, typename Report, typename Clock, typename T>
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t, typename T>
 class scope_t {
 public:
     static constexpr bool enabled = true;
-    scope_t(profiler_t<Metrics, Report, Clock>& profiler, region_id_t region) noexcept;
+    scope_t(profiler_t<metrics_type_t, report_type_t, clock_type_t>& profiler, region_id_t region) noexcept;
     ~scope_t();
     /** @brief Closes once; later close calls and destruction do nothing. */
     void close() noexcept;
@@ -84,7 +84,7 @@ public:
     const T& metrics() const noexcept;
 
 private:
-    profiler_t<Metrics, Report, Clock>& m_profiler;
+    profiler_t<metrics_type_t, report_type_t, clock_type_t>& m_profiler;
     T m_metrics {};
     std::optional<std::size_t> m_record;
     int m_exceptions;
@@ -103,25 +103,26 @@ private:
  * reset or reuse; region views remain valid after start until profiler destruction.
  * One thread owns all operations; scopes are synchronous and strictly nested.
  *
- * Recording performs no allocation, formatting, I/O, or locking. Metrics is a
+ * Recording performs no allocation, formatting, I/O, or locking. metrics_type_t is a
  * producer value or variant of values with nonthrowing move construction and
  * destruction; scoped payloads also require nonthrowing default construction.
- * Producers guarantee these operations do not allocate. Report policy invocation
+ * Producers guarantee these operations do not allocate. report_type_t policy invocation
  * occurs only in report(). Every payload alternative except timing-only
  * std::monostate requires std::formatter.
- * A steady, nonthrowing Clock supports deterministic measurement tests.
+ * A steady, nonthrowing clock_type_t supports deterministic measurement tests.
  *
  * Exhaustion omits the new scope and all its descendants, counting each omission.
  * Inclusive parent durations still include omitted work; self time is unavailable
  * for parents missing direct-child timings. The omission count saturates rather than wraps.
  */
-template <typename Metrics, typename Report, typename Clock>
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
 class profiler_t {
 public:
     static constexpr bool enabled = true;
-    using record_type_t = record_t<Metrics>;
+    using record_type_t = record_t<metrics_type_t>;
 
-    explicit profiler_t(std::span<record_type_t> storage, Report report = {});
+    explicit profiler_t(std::span<record_type_t> storage) requires std::default_initializable<report_type_t>;
+    explicit profiler_t(std::span<record_type_t> storage, report_type_t report);
     profiler_t(const profiler_t&) = delete;
     profiler_t& operator=(const profiler_t&) = delete;
     profiler_t(profiler_t&&) = delete;
@@ -141,7 +142,7 @@ public:
      * Violating recording preconditions is a programming error checked by assertions.
      */
     template <typename T = std::monostate>
-    scope_t<Metrics, Report, Clock, T> scope(region_id_t region) noexcept;
+    scope_t<metrics_type_t, report_type_t, clock_type_t, T> scope(region_id_t region) noexcept;
 
     /** @brief Returns finalized records; fails while scopes are active. */
     std::span<const record_type_t> records() const;
@@ -160,9 +161,9 @@ private:
     void require_quiescent() const;
 
     std::span<record_type_t> m_storage;
-    Report m_report;
+    report_type_t m_report;
     std::vector<std::string> m_regions;
-    typename Clock::time_point m_origin {};
+    typename clock_type_t::time_point m_origin {};
     std::optional<std::size_t> m_parent;
     std::size_t m_count = 0;
     std::size_t m_depth = 0;
@@ -176,8 +177,8 @@ struct disabled_scope_t {
 };
 
 /** @brief Disables collection without constructing payloads or requiring formatters. */
-template <typename Metrics, typename Clock>
-class profiler_t<Metrics, void, Clock> {
+template <typename metrics_type_t, typename clock_type_t>
+class profiler_t<metrics_type_t, void, clock_type_t> {
 public:
     static constexpr bool enabled = false;
 
@@ -198,17 +199,17 @@ namespace std {
 template <>
 struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::region_id_t>;
 
-template <typename Metrics>
-struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::record_t<Metrics>>;
+template <typename metrics_type_t>
+struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::record_t<metrics_type_t>>;
 
 template <>
 struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::text_report_t>;
 
-template <typename Metrics, typename Report, typename Clock, typename T>
-struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::scope_t<Metrics, Report, Clock, T>>;
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t, typename T>
+struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::scope_t<metrics_type_t, report_type_t, clock_type_t, T>>;
 
-template <typename Metrics, typename Report, typename Clock>
-struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t<Metrics, Report, Clock>>;
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t<metrics_type_t, report_type_t, clock_type_t>>;
 
 template <>
 struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::disabled_scope_t>;
@@ -217,16 +218,16 @@ struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::disabled_scope_t>;
 
 namespace m03gtjqkhqacstl3luv2ojsz3q_profiling {
 
-template <typename Metrics>
-std::optional<std::chrono::nanoseconds> record_t<Metrics>::self() const noexcept {
+template <typename metrics_type_t>
+std::optional<std::chrono::nanoseconds> record_t<metrics_type_t>::self() const noexcept {
     if (!m_children_complete) {
         return std::nullopt;
     }
     return m_elapsed - m_children_elapsed;
 }
 
-template <typename Metrics>
-void text_report_t::operator()(std::ostream& out, std::span<const record_t<Metrics>> records, std::span<const std::string> regions, std::size_t omitted) const {
+template <typename metrics_type_t>
+void text_report_t::operator()(std::ostream& out, std::span<const record_t<metrics_type_t>> records, std::span<const std::string> regions, std::size_t omitted) const {
     for (const auto& record : records) {
         out << std::string(record.m_depth * 2, ' ') << regions[record.m_region];
         out << std::format(" inclusive={} ns self=", record.m_elapsed.count());
@@ -244,7 +245,7 @@ void text_report_t::operator()(std::ostream& out, std::span<const record_t<Metri
                     out << std::format(" {}", metrics);
                 }
             };
-            if constexpr (requires { std::variant_size<Metrics>::value; }) {
+            if constexpr (requires { std::variant_size<metrics_type_t>::value; }) {
                 std::visit(write, *record.m_metrics);
             } else {
                 write(*record.m_metrics);
@@ -255,8 +256,8 @@ void text_report_t::operator()(std::ostream& out, std::span<const record_t<Metri
     out << std::format("capture: {} records, {} omitted, {}\n", records.size(), omitted, omitted == 0 ? "complete" : "incomplete");
 }
 
-template <typename Metrics, typename Report, typename Clock, typename T>
-scope_t<Metrics, Report, Clock, T>::scope_t(profiler_t<Metrics, Report, Clock>& profiler, region_id_t region) noexcept:
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t, typename T>
+scope_t<metrics_type_t, report_type_t, clock_type_t, T>::scope_t(profiler_t<metrics_type_t, report_type_t, clock_type_t>& profiler, region_id_t region) noexcept:
     m_profiler(profiler),
     m_record(profiler.begin(region)),
     m_exceptions(std::uncaught_exceptions())
@@ -264,47 +265,53 @@ scope_t<Metrics, Report, Clock, T>::scope_t(profiler_t<Metrics, Report, Clock>& 
     static_assert(std::is_nothrow_default_constructible_v<T> && std::is_nothrow_move_constructible_v<T> && std::is_nothrow_destructible_v<T>);
 }
 
-template <typename Metrics, typename Report, typename Clock, typename T>
-scope_t<Metrics, Report, Clock, T>::~scope_t() {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t, typename T>
+scope_t<metrics_type_t, report_type_t, clock_type_t, T>::~scope_t() {
     close();
 }
 
-template <typename Metrics, typename Report, typename Clock, typename T>
-void scope_t<Metrics, Report, Clock, T>::close() noexcept {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t, typename T>
+void scope_t<metrics_type_t, report_type_t, clock_type_t, T>::close() noexcept {
     if (!m_closed) {
         m_profiler.end(m_record, std::move(m_metrics), m_exceptions < std::uncaught_exceptions());
         m_closed = true;
     }
 }
 
-template <typename Metrics, typename Report, typename Clock, typename T>
-T& scope_t<Metrics, Report, Clock, T>::metrics() noexcept {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t, typename T>
+T& scope_t<metrics_type_t, report_type_t, clock_type_t, T>::metrics() noexcept {
     return m_metrics;
 }
 
-template <typename Metrics, typename Report, typename Clock, typename T>
-const T& scope_t<Metrics, Report, Clock, T>::metrics() const noexcept {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t, typename T>
+const T& scope_t<metrics_type_t, report_type_t, clock_type_t, T>::metrics() const noexcept {
     return m_metrics;
 }
 
-template <typename Metrics, typename Report, typename Clock>
-profiler_t<Metrics, Report, Clock>::profiler_t(std::span<record_type_t> storage, Report report):
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+profiler_t<metrics_type_t, report_type_t, clock_type_t>::profiler_t(std::span<record_type_t> storage) requires std::default_initializable<report_type_t>:
+    profiler_t(storage, report_type_t {})
+{
+}
+
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+profiler_t<metrics_type_t, report_type_t, clock_type_t>::profiler_t(std::span<record_type_t> storage, report_type_t report):
     m_storage(storage),
     m_report(std::move(report))
 {
-    static_assert(Clock::is_steady && noexcept(Clock::now()));
-    static_assert(std::is_nothrow_move_constructible_v<Metrics> && std::is_nothrow_destructible_v<Metrics>);
-    if constexpr (requires { std::variant_size<Metrics>::value; }) {
+    static_assert(clock_type_t::is_steady && noexcept(clock_type_t::now()));
+    static_assert(std::is_nothrow_move_constructible_v<metrics_type_t> && std::is_nothrow_destructible_v<metrics_type_t>);
+    if constexpr (requires { std::variant_size<metrics_type_t>::value; }) {
         []<std::size_t... I>(std::index_sequence<I...>) {
-            static_assert(((std::same_as<std::variant_alternative_t<I, Metrics>, std::monostate> || std::formattable<std::variant_alternative_t<I, Metrics>, char>) && ...), "enabled profiling requires payload formatters");
-        }(std::make_index_sequence<std::variant_size_v<Metrics>>{});
+            static_assert(((std::same_as<std::variant_alternative_t<I, metrics_type_t>, std::monostate> || std::formattable<std::variant_alternative_t<I, metrics_type_t>, char>) && ...), "enabled profiling requires payload formatters");
+        }(std::make_index_sequence<std::variant_size_v<metrics_type_t>>{});
     } else {
-        static_assert(std::same_as<Metrics, std::monostate> || std::formattable<Metrics, char>, "enabled profiling requires a payload formatter");
+        static_assert(std::same_as<metrics_type_t, std::monostate> || std::formattable<metrics_type_t, char>, "enabled profiling requires a payload formatter");
     }
 }
 
-template <typename Metrics, typename Report, typename Clock>
-region_id_t profiler_t<Metrics, Report, Clock>::register_region(std::string_view name) {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+region_id_t profiler_t<metrics_type_t, report_type_t, clock_type_t>::register_region(std::string_view name) {
     if (m_started) {
         throw std::logic_error("profiler_t::register_region requires setup before start");
     }
@@ -313,8 +320,8 @@ region_id_t profiler_t<Metrics, Report, Clock>::register_region(std::string_view
     return {this, index};
 }
 
-template <typename Metrics, typename Report, typename Clock>
-void profiler_t<Metrics, Report, Clock>::start() {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+void profiler_t<metrics_type_t, report_type_t, clock_type_t>::start() {
     if (m_started) {
         throw std::logic_error("profiler_t::start requires a profiler that has not started");
     }
@@ -322,49 +329,49 @@ void profiler_t<Metrics, Report, Clock>::start() {
     reset();
 }
 
-template <typename Metrics, typename Report, typename Clock>
-void profiler_t<Metrics, Report, Clock>::reset() {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+void profiler_t<metrics_type_t, report_type_t, clock_type_t>::reset() {
     require_quiescent();
     for (auto& record : m_storage.first(m_count)) {
         record.m_metrics.reset();
     }
     m_count = 0;
     m_omitted = 0;
-    m_origin = Clock::now();
+    m_origin = clock_type_t::now();
 }
 
-template <typename Metrics, typename Report, typename Clock>
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
 template <typename T>
-scope_t<Metrics, Report, Clock, T> profiler_t<Metrics, Report, Clock>::scope(region_id_t region) noexcept {
-    return scope_t<Metrics, Report, Clock, T>(*this, region);
+scope_t<metrics_type_t, report_type_t, clock_type_t, T> profiler_t<metrics_type_t, report_type_t, clock_type_t>::scope(region_id_t region) noexcept {
+    return scope_t<metrics_type_t, report_type_t, clock_type_t, T>(*this, region);
 }
 
-template <typename Metrics, typename Report, typename Clock>
-std::span<const typename profiler_t<Metrics, Report, Clock>::record_type_t> profiler_t<Metrics, Report, Clock>::records() const {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+std::span<const typename profiler_t<metrics_type_t, report_type_t, clock_type_t>::record_type_t> profiler_t<metrics_type_t, report_type_t, clock_type_t>::records() const {
     require_quiescent();
     return m_storage.first(m_count);
 }
 
-template <typename Metrics, typename Report, typename Clock>
-std::span<const std::string> profiler_t<Metrics, Report, Clock>::regions() const {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+std::span<const std::string> profiler_t<metrics_type_t, report_type_t, clock_type_t>::regions() const {
     require_quiescent();
     return m_regions;
 }
 
-template <typename Metrics, typename Report, typename Clock>
-std::size_t profiler_t<Metrics, Report, Clock>::omitted() const {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+std::size_t profiler_t<metrics_type_t, report_type_t, clock_type_t>::omitted() const {
     require_quiescent();
     return m_omitted;
 }
 
-template <typename Metrics, typename Report, typename Clock>
-void profiler_t<Metrics, Report, Clock>::report(std::ostream& out) const {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+void profiler_t<metrics_type_t, report_type_t, clock_type_t>::report(std::ostream& out) const {
     require_quiescent();
     m_report(out, records(), regions(), m_omitted);
 }
 
-template <typename Metrics, typename Report, typename Clock>
-std::optional<std::size_t> profiler_t<Metrics, Report, Clock>::begin(region_id_t region) noexcept {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+std::optional<std::size_t> profiler_t<metrics_type_t, report_type_t, clock_type_t>::begin(region_id_t region) noexcept {
     assert(m_started && region.m_owner == this && region.m_index < m_regions.size());
     ++m_depth;
     if (m_suppressed != 0 || m_count == m_storage.size()) {
@@ -382,7 +389,7 @@ std::optional<std::size_t> profiler_t<Metrics, Report, Clock>::begin(region_id_t
     record.m_parent = m_parent;
     record.m_region = region.m_index;
     record.m_depth = m_depth - 1;
-    record.m_start = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - m_origin);
+    record.m_start = std::chrono::duration_cast<std::chrono::nanoseconds>(clock_type_t::now() - m_origin);
     record.m_elapsed = {};
     record.m_children_elapsed = {};
     record.m_children_complete = true;
@@ -392,9 +399,9 @@ std::optional<std::size_t> profiler_t<Metrics, Report, Clock>::begin(region_id_t
     return index;
 }
 
-template <typename Metrics, typename Report, typename Clock>
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
 template <typename T>
-void profiler_t<Metrics, Report, Clock>::end(std::optional<std::size_t> record_index, T&& metrics, bool unwinding) noexcept {
+void profiler_t<metrics_type_t, report_type_t, clock_type_t>::end(std::optional<std::size_t> record_index, T&& metrics, bool unwinding) noexcept {
     assert(m_depth != 0);
     --m_depth;
     if (!record_index) {
@@ -404,10 +411,10 @@ void profiler_t<Metrics, Report, Clock>::end(std::optional<std::size_t> record_i
     }
     assert(m_suppressed == 0 && m_parent == record_index);
     auto& record = m_storage[*record_index];
-    record.m_elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - m_origin) - record.m_start;
+    record.m_elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(clock_type_t::now() - m_origin) - record.m_start;
     record.m_unwinding = unwinding;
     if constexpr (!std::same_as<std::remove_cvref_t<T>, std::monostate>) {
-        if constexpr (std::same_as<std::remove_cvref_t<T>, Metrics>) {
+        if constexpr (std::same_as<std::remove_cvref_t<T>, metrics_type_t>) {
             record.m_metrics.emplace(std::forward<T>(metrics));
         } else {
             record.m_metrics.emplace(std::in_place_type<std::remove_cvref_t<T>>, std::forward<T>(metrics));
@@ -419,34 +426,34 @@ void profiler_t<Metrics, Report, Clock>::end(std::optional<std::size_t> record_i
     }
 }
 
-template <typename Metrics, typename Report, typename Clock>
-void profiler_t<Metrics, Report, Clock>::require_quiescent() const {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+void profiler_t<metrics_type_t, report_type_t, clock_type_t>::require_quiescent() const {
     if (!m_started || m_depth != 0) {
         throw std::logic_error("profiler_t operation requires start and no active scopes");
     }
 }
 
-template <typename Metrics, typename Clock>
-region_id_t profiler_t<Metrics, void, Clock>::register_region(std::string_view) const noexcept {
+template <typename metrics_type_t, typename clock_type_t>
+region_id_t profiler_t<metrics_type_t, void, clock_type_t>::register_region(std::string_view) const noexcept {
     return {};
 }
 
-template <typename Metrics, typename Clock>
-void profiler_t<Metrics, void, Clock>::start() const noexcept {
+template <typename metrics_type_t, typename clock_type_t>
+void profiler_t<metrics_type_t, void, clock_type_t>::start() const noexcept {
 }
 
-template <typename Metrics, typename Clock>
-void profiler_t<Metrics, void, Clock>::reset() const noexcept {
+template <typename metrics_type_t, typename clock_type_t>
+void profiler_t<metrics_type_t, void, clock_type_t>::reset() const noexcept {
 }
 
-template <typename Metrics, typename Clock>
+template <typename metrics_type_t, typename clock_type_t>
 template <typename T>
-disabled_scope_t profiler_t<Metrics, void, Clock>::scope(region_id_t) const noexcept {
+disabled_scope_t profiler_t<metrics_type_t, void, clock_type_t>::scope(region_id_t) const noexcept {
     return {};
 }
 
-template <typename Metrics, typename Clock>
-void profiler_t<Metrics, void, Clock>::report(std::ostream&) const noexcept {
+template <typename metrics_type_t, typename clock_type_t>
+void profiler_t<metrics_type_t, void, clock_type_t>::report(std::ostream&) const noexcept {
 }
 
 } // namespace m03gtjqkhqacstl3luv2ojsz3q_profiling
@@ -470,8 +477,8 @@ struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::region_id_t> {
     }
 };
 
-template <typename Metrics>
-struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::record_t<Metrics>> {
+template <typename metrics_type_t>
+struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::record_t<metrics_type_t>> {
     constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
         if (it != ctx.end() && *it != '}') {
@@ -480,7 +487,7 @@ struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::record_t<Metrics>> {
         return it;
     }
 
-    auto format(const m03gtjqkhqacstl3luv2ojsz3q_profiling::record_t<Metrics>& value, auto& ctx) const {
+    auto format(const m03gtjqkhqacstl3luv2ojsz3q_profiling::record_t<metrics_type_t>& value, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "{{ region: {}, elapsed_ns: {}, unwinding: {} }}", value.m_region, value.m_elapsed.count(), value.m_unwinding);
         return out;
@@ -504,8 +511,8 @@ struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::text_report_t> {
     }
 };
 
-template <typename Metrics, typename Report, typename Clock, typename T>
-struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::scope_t<Metrics, Report, Clock, T>> {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t, typename T>
+struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::scope_t<metrics_type_t, report_type_t, clock_type_t, T>> {
     constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
         if (it != ctx.end() && *it != '}') {
@@ -514,15 +521,15 @@ struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::scope_t<Metrics, Report, 
         return it;
     }
 
-    auto format(const m03gtjqkhqacstl3luv2ojsz3q_profiling::scope_t<Metrics, Report, Clock, T>&, auto& ctx) const {
+    auto format(const m03gtjqkhqacstl3luv2ojsz3q_profiling::scope_t<metrics_type_t, report_type_t, clock_type_t, T>&, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "scope");
         return out;
     }
 };
 
-template <typename Metrics, typename Report, typename Clock>
-struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t<Metrics, Report, Clock>> {
+template <typename metrics_type_t, typename report_type_t, typename clock_type_t>
+struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t<metrics_type_t, report_type_t, clock_type_t>> {
     constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
         if (it != ctx.end() && *it != '}') {
@@ -531,9 +538,9 @@ struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t<Metrics, Repor
         return it;
     }
 
-    auto format(const m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t<Metrics, Report, Clock>&, auto& ctx) const {
+    auto format(const m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t<metrics_type_t, report_type_t, clock_type_t>&, auto& ctx) const {
         auto out = ctx.out();
-        out = std::format_to(out, "{{ enabled: {} }}", m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t<Metrics, Report, Clock>::enabled);
+        out = std::format_to(out, "{{ enabled: {} }}", m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t<metrics_type_t, report_type_t, clock_type_t>::enabled);
         return out;
     }
 };
