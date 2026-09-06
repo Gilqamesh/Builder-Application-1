@@ -1,0 +1,113 @@
+#ifndef M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_FRAMEBUFFER_H
+# define M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_FRAMEBUFFER_H
+
+# include <cstddef>
+# include <cstdint>
+# include <format>
+# include <span>
+
+namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
+
+/**
+ * @brief Represents one non-premultiplied eight-bit RGBA framebuffer pixel.
+ */
+struct rgba8_t {
+    std::uint8_t red;
+    std::uint8_t green;
+    std::uint8_t blue;
+    std::uint8_t alpha;
+};
+
+static_assert(sizeof(rgba8_t) == 4);
+
+/**
+ * @brief Borrows row-major, top-left-origin, non-premultiplied RGBA8 storage.
+ *
+ * Construction rejects negative dimensions, a pixel count that overflows
+ * std::size_t, or storage whose size differs from width * height. Zero dimensions
+ * are valid. The caller keeps storage valid during renderer operations and
+ * replaces the framebuffer after reallocating it. Pixels remain mutable.
+ */
+class framebuffer_t {
+public:
+    framebuffer_t(std::span<rgba8_t> pixels, int width, int height);
+
+    /**
+     * @brief Returns width * height, rejecting negative dimensions and std::size_t overflow.
+     */
+    static std::size_t pixel_count(int width, int height);
+
+    int width() const noexcept;
+    int height() const noexcept;
+    std::span<rgba8_t> pixels() const noexcept;
+
+private:
+    std::span<rgba8_t> m_pixels;
+    int m_width;
+    int m_height;
+};
+
+} // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
+
+namespace std {
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::rgba8_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::framebuffer_t>;
+
+} // namespace std
+
+namespace std {
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::rgba8_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid rgba8_t format specifier");
+        }
+        return it;
+    }
+
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::rgba8_t& color, auto& ctx) const {
+        auto out = ctx.out();
+
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "red: {}", color.red);
+        out = std::format_to(out, ", green: {}", color.green);
+        out = std::format_to(out, ", blue: {}", color.blue);
+        out = std::format_to(out, ", alpha: {}", color.alpha);
+        out = std::format_to(out, " }}");
+
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::framebuffer_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid framebuffer_t format specifier");
+        }
+        return it;
+    }
+
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::framebuffer_t& framebuffer, auto& ctx) const {
+        auto out = ctx.out();
+
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "width: {}", framebuffer.width());
+        out = std::format_to(out, ", height: {}", framebuffer.height());
+        out = std::format_to(out, ", pixels: {}", framebuffer.pixels().size());
+        out = std::format_to(out, " }}");
+
+        return out;
+    }
+};
+
+} // namespace std
+
+#endif // M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_FRAMEBUFFER_H

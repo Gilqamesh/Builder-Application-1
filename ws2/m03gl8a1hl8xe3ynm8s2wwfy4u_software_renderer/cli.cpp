@@ -116,11 +116,7 @@ int main() {
         window->swap_interval(1);
 
         std::vector<rgba8_t> pixels;
-        software_renderer_api::software_renderer_t renderer({
-            .pixels = pixels,
-            .width = 0,
-            .height = 0
-        });
+        software_renderer_api::software_renderer_t renderer(software_renderer_api::framebuffer_t(pixels, 0, 0));
         opengl_renderer_api::opengl_renderer_t opengl_renderer(window);
         auto material = std::make_shared<software_renderer_api::material_t>(make_program());
         material->texture(0, make_texture());
@@ -130,9 +126,9 @@ int main() {
             texture::address_mode_t::clamp_to_edge
         ));
         software_renderer_api::render_item_t render_item;
-        render_item.geometry(make_geometry());
-        render_item.material(std::move(material));
-        render_item.scale({0.72F, 0.72F});
+        render_item.geometry() = make_geometry();
+        render_item.material() = std::move(material);
+        render_item.scale() = {0.72F, 0.72F};
 
         const auto started_at = steady_clock_t::now();
         auto previous_frame_started_at = started_at;
@@ -145,36 +141,32 @@ int main() {
 
             const auto size = window->framebuffer_size();
             auto framebuffer = renderer.framebuffer();
-            if (framebuffer.width != size[0] || framebuffer.height != size[1]) {
-                pixels.resize(software_renderer_api::framebuffer_pixel_count(size[0], size[1]));
-                renderer.framebuffer({
-                    .pixels = pixels,
-                    .width = size[0],
-                    .height = size[1]
-                });
+            if (framebuffer.width() != size[0] || framebuffer.height() != size[1]) {
+                pixels.resize(software_renderer_api::framebuffer_t::pixel_count(size[0], size[1]));
+                renderer.framebuffer() = software_renderer_api::framebuffer_t(pixels, size[0], size[1]);
                 framebuffer = renderer.framebuffer();
             }
 
-            if (framebuffer.width == 0 || framebuffer.height == 0) {
+            if (framebuffer.width() == 0 || framebuffer.height() == 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             } else {
                 renderer.clear({0, 0, 0, 255});
-                render_item.rotation(seconds * 0.35F);
+                render_item.rotation() = seconds * 0.35F;
                 const software_renderer_api::camera_t<float, int, 2> camera(
                     {{-1.0F, 1.0F}, {-1.0F, 1.0F}},
-                    {{0, framebuffer.width}, {0, framebuffer.height}}
+                    {{0, framebuffer.width()}, {0, framebuffer.height()}}
                 );
                 renderer.draw(camera, render_item);
                 opengl_renderer.present_rgba8(
                     std::as_bytes(std::span<const rgba8_t>(pixels)),
-                    framebuffer.width,
-                    framebuffer.height
+                    framebuffer.width(),
+                    framebuffer.height()
                 );
             }
 
             const auto frame_time = std::chrono::duration<double, std::milli>(frame_started_at - previous_frame_started_at);
             previous_frame_started_at = frame_started_at;
-            std::cout << std::format("frame: {:.2f} ms, framebuffer: {}x{}\n", frame_time.count(), framebuffer.width, framebuffer.height);
+            std::cout << std::format("frame: {:.2f} ms, framebuffer: {}x{}\n", frame_time.count(), framebuffer.width(), framebuffer.height());
         }
 
         return 0;

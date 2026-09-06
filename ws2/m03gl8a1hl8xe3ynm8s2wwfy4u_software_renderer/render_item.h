@@ -21,19 +21,19 @@ class render_item_t {
 public:
     render_item_t();
 
-    void geometry(std::shared_ptr<geometry_t> geometry);
-    std::shared_ptr<geometry_t> geometry() const;
+    std::shared_ptr<geometry_t>& geometry();
+    const std::shared_ptr<geometry_t>& geometry() const;
 
-    void material(std::shared_ptr<material_t> material);
-    std::shared_ptr<material_t> material() const;
+    std::shared_ptr<material_t>& material();
+    const std::shared_ptr<material_t>& material() const;
 
-    void translation(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& translation);
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& translation();
     const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& translation() const;
 
-    void rotation(float rotation);
-    float rotation() const;
+    float& rotation();
+    const float& rotation() const;
 
-    void scale(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& scale);
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& scale();
     const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& scale() const;
 
 private:

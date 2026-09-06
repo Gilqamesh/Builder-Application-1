@@ -2,6 +2,7 @@
 
 #include <m03gagbht2l61mj6qitacwbmea_byte_stream/byte_stream.h>
 #include <m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays/api.h>
+#include <m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/framebuffer.h>
 #include <m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/software_renderer.h>
 #include <m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/helpers.h>
 #include <m03gn97n4iusbtl7uthb01wu9m_test_framework/test_framework.h>
@@ -212,10 +213,10 @@ api::render_item_t make_render_item(
     std::shared_ptr<api::material_t> material
 ) {
     api::render_item_t render_item;
-    render_item.geometry(std::move(geometry));
-    render_item.material(std::move(material));
-    render_item.translation({0.0F, 0.0F});
-    render_item.scale({1.0F, 1.0F});
+    render_item.geometry() = std::move(geometry);
+    render_item.material() = std::move(material);
+    render_item.translation() = {0.0F, 0.0F};
+    render_item.scale() = {1.0F, 1.0F};
     return render_item;
 }
 
@@ -235,14 +236,10 @@ std::vector<api::rgba8_t> draw_scene(
     std::shared_ptr<texture::texture_t> image = make_unorm_texture(red)
 ) {
     std::vector<api::rgba8_t> pixels(
-        api::framebuffer_pixel_count(width, height),
+        api::framebuffer_t::pixel_count(width, height),
         clear_color
     );
-    api::software_renderer_t renderer({
-        .pixels = pixels,
-        .width = width,
-        .height = height
-    });
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, width, height));
     const auto camera = make_camera(width, height);
     const auto render_item = make_render_item(
         make_geometry(std::move(positions), std::move(indices), topology),
@@ -313,52 +310,82 @@ void test_resource_model() {
 }
 
 void test_framebuffer() {
-    test::expect(std::equal_to<>(), api::framebuffer_pixel_count(3, 2), std::size_t(6));
-    test::expect(std::equal_to<>(), api::framebuffer_pixel_count(0, 2), std::size_t(0));
-    test::expect_throws<std::invalid_argument>([] { (void)api::framebuffer_pixel_count(-1, 2); });
+    static_assert(!std::is_copy_constructible_v<api::software_renderer_t>);
+    static_assert(!std::is_copy_assignable_v<api::software_renderer_t>);
+    static_assert(!std::is_move_constructible_v<api::software_renderer_t>);
+    static_assert(!std::is_move_assignable_v<api::software_renderer_t>);
+    static_assert(std::is_same_v<decltype(std::declval<api::framebuffer_t&>().width()), int>);
+    static_assert(std::is_same_v<decltype(std::declval<api::framebuffer_t&>().height()), int>);
+    static_assert(std::is_same_v<decltype(std::declval<const api::framebuffer_t&>().pixels()), std::span<api::rgba8_t>>);
+    static_assert(std::is_same_v<decltype(std::declval<api::software_renderer_t&>().framebuffer()), api::framebuffer_t&>);
+    static_assert(std::is_same_v<decltype(std::declval<const api::software_renderer_t&>().framebuffer()), const api::framebuffer_t&>);
+
+    test::expect(std::equal_to<>(), api::framebuffer_t::pixel_count(3, 2), std::size_t(6));
+    test::expect(std::equal_to<>(), api::framebuffer_t::pixel_count(0, 2), std::size_t(0));
+    test::expect(std::equal_to<>(), api::framebuffer_t::pixel_count(3, 0), std::size_t(0));
+    test::expect_throws<std::invalid_argument>([] { (void)api::framebuffer_t::pixel_count(-1, 2); });
+    test::expect_throws<std::invalid_argument>([] { (void)api::framebuffer_t::pixel_count(0, -1); });
+
+    constexpr int largest_dimension = std::numeric_limits<int>::max();
+    constexpr auto largest_size = static_cast<std::size_t>(largest_dimension);
+    if constexpr (std::numeric_limits<std::size_t>::max() / largest_size < largest_size) {
+        test::expect_throws<std::length_error>([] {
+            (void)api::framebuffer_t::pixel_count(largest_dimension, largest_dimension);
+        });
+        test::expect_throws<std::length_error>([] {
+            [[maybe_unused]] const api::framebuffer_t invalid({}, largest_dimension, largest_dimension);
+        });
+    } else {
+        test::expect(std::equal_to<>(), api::framebuffer_t::pixel_count(largest_dimension, largest_dimension), largest_size * largest_size);
+    }
 
     std::vector<api::rgba8_t> pixels(6);
     test::expect_throws<std::invalid_argument>([&] {
-        [[maybe_unused]] const api::software_renderer_t invalid({
-            .pixels = pixels,
-            .width = -1,
-            .height = 6
-        });
+        [[maybe_unused]] const api::framebuffer_t invalid(pixels, -1, 6);
     });
     test::expect_throws<std::invalid_argument>([&] {
-        [[maybe_unused]] const api::software_renderer_t invalid({
-            .pixels = pixels,
-            .width = 2,
-            .height = 2
-        });
+        [[maybe_unused]] const api::framebuffer_t invalid({}, 0, -1);
+    });
+    test::expect_throws<std::invalid_argument>([&] {
+        [[maybe_unused]] const api::framebuffer_t invalid(pixels, 2, 2);
+    });
+    test::expect_throws<std::invalid_argument>([&] {
+        [[maybe_unused]] const api::framebuffer_t invalid(pixels, 4, 2);
+    });
+    test::expect_throws<std::invalid_argument>([&] {
+        [[maybe_unused]] const api::framebuffer_t invalid(pixels, 0, 2);
     });
 
-    api::software_renderer_t renderer({
-        .pixels = pixels,
-        .width = 3,
-        .height = 2
-    });
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 3, 2));
 
     renderer.clear(clear_color);
     test::expect(std::identity(), std::ranges::all_of(pixels, [](const auto& pixel) {
         return same_color(pixel, clear_color);
     }));
 
-    const auto framebuffer = renderer.framebuffer();
-    test::expect(std::identity(), framebuffer.pixels.data() == pixels.data());
-    test::expect(std::equal_to<>(), framebuffer.width, 3);
-    test::expect(std::equal_to<>(), framebuffer.height, 2);
+    const auto& framebuffer = std::as_const(renderer).framebuffer();
+    test::expect(std::identity(), framebuffer.pixels().data() == pixels.data());
+    test::expect(std::equal_to<>(), framebuffer.width(), 3);
+    test::expect(std::equal_to<>(), framebuffer.height(), 2);
+    framebuffer.pixels()[0] = red;
+    expect_color(pixels[0], red);
+    auto borrowed_pixels = framebuffer.pixels();
+    borrowed_pixels = borrowed_pixels.first(1);
+    test::expect(std::equal_to<>(), framebuffer.pixels().size(), std::size_t(6));
 
     test::expect_throws<std::invalid_argument>([&] {
-        renderer.framebuffer({.pixels = pixels, .width = -1, .height = 6});
+        renderer.framebuffer() = api::framebuffer_t(pixels, -1, 6);
     });
     test::expect_throws<std::invalid_argument>([&] {
-        renderer.framebuffer({.pixels = pixels, .width = 2, .height = 2});
+        renderer.framebuffer() = api::framebuffer_t(pixels, 2, 2);
     });
-    test::expect(std::identity(), renderer.framebuffer().pixels.data() == pixels.data());
+    test::expect(std::identity(), renderer.framebuffer().pixels().data() == pixels.data());
 
     std::vector<api::rgba8_t> replacement(4);
-    renderer.framebuffer({.pixels = replacement, .width = 2, .height = 2});
+    renderer.framebuffer() = api::framebuffer_t(replacement, 2, 2);
+    test::expect(std::identity(), framebuffer.pixels().data() == replacement.data());
+    test::expect(std::equal_to<>(), framebuffer.width(), 2);
+    test::expect(std::equal_to<>(), framebuffer.height(), 2);
     renderer.clear(texture_color);
     test::expect(std::identity(), std::ranges::all_of(replacement, [](const auto& pixel) {
         return same_color(pixel, texture_color);
@@ -367,11 +394,7 @@ void test_framebuffer() {
 
 void test_empty_framebuffer() {
     std::vector<api::rgba8_t> pixels;
-    api::software_renderer_t renderer({
-        .pixels = pixels,
-        .width = 0,
-        .height = 4
-    });
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 0, 4));
     test::expect_no_throw([&] { renderer.clear(clear_color); });
 
     const auto camera = make_camera(8, 8);
@@ -379,6 +402,12 @@ void test_empty_framebuffer() {
         make_geometry({{0.0F, 0.0F}}, {0}, api::vertex_primitive_topology_t::point),
         make_material(make_unorm_texture(red))
     );
+    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, render_item); });
+    renderer.framebuffer() = api::framebuffer_t(pixels, 4, 0);
+    test::expect_no_throw([&] { renderer.clear(clear_color); });
+    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, render_item); });
+    renderer.framebuffer() = api::framebuffer_t(pixels, 0, 0);
+    test::expect_no_throw([&] { renderer.clear(clear_color); });
     test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, render_item); });
 }
 
@@ -480,20 +509,16 @@ void test_texture_coordinate_interpolation() {
     expect_color(framebuffer[pixel_index(6, 6, 8)], white);
 
     std::vector<api::rgba8_t> transformed_pixels(32 * 32, clear_color);
-    api::software_renderer_t renderer({
-        .pixels = transformed_pixels,
-        .width = 32,
-        .height = 32
-    });
+    api::software_renderer_t renderer(api::framebuffer_t(transformed_pixels, 32, 32));
     api::render_item_t transformed;
-    transformed.geometry(make_geometry(
+    transformed.geometry() = make_geometry(
         {{-1.0F, -1.0F}, {-1.0F, 1.0F}, {1.0F, -1.0F}, {1.0F, 1.0F}},
         {0, 1, 2, 3},
         api::vertex_primitive_topology_t::triangle_strip
-    ));
-    transformed.material(make_material(make_unorm_texture(2, 2, texels)));
-    transformed.translation({0.25F, 0.25F});
-    transformed.scale({0.5F, 0.5F});
+    );
+    transformed.material() = make_material(make_unorm_texture(2, 2, texels));
+    transformed.translation() = {0.25F, 0.25F};
+    transformed.scale() = {0.5F, 0.5F};
     renderer.draw(make_camera(32, 32), transformed);
     expect_color(transformed_pixels[pixel_index(14, 14, 32)], red);
     expect_color(transformed_pixels[pixel_index(26, 14, 32)], green);
@@ -503,7 +528,7 @@ void test_texture_coordinate_interpolation() {
 
 void test_shared_material_transform_semantics() {
     std::vector<api::rgba8_t> pixels(64 * 64, clear_color);
-    api::software_renderer_t renderer({.pixels = pixels, .width = 64, .height = 64});
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 64, 64));
     const auto camera = make_camera(64, 64);
     const auto geometry = make_geometry(
         {{0.0F, 0.0F}},
@@ -514,9 +539,9 @@ void test_shared_material_transform_semantics() {
         make_constant_program(vector4f_t({1.0F, 0.0F, 0.0F, 1.0F}))
     );
     auto left = make_render_item(geometry, material);
-    left.translation({-0.5F, 0.0F});
+    left.translation() = {-0.5F, 0.0F};
     auto right = make_render_item(geometry, material);
-    right.translation({0.5F, 0.0F});
+    right.translation() = {0.5F, 0.0F};
     renderer.draw(camera, left);
     renderer.draw(camera, right);
     expect_color(pixels[pixel_index(16, 32, 64)], red);
@@ -527,9 +552,9 @@ void test_shared_material_transform_semantics() {
         make_geometry({{0.25F, 0.0F}}, {0}, api::vertex_primitive_topology_t::point),
         material
     );
-    trs.scale({2.0F, 1.0F});
-    trs.rotation(std::numbers::pi_v<float> * 0.5F);
-    trs.translation({0.25F, -0.25F});
+    trs.scale() = {2.0F, 1.0F};
+    trs.rotation() = std::numbers::pi_v<float> * 0.5F;
+    trs.translation() = {0.25F, -0.25F};
     renderer.draw(camera, trs);
     expect_color(pixels[pixel_index(40, 40, 64)], red);
     expect_color(pixels[pixel_index(48, 48, 64)], clear_color);
@@ -562,7 +587,7 @@ void test_matrix_zw_and_sparse_consumed_outputs() {
         material
     );
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
-    api::software_renderer_t renderer({.pixels = pixels, .width = 16, .height = 16});
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
     renderer.draw(make_camera(16, 16), item);
     expect_color(pixels[pixel_index(8, 8, 16)], {64, 255, 64, 255});
 
@@ -630,7 +655,7 @@ void test_selected_range_indices_and_pre_raster_validation() {
     geometry->finalize();
 
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
-    api::software_renderer_t renderer({.pixels = pixels, .width = 16, .height = 16});
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
     const auto item = make_render_item(
         std::move(geometry),
         std::make_shared<api::material_t>(program)
@@ -689,7 +714,7 @@ void test_fragment_bindings_are_validated_before_clipped_geometry() {
         material
     );
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
-    api::software_renderer_t renderer({.pixels = pixels, .width = 16, .height = 16});
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
     test::expect_throws<std::invalid_argument>([&] {
         renderer.draw(make_camera(16, 16), item);
     });
@@ -730,7 +755,7 @@ void test_explicit_color_and_rgba8_conversion() {
 
 void test_vertex_layout_rejection() {
     std::vector<api::rgba8_t> pixels(8 * 8, clear_color);
-    api::software_renderer_t renderer({.pixels = pixels, .width = 8, .height = 8});
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 8, 8));
     const auto camera = make_camera(8, 8);
     const auto material = make_material(make_unorm_texture(red));
 
@@ -769,7 +794,7 @@ void test_material_resource_mapping() {
     static_assert(!std::is_copy_assignable_v<api::material_t>);
 
     std::vector<api::rgba8_t> pixels(8 * 8, clear_color);
-    api::software_renderer_t renderer({.pixels = pixels, .width = 8, .height = 8});
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 8, 8));
     const auto camera = make_camera(8, 8);
     const auto geometry = make_geometry(
         {{0.0F, 0.0F}},
@@ -824,7 +849,7 @@ void test_material_resource_mapping() {
 
 void test_nonfinite_clip_position_rejection() {
     std::vector<api::rgba8_t> pixels(8 * 8, clear_color);
-    api::software_renderer_t renderer({.pixels = pixels, .width = 8, .height = 8});
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 8, 8));
     const auto camera = make_camera(8, 8);
     const auto material = make_material(make_unorm_texture(red));
 
@@ -862,7 +887,7 @@ program_ptr_t make_clip_program(bool facing = false) {
 
 std::vector<api::rgba8_t> draw_clip_scene(const std::vector<clip_position_fixture_t>& positions, api::index_buffer_t::indices_t indices, api::vertex_primitive_topology_t topology, program_ptr_t program) {
     std::vector<api::rgba8_t> pixels(32 * 32, clear_color);
-    api::software_renderer_t renderer({.pixels = pixels, .width = 32, .height = 32});
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 32, 32));
     const api::vertex_attribute_t attribute(api::vertex_attribute_type_t::R32, 4);
     const auto geometry = make_typed_geometry(positions, attribute, std::move(indices), topology);
     const auto material = std::make_shared<api::material_t>(program);
@@ -961,7 +986,7 @@ void test_grid_fragment_state() {
     const auto zero_w = draw_clip_scene({{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}}, {0, 1, 2}, api::vertex_primitive_topology_t::triangle, make_clip_program());
     test::expect(std::equal_to<>(), colored_pixel_count(zero_w), std::size_t(0));
     std::vector<api::rgba8_t> wide_pixels(std::size_t(raster::maximum_extent) + 1);
-    api::software_renderer_t wide({.pixels = wide_pixels, .width = raster::maximum_extent + 1, .height = 1});
+    api::software_renderer_t wide(api::framebuffer_t(wide_pixels, raster::maximum_extent + 1, 1));
     const auto item = make_render_item(make_geometry({{0, 0}}, {0}, api::vertex_primitive_topology_t::point), make_material(make_unorm_texture(red)));
     test::expect_throws<std::out_of_range>([&] { wide.draw(make_camera(32, 32), item); });
 }

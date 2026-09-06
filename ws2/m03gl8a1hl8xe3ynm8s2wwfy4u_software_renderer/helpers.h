@@ -1,7 +1,10 @@
 #ifndef M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_HELPERS_H
 # define M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_HELPERS_H
 
-# include "software_renderer.h"
+# include "camera.h"
+# include "framebuffer.h"
+# include "render_item.h"
+# include "vertex_attribute.h"
 
 # include <m03gjfvd6i5jzbmngb2ldoooza_type_erased_array/api.h>
 # include <m03gsy25j4v7nccgmsdov9ioft_shader/api.h>
@@ -21,6 +24,7 @@
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
+namespace software_shader = m03gt1djvvy5atia5evkbg6rqy_software_shader;
 namespace shader = m03gsy25j4v7nccgmsdov9ioft_shader;
 namespace type_erased_array = m03gjfvd6i5jzbmngb2ldoooza_type_erased_array;
 
@@ -101,6 +105,17 @@ struct screen_vertex_t {
     std::span<const varying_entry_t> m_outputs;
 };
 
+// Renderer-owned storage retains its peak capacities across draws.
+struct scratch_t {
+    std::vector<pipeline_vertex_t> m_vertex_results;
+    varying_values_t m_vertex_values;
+    clipping_workspace_t m_clipping;
+    raster_workspace_t m_raster;
+    varying_values_t m_fragment_inputs;
+    software_shader::vertex_io_t m_vertex_io {0, 0};
+    software_shader::fragment_io_t m_fragment_io {vector4f_t(0.0F), true};
+};
+
 void clear(clipping_buffer_t& buffer);
 
 void append_vertex(clipping_buffer_t& destination, const pipeline_vertex_view_t& source);
@@ -159,8 +174,6 @@ sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::s
 
 // Returns window depth and reciprocal W, and writes perspective-correct varyings.
 std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, varying_values_t& outputs);
-
-framebuffer_t validated_framebuffer(framebuffer_t framebuffer);
 
 bool finite(const vector4f_t& vector);
 
@@ -324,6 +337,9 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_workspace_
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::screen_vertex_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scratch_t>;
 
 } // namespace std
 
@@ -625,6 +641,25 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::screen_vertex_t> 
         out = std::format_to(out, ", outputs: {}", vertex.m_outputs.size());
         out = std::format_to(out, " }}");
 
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scratch_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        return ctx.begin();
+    }
+
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scratch_t& scratch, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "vertices: {}", scratch.m_vertex_results.size());
+        out = std::format_to(out, ", values: {}", scratch.m_vertex_values.size());
+        out = std::format_to(out, ", clipping: {}", scratch.m_clipping);
+        out = std::format_to(out, ", raster: {}", scratch.m_raster);
+        out = std::format_to(out, ", fragment_inputs: {}", scratch.m_fragment_inputs.size());
+        out = std::format_to(out, " }}");
         return out;
     }
 };

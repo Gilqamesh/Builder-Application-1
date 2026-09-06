@@ -92,7 +92,7 @@ using software_renderer::vertex_primitive_topology_t;
 game_t::game_t():
     m_window(make_window()),
     m_pixels(),
-    m_software_renderer({.pixels = m_pixels, .width = 0, .height = 0}),
+    m_software_renderer(software_renderer::framebuffer_t(m_pixels, 0, 0)),
     m_opengl_renderer(m_window),
     m_camera({{-400, 400}, {-300, 300}}, {{0, 400}, {0, 200}})
 {
@@ -182,11 +182,11 @@ game_t::game_t():
 
         geometry->primitive_topology() = vertex_primitive_topology_t::triangle_fan;
         geometry->finalize();
-        render_item.geometry(std::move(geometry));
+        render_item.geometry() = std::move(geometry);
 
         const auto material_index = rand() % materials.size();
         std::shared_ptr<material_t> material = materials[material_index];
-        render_item.material(material);
+        render_item.material() = material;
 
         const auto max_horizontal_translation = 5000;
         const auto max_vertical_translation = 3000;
@@ -194,9 +194,9 @@ game_t::game_t():
             static_cast<float>(rand() % max_horizontal_translation - max_horizontal_translation / 2),
             static_cast<float>(rand() % max_vertical_translation - max_vertical_translation / 2)
         };
-        render_item.translation(translation);
+        render_item.translation() = translation;
 
-        render_item.rotation(0.0F);
+        render_item.rotation() = 0.0F;
 
         const auto max_horizontal_scale = 30;
         const auto max_vertical_scale = 20;
@@ -204,7 +204,7 @@ game_t::game_t():
             static_cast<float>(rand() % max_horizontal_scale + 1),
             static_cast<float>(rand() % max_vertical_scale + 1)
         };
-        render_item.scale(scale);
+        render_item.scale() = scale;
 
         m_render_items.push_back(std::move(render_item));
     }
@@ -233,7 +233,7 @@ void game_t::run() {
         const auto frame_time_ms = std::chrono::duration<double, std::milli>(frame_time - previous_frame_time);
         previous_frame_time = frame_time;
         const auto framebuffer = m_software_renderer.framebuffer();
-        std::cout << std::format("frame: {:.2f} ms, framebuffer: {}x{}\n", frame_time_ms.count(), framebuffer.width, framebuffer.height);
+        std::cout << std::format("frame: {:.2f} ms, framebuffer: {}x{}\n", frame_time_ms.count(), framebuffer.width(), framebuffer.height());
     }
 }
 
@@ -308,16 +308,12 @@ void game_t::update(float dt) {
 void game_t::render() {
     const auto size = m_window->framebuffer_size();
     auto framebuffer = m_software_renderer.framebuffer();
-    if (framebuffer.width != size[0] || framebuffer.height != size[1]) {
-        m_pixels.resize(software_renderer::framebuffer_pixel_count(size[0], size[1]));
-        m_software_renderer.framebuffer({
-            .pixels = m_pixels,
-            .width = size[0],
-            .height = size[1]
-        });
+    if (framebuffer.width() != size[0] || framebuffer.height() != size[1]) {
+        m_pixels.resize(software_renderer::framebuffer_t::pixel_count(size[0], size[1]));
+        m_software_renderer.framebuffer() = software_renderer::framebuffer_t(m_pixels, size[0], size[1]);
         framebuffer = m_software_renderer.framebuffer();
     }
-    if (framebuffer.width == 0 || framebuffer.height == 0) {
+    if (framebuffer.width() == 0 || framebuffer.height() == 0) {
         return;
     }
 
@@ -328,8 +324,8 @@ void game_t::render() {
 
     m_opengl_renderer.present_rgba8(
         std::as_bytes(std::span<const software_renderer::rgba8_t>(m_pixels)),
-        framebuffer.width,
-        framebuffer.height
+        framebuffer.width(),
+        framebuffer.height()
     );
 }
 

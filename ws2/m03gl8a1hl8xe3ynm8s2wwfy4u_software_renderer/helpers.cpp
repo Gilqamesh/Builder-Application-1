@@ -596,21 +596,6 @@ std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> ver
     return {ndc_z * 0.5 + 0.5, reciprocal};
 }
 
-framebuffer_t validated_framebuffer(framebuffer_t framebuffer) {
-    const std::size_t pixel_count = framebuffer_pixel_count(framebuffer.width, framebuffer.height);
-    if (framebuffer.pixels.size() != pixel_count) {
-        throw std::invalid_argument(std::format(
-            "software renderer framebuffer has {} pixels, expected {} for dimensions {}x{}",
-            framebuffer.pixels.size(),
-            pixel_count,
-            framebuffer.width,
-            framebuffer.height
-        ));
-    }
-
-    return framebuffer;
-}
-
 bool finite(const vector4f_t& vector) {
     return std::ranges::all_of(vector, [](float component) { return std::isfinite(component); });
 }
@@ -1026,8 +1011,8 @@ matrix4f_t world_to_clip_matrix(
     const float world_height = world_rect[1].length();
     const float view_world_scale_x = static_cast<float>(view_rect[0].length()) / world_width;
     const float view_world_scale_y = static_cast<float>(view_rect[1].length()) / world_height;
-    const float framebuffer_width = static_cast<float>(framebuffer.width);
-    const float framebuffer_height = static_cast<float>(framebuffer.height);
+    const float framebuffer_width = static_cast<float>(framebuffer.width());
+    const float framebuffer_height = static_cast<float>(framebuffer.height());
     const float scale_x = view_world_scale_x * 2.0F / framebuffer_width;
     const float scale_y = view_world_scale_y * -2.0F / framebuffer_height;
     const float offset_x = (static_cast<float>(view_rect[0][0]) - world_rect[0][0] * view_world_scale_x) * 2.0F / framebuffer_width - 1.0F;
