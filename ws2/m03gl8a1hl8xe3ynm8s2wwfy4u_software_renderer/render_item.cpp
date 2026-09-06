@@ -1,5 +1,9 @@
 #include "render_item.h"
 
+#include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
+#include <m03glv28yaiwc5hbnvz43r14zr_matrix/api.h>
+#include <m03gtgtrh2smvh28qlwgm7gdl4_quaternion/api.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -30,41 +34,41 @@ const std::shared_ptr<material_t>& render_item_t::material() const {
     return m_material;
 }
 
-vector3f_t& render_item_t::translation() {
+m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& render_item_t::translation() {
     return m_translation;
 }
 
-const vector3f_t& render_item_t::translation() const {
+const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& render_item_t::translation() const {
     return m_translation;
 }
 
-void render_item_t::rotation(const quaternion_t& rotation) {
+void render_item_t::rotation(const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>& rotation) {
     m_rotation = rotation.unit();
 }
 
-void render_item_t::rotation(const vector3f_t& euler_xyz) {
-    m_rotation = quaternion_t::from_euler_xyz(euler_xyz);
+void render_item_t::rotation(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& euler_xyz) {
+    m_rotation = m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>::from_euler_xyz(euler_xyz);
 }
 
-const quaternion_t& render_item_t::rotation() const {
+const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>& render_item_t::rotation() const {
     return m_rotation;
 }
 
-vector3f_t& render_item_t::scale() {
+m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& render_item_t::scale() {
     return m_scale;
 }
 
-const vector3f_t& render_item_t::scale() const {
+const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& render_item_t::scale() const {
     return m_scale;
 }
 
-matrix4f_t render_item_t::object_to_world() const {
+m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> render_item_t::object_to_world() const {
     const auto finite = [](float component) { return std::isfinite(component); };
     if (!std::ranges::all_of(m_translation, finite) || !std::ranges::all_of(m_scale, finite)) {
         throw std::invalid_argument("render_item_t::object_to_world requires finite translation and scale");
     }
     const auto rotation = m_rotation.to_matrix();
-    matrix4f_t matrix(0.0F);
+    m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> matrix(0.0F);
     for (std::size_t row = 0; row < 3; ++row) {
         for (std::size_t column = 0; column < 3; ++column) {
             matrix(row, column) = rotation(row, column) * m_scale[column];

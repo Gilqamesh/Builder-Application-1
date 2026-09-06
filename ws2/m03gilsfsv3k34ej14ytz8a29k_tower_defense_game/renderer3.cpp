@@ -1,5 +1,7 @@
 #include "renderer3.h"
 
+#include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
+#include <m03glv28yaiwc5hbnvz43r14zr_matrix/api.h>
 #include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
 
 #include <array>
@@ -38,7 +40,7 @@ struct render_item_data_t {
     const m03gjfvd6i5jzbmngb2ldoooza_type_erased_array::type_erased_array_t* vertex_stream;
     std::span<const std::uint32_t> indices;
     software_renderer_api::vertex_primitive_topology_t primitive_topology;
-    software_renderer_api::matrix4f_t object_to_world;
+    m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> object_to_world;
 };
 
 constexpr renderer3_color_t ray_white_color() noexcept {
@@ -192,10 +194,10 @@ vector2f_t read_position(
     return { values[0], values[1] };
 }
 
-software_renderer_api::vector3f_t transform_position(
+m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> transform_position(
     const software_renderer_api::camera_t& camera,
     vector2f_t position,
-    const software_renderer_api::matrix4f_t& object_to_world
+    const m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4>& object_to_world
 ) {
     const auto world_position = object_to_world * vector_api::vector_t<float, 4>{position[0], position[1], 0.0F, 1.0F};
     return camera.to_view({world_position[0], world_position[1], world_position[2]});

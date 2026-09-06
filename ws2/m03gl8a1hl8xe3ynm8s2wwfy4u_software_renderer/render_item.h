@@ -3,8 +3,9 @@
 
 # include "geometry.h"
 # include "material.h"
-# include "types.h"
 
+# include <m03glv28yaiwc5hbnvz43r14zr_matrix/api.h>
+# include <m03gtgtrh2smvh28qlwgm7gdl4_quaternion/api.h>
 # include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
 
 # include <format>
@@ -32,24 +33,24 @@ public:
     std::shared_ptr<material_t>& material();
     const std::shared_ptr<material_t>& material() const;
 
-    vector3f_t& translation();
-    const vector3f_t& translation() const;
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& translation();
+    const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& translation() const;
 
-    void rotation(const quaternion_t& rotation);
-    void rotation(const vector3f_t& euler_xyz);
-    const quaternion_t& rotation() const;
+    void rotation(const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>& rotation);
+    void rotation(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& euler_xyz);
+    const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>& rotation() const;
 
-    vector3f_t& scale();
-    const vector3f_t& scale() const;
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& scale();
+    const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& scale() const;
 
-    matrix4f_t object_to_world() const;
+    m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> object_to_world() const;
 
 private:
     std::shared_ptr<geometry_t> m_geometry;
     std::shared_ptr<material_t> m_material;
-    vector3f_t m_translation;
-    quaternion_t m_rotation;
-    vector3f_t m_scale;
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> m_translation;
+    m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float> m_rotation;
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> m_scale;
 };
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

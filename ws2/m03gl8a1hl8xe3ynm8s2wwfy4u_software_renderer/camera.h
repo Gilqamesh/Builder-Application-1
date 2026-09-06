@@ -1,8 +1,9 @@
 #ifndef M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_CAMERA_H
 # define M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_CAMERA_H
 
-# include "types.h"
-
+# include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
+# include <m03glv28yaiwc5hbnvz43r14zr_matrix/api.h>
+# include <m03gtgtrh2smvh28qlwgm7gdl4_quaternion/api.h>
 # include <m03gintxczohr63y44o77b4pyj_hyperrectangle/api.h>
 
 # include <format>
@@ -74,12 +75,12 @@ class camera_t {
 public:
     camera_t(const view_rect_t& view_rect, projection_t projection);
 
-    vector3f_t& position();
-    const vector3f_t& position() const;
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& position();
+    const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& position() const;
 
-    void rotation(const quaternion_t& rotation);
-    void rotation(const vector3f_t& euler_xyz);
-    const quaternion_t& rotation() const;
+    void rotation(const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>& rotation);
+    void rotation(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& euler_xyz);
+    const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>& rotation() const;
 
     /**
      * @brief Replaces position and rotation to look from eye toward target with the supplied world up direction.
@@ -87,7 +88,11 @@ public:
      * Rejects non-finite inputs, coincident eye/target, and zero or parallel up
      * directions. Failed updates preserve the previous pose.
      */
-    void look_at(const vector3f_t& eye, const vector3f_t& target, const vector3f_t& up);
+    void look_at(
+        const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& eye,
+        const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& target,
+        const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& up
+    );
 
     projection_t& projection();
     const projection_t& projection() const;
@@ -95,12 +100,12 @@ public:
     view_rect_t& view_rect();
     const view_rect_t& view_rect() const;
 
-    matrix4f_t world_to_view() const;
+    m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> world_to_view() const;
 
     /**
      * @brief Derives projection times inverse pose, requiring a nonempty view rectangle and representable finite matrix coefficients.
      */
-    matrix4f_t world_to_clip() const;
+    m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> world_to_clip() const;
 
     /**
      * @brief Projects a world position to unclipped framebuffer X/Y and depth (NDC Z + 1) / 2.
@@ -108,11 +113,11 @@ public:
      * Requires a finite input, nonempty view rectangle, positive clip W, and
      * representable finite results. This operation does not perform visibility tests.
      */
-    vector3f_t to_view(const vector3f_t& world_position) const;
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> to_view(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& world_position) const;
 
 private:
-    vector3f_t m_position;
-    quaternion_t m_rotation;
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> m_position;
+    m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float> m_rotation;
     projection_t m_projection;
     view_rect_t m_view_rect;
 };

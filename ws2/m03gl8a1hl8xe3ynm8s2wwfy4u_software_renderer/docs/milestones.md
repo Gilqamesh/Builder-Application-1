@@ -54,9 +54,9 @@ renderer::camera_t camera(
 camera.look_at({0, 0, 4}, {0, 0, 0}, {0, 1, 0});
 item.translation() = {0, 0, 0};
 item.scale() = {1, 1, 1};
-item.rotation(renderer::vector3f_t {0.25F, 0.5F, 0});
+item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> {0.25F, 0.5F, 0});
 // Quaternion input uses the same setter:
-item.rotation(renderer::quaternion_t(1, 0, 0, 0));
+item.rotation(m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>(1, 0, 0, 0));
 software_renderer.clear(camera, {0, 0, 0, 255});
 software_renderer.draw(camera, item);
 ```
@@ -227,8 +227,8 @@ remain unimplemented.
 
 The renderer now consumes
 [`m03gtgtrh2smvh28qlwgm7gdl4_quaternion`](../../../ws1/m03gtgtrh2smvh28qlwgm7gdl4_quaternion/AGENTS.md).
-The local quaternion implementation was removed. [types.h](../types.h) exposes a
-float alias of the module type; camera and render-item setters normalize a copy
+The local quaternion implementation was removed. Camera and render-item APIs
+use the quaternion module type directly. Their setters normalize a copy
 with `unit()`, while Euler and look-at conversions use `from_euler_xyz()` and
 `from_matrix()`. The shared module supplies rotation matrices through `to_matrix()`.
 The pose owners retain read-only rotation access and reject invalid assignments

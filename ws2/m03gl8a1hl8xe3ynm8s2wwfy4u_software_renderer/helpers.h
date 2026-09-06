@@ -4,9 +4,9 @@
 # include "camera.h"
 # include "framebuffer.h"
 # include "render_item.h"
-# include "types.h"
 # include "vertex_attribute.h"
 
+# include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
 # include <m03gjfvd6i5jzbmngb2ldoooza_type_erased_array/api.h>
 # include <m03gsy25j4v7nccgmsdov9ioft_shader/api.h>
 # include <m03gt1djvvy5atia5evkbg6rqy_software_shader/software_shader.h>
@@ -31,7 +31,7 @@ namespace type_erased_array = m03gjfvd6i5jzbmngb2ldoooza_type_erased_array;
 
 using vector2f_t = m03gsy25j4v7nccgmsdov9ioft_shader::vector_t<float, 2>;
 using vector4f_t = m03gsy25j4v7nccgmsdov9ioft_shader::vector_t<float, 4>;
-using varying_t = std::variant<float, vector2f_t, vector3f_t, vector4f_t>;
+using varying_t = std::variant<float, vector2f_t, m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>, vector4f_t>;
 using varying_entry_t = std::pair<std::uint32_t, varying_t>;
 using varying_values_t = std::vector<varying_entry_t>;
 using grid_point_t = std::array<std::int64_t, 2>;

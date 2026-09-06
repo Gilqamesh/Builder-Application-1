@@ -1,6 +1,7 @@
 #include "software_renderer.h"
 
 #include <m03gagbht2l61mj6qitacwbmea_byte_stream/byte_stream.h>
+#include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
 #include <m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays/api.h>
 #include <m03gkcdy62bnz808pmk4uzkjra_glfw/glfw.h>
 #include <m03gkcdy62bnz808pmk4uzkjra_glfw/window.h>
@@ -154,7 +155,7 @@ int main() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             } else {
                 renderer.clear({0, 0, 0, 255});
-                render_item.rotation(vector3f_t({0.25F, seconds * 0.35F, 0.0F}));
+                render_item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0.25F, seconds * 0.35F, 0.0F}));
                 render_item.translation() = {0.0F, 0.0F, -1.1F + 0.7F * std::sin(seconds * 0.4F)};
                 const software_renderer_api::camera_t camera(
                     {{0, framebuffer.width()}, {0, framebuffer.height()}},

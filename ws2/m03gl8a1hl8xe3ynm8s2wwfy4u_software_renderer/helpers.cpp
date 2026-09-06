@@ -1,5 +1,7 @@
 #include "helpers.h"
 
+#include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -722,8 +724,8 @@ varying_t vertex_output(
     if (input.type == shader::shader_data_type<vector2f_t>()) {
         return require_vertex_output<vector2f_t>(io, input.index);
     }
-    if (input.type == shader::shader_data_type<vector3f_t>()) {
-        return require_vertex_output<vector3f_t>(io, input.index);
+    if (input.type == shader::shader_data_type<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>()) {
+        return require_vertex_output<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>(io, input.index);
     }
     if (input.type == shader::shader_data_type<vector4f_t>()) {
         return require_vertex_output<vector4f_t>(io, input.index);
@@ -962,6 +964,5 @@ void rasterize_triangle(
         );
     }, bounds.m_first_x, bounds.m_first_y);
 }
-
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

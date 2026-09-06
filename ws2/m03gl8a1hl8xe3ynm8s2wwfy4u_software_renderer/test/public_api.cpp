@@ -1,5 +1,6 @@
 #include "raster_fixtures.h"
 
+#include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
 #include <m03gagbht2l61mj6qitacwbmea_byte_stream/byte_stream.h>
 #include <m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays/api.h>
 #include <m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/framebuffer.h>
@@ -229,7 +230,7 @@ api::camera_t make_camera(int width, int height) {
     );
     // Explicit planar migration: this camera looks along +world Z, with world Y down.
     camera.position() = {0, 0, -1};
-    camera.rotation(api::quaternion_t(0, 1, 0, 0));
+    camera.rotation(m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>(0, 1, 0, 0));
     return camera;
 }
 
@@ -559,7 +560,7 @@ void test_shared_material_transform_semantics() {
         material
     );
     trs.scale() = {2.0F, 1.0F, 1.0F};
-    trs.rotation(vector3f_t({0, 0, std::numbers::pi_v<float> * 0.5F}));
+    trs.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, 0, std::numbers::pi_v<float> * 0.5F}));
     trs.translation() = {0.25F, -0.25F, 0.0F};
     renderer.draw(camera, trs);
     expect_color(pixels[pixel_index(40, 40, 64)], red);
@@ -1219,7 +1220,7 @@ void test_interpolation() {
     std::array<raster::varying_values_t, 4> payloads;
     raster::raster_workspace_t workspace;
     for (std::size_t i = 0; i < points.size(); ++i) {
-        payloads[i] = {{3, float(i)}, {5, raster::vector2f_t({float(i), 7.0F})}, {7, raster::vector3f_t(float(i))}, {9, raster::vector4f_t(float(i))}};
+        payloads[i] = {{3, float(i)}, {5, raster::vector2f_t({float(i), 7.0F})}, {7, m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>(float(i))}, {9, raster::vector4f_t(float(i))}};
         workspace.m_vertices.push_back({points[i], z[i], q[i], {raster::vector4f_t({0, 0, 0, 1}), payloads[i]}});
     }
     raster::prepare_polygon(workspace);
@@ -1233,7 +1234,7 @@ void test_interpolation() {
         near(std::get<float>(output[0].second), 0.5);
         near(std::get<raster::vector2f_t>(output[1].second)[0], 0.5);
         near(std::get<raster::vector2f_t>(output[1].second)[1], 7.0);
-        near(std::get<raster::vector3f_t>(output[2].second)[2], 0.5);
+        near(std::get<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>(output[2].second)[2], 0.5);
         near(std::get<raster::vector4f_t>(output[3].second)[3], 0.5);
     });
     require(hits == 1);
@@ -1538,18 +1539,16 @@ void run_raster_tests() {
 }
 
 void test_rotation_and_item_transform() {
-    using shared_quaternion_t = m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>;
-    static_assert(std::is_same_v<api::quaternion_t, shared_quaternion_t>);
     api::render_item_t item;
     api::camera_t camera({{0, 16}, {0, 16}}, api::perspective_t(1, 1, 10));
     const auto check_rotation_storage = [](auto& owner) {
-        static_assert(std::is_same_v<decltype(owner.rotation()), const shared_quaternion_t&>);
+        static_assert(std::is_same_v<decltype(owner.rotation()), const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>&>);
         near(owner.rotation().w(), 1);
         near(owner.rotation().x(), 0);
         near(owner.rotation().y(), 0);
         near(owner.rotation().z(), 0);
         for (float magnitude : {std::numeric_limits<float>::denorm_min(), 1.0F, std::numeric_limits<float>::max()}) {
-            shared_quaternion_t input(magnitude, magnitude, magnitude, magnitude);
+            m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float> input(magnitude, magnitude, magnitude, magnitude);
             owner.rotation(input);
             require(input.w() == magnitude);
             input.x() = 0; // The setter owns a copy, not a reference to mutable components.
@@ -1560,28 +1559,28 @@ void test_rotation_and_item_transform() {
         }
         const auto previous = owner.rotation();
         for (float invalid : {std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
-            const shared_quaternion_t input(invalid, 0, 0, 1);
+            const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float> input(invalid, 0, 0, 1);
             test::expect_throws<std::invalid_argument>([&] { owner.rotation(input); });
-            test::expect_throws<std::invalid_argument>([&] { owner.rotation(vector3f_t({0, invalid, 0})); });
+            test::expect_throws<std::invalid_argument>([&] { owner.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, invalid, 0})); });
             require(owner.rotation() == previous);
         }
-        test::expect_throws<std::invalid_argument>([&] { owner.rotation(shared_quaternion_t(0, 0, 0, 0)); });
+        test::expect_throws<std::invalid_argument>([&] { owner.rotation(m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>(0, 0, 0, 0)); });
         require(owner.rotation() == previous);
     };
     check_rotation_storage(item);
     check_rotation_storage(camera);
 
-    const vector3f_t euler {0.31F, -0.72F, 1.27F};
+    const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> euler {0.31F, -0.72F, 1.27F};
     item.rotation(euler);
     camera.rotation(euler);
     require(item.rotation() == camera.rotation());
     const auto matrix = item.object_to_world();
     const auto rotation = item.rotation();
-    item.rotation(shared_quaternion_t(-rotation.w(), -rotation.x(), -rotation.y(), -rotation.z()));
+    item.rotation(m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>(-rotation.w(), -rotation.x(), -rotation.y(), -rotation.z()));
     require(item.object_to_world() == matrix);
 
     // Independent sequential Euler rotations establish the fixed-axis order.
-    vector3f_t point {0.4F, -0.3F, 0.9F};
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> point {0.4F, -0.3F, 0.9F};
     for (std::size_t axis = 0; axis < 3; ++axis) {
         const auto a = (axis + 1) % 3, b = (axis + 2) % 3;
         const auto before = point;
@@ -1593,7 +1592,7 @@ void test_rotation_and_item_transform() {
 
     item.translation() = {1, 2, 3};
     item.scale() = {2, 3, 0};
-    item.rotation(vector3f_t({0, 0, std::numbers::pi_v<float> / 2}));
+    item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, 0, std::numbers::pi_v<float> / 2}));
     const auto result = item.object_to_world() * vector4f_t({1, 0, 4, 1});
     near(result[0], 1); near(result[1], 4); near(result[2], 3); near(result[3], 1);
     item.translation()[0] = std::numeric_limits<float>::infinity();
@@ -1617,14 +1616,14 @@ void test_camera_pose_and_projection() {
     near(screen[0], 900); near(screen[1], 250);
 
     camera.position() = {3, 2, 5};
-    camera.rotation(vector3f_t({0, std::numbers::pi_v<float> / 2, 0}));
+    camera.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, std::numbers::pi_v<float> / 2, 0}));
     const auto view = camera.world_to_view();
     const auto local = view * vector4f_t({2, 2, 5, 1});
     near(local[0], 0); near(local[1], 0); near(local[2], -1); near(local[3], 1);
     const auto camera_origin = view * vector4f_t({3, 2, 5, 1});
     for (std::size_t axis = 0; axis < 3; ++axis) { near(camera_origin[axis], 0); }
 
-    for (const vector3f_t target : {vector3f_t({1, 0, 0}), vector3f_t({-1, 0, 0}), vector3f_t({0, 0, 1}), vector3f_t({0, 0, -1}), vector3f_t({1, 2, -3})}) {
+    for (const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> target : {m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({1, 0, 0}), m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({-1, 0, 0}), m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, 0, 1}), m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, 0, -1}), m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({1, 2, -3})}) {
         camera.look_at({0, 0, 0}, target, {0, 1, 0});
         const auto result = camera.world_to_view() * vector4f_t({target[0], target[1], target[2], 1});
         near(result[0], 0); near(result[1], 0);
@@ -1638,7 +1637,7 @@ void test_camera_pose_and_projection() {
     // Normalizing this diagonal before the cross product can hide exact parallelism.
     test::expect_throws<std::invalid_argument>([&] { camera.look_at({0, 0, 0}, {-1, -3, -7}, {1, 3, 7}); });
     test::expect_throws<std::invalid_argument>([&] { camera.look_at({0, 0, 0}, {-1, -3, -7}, {-1, -3, -7}); });
-    test::expect_throws<std::invalid_argument>([&] { camera.rotation(vector3f_t({0, 0, std::numeric_limits<float>::infinity()})); });
+    test::expect_throws<std::invalid_argument>([&] { camera.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, 0, std::numeric_limits<float>::infinity()})); });
     require(camera.world_to_view() == previous);
     test::expect_throws<std::invalid_argument>([&] { (void)camera.to_view({1, 2, 3}); });
     test::expect_throws<std::invalid_argument>([] { (void)api::perspective_t(0, 1, 10); });
@@ -1651,14 +1650,14 @@ void test_camera_pose_and_projection() {
     test::expect_throws<std::invalid_argument>([] { (void)api::orthographic_t({{0, 1}, {0, 1}}, 1, 1); });
 
     camera.position() = {0, 0, 0};
-    camera.rotation(api::quaternion_t());
+    camera.rotation(m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>());
     camera.projection() = api::orthographic_t({{-2, 6}, {-3, 1}}, 0, 10);
     screen = camera.to_view({-2, 1, 0});
     near(screen[0], 100); near(screen[1], 50); near(screen[2], 0);
     screen = camera.to_view({6, -3, -10});
     near(screen[0], 900); near(screen[1], 450); near(screen[2], 1);
     require(!std::format("{}", camera).empty());
-    static_assert(std::is_same_v<decltype(camera.rotation()), const api::quaternion_t&>);
+    static_assert(std::is_same_v<decltype(camera.rotation()), const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>&>);
 }
 
 void test_camera_regions_and_clears() {
@@ -1755,7 +1754,7 @@ void test_region_topologies_and_original_aspect() {
         }
     }
     shader::vertex_shader_ast_builder_t vertex_shader;
-    const auto position = vertex_shader.input<vector3f_t>(0);
+    const auto position = vertex_shader.input<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>(0);
     vertex_shader.position(vertex_shader.world_to_clip() * vertex_shader.object_to_world() * vertex_shader.construct<vector4f_t>(position, 1.0F));
     shader::fragment_shader_ast_builder_t fragment;
     fragment.color(vector4f_t({0, 0, 1, 1}));
@@ -1774,7 +1773,7 @@ void test_region_topologies_and_original_aspect() {
 
 void test_textured_3d_near_plane() {
     shader::vertex_shader_ast_builder_t vertex_shader;
-    const auto position = vertex_shader.input<vector3f_t>(0);
+    const auto position = vertex_shader.input<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>(0);
     vertex_shader.position(vertex_shader.world_to_clip() * vertex_shader.object_to_world() * vertex_shader.construct<vector4f_t>(position, 1.0F));
     vertex_shader.output(0, shader::swizzle<0, 1>(position) * 0.5F + vector2f_t({0.5F, 0.5F}));
     shader::fragment_shader_ast_builder_t fragment;
@@ -1783,7 +1782,7 @@ void test_textured_3d_near_plane() {
     const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex_shader).finalize(), std::move(fragment).finalize());
     const std::array texels {red, green, blue, white};
     auto item = make_render_item(make_typed_geometry(std::vector<std::array<float, 3>>{{-1, -1, 0}, {1, -1, 0}, {-1, 1, 0}, {1, 1, 0}}, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 3), {0, 1, 2, 3}, api::vertex_primitive_topology_t::triangle_strip), make_material(make_unorm_texture(2, 2, texels), make_sampler(), program));
-    item.rotation(vector3f_t({0, std::atan2(0.6F, 0.8F), 0}));
+    item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, std::atan2(0.6F, 0.8F), 0}));
     item.translation() = {0, 0, -1};
     item.scale() = {1, 1, 0}; // A collapsed Z scale still leaves a visible XY surface.
     std::vector<api::rgba8_t> pixels(32 * 32, clear_color);

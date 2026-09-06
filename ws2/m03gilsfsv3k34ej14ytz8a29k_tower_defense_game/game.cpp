@@ -1,5 +1,7 @@
 #include "game.h"
 
+#include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
+#include <m03gtgtrh2smvh28qlwgm7gdl4_quaternion/api.h>
 #include <m03gsy25j4v7nccgmsdov9ioft_shader/api.h>
 #include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
 #include <m03gt1djvvy5atia5evkbg6rqy_software_shader/api.h>
@@ -99,7 +101,7 @@ game_t::game_t():
 {
     // Keep the game's world +Y direction pointing down the framebuffer.
     m_camera.position() = {0.0F, 0.0F, -1.0F};
-    m_camera.rotation(software_renderer::quaternion_t(0.0F, 1.0F, 0.0F, 0.0F));
+    m_camera.rotation(m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>(0.0F, 1.0F, 0.0F, 0.0F));
 
     std::vector<std::shared_ptr<texture_api::texture_t>> tile_textures;
     std::vector<std::string> tile_texture_paths = {
@@ -195,18 +197,18 @@ game_t::game_t():
 
         const auto max_horizontal_translation = 5000;
         const auto max_vertical_translation = 3000;
-        software_renderer::vector3f_t translation = {
+        m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> translation = {
             static_cast<float>(rand() % max_horizontal_translation - max_horizontal_translation / 2),
             static_cast<float>(rand() % max_vertical_translation - max_vertical_translation / 2),
             0.0F
         };
         render_item.translation() = translation;
 
-        render_item.rotation(software_renderer::quaternion_t());
+        render_item.rotation(m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>());
 
         const auto max_horizontal_scale = 30;
         const auto max_vertical_scale = 20;
-        software_renderer::vector3f_t scale = {
+        m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> scale = {
             static_cast<float>(rand() % max_horizontal_scale + 1),
             static_cast<float>(rand() % max_vertical_scale + 1),
             1.0F
@@ -249,7 +251,7 @@ void game_t::update(float dt) {
     const auto& current_input_state = input_states.history(0);
 
     auto camera_view_dp = m03ginwy24ng8o487c4beoms6l_vector::vector_t<int, 2>{0, 0};
-    auto camera_world_dp = software_renderer::vector3f_t{0.0F, 0.0F, 0.0F};
+    auto camera_world_dp = m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>{0.0F, 0.0F, 0.0F};
     auto camera_view_lengths_dp = m03ginwy24ng8o487c4beoms6l_vector::vector_t<int, 2>{0, 0};
     auto camera_world_lengths_dp = m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>{0, 0};
 

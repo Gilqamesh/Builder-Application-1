@@ -1,5 +1,7 @@
 #include "camera.h"
 
+#include <m03glv28yaiwc5hbnvz43r14zr_matrix/api.h>
+#include <m03gtgtrh2smvh28qlwgm7gdl4_quaternion/api.h>
 #include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
 
 #include <algorithm>
@@ -56,14 +58,22 @@ camera_t::camera_t(const view_rect_t& view_rect, projection_t projection):
 {
 }
 
-vector3f_t& camera_t::position() { return m_position; }
-const vector3f_t& camera_t::position() const { return m_position; }
+m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& camera_t::position() { return m_position; }
+const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& camera_t::position() const { return m_position; }
 
-void camera_t::rotation(const quaternion_t& rotation) { m_rotation = rotation.unit(); }
-void camera_t::rotation(const vector3f_t& euler_xyz) { m_rotation = quaternion_t::from_euler_xyz(euler_xyz); }
-const quaternion_t& camera_t::rotation() const { return m_rotation; }
+void camera_t::rotation(const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>& rotation) {
+    m_rotation = rotation.unit();
+}
+void camera_t::rotation(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& euler_xyz) {
+    m_rotation = m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>::from_euler_xyz(euler_xyz);
+}
+const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>& camera_t::rotation() const { return m_rotation; }
 
-void camera_t::look_at(const vector3f_t& eye, const vector3f_t& target, const vector3f_t& up) {
+void camera_t::look_at(
+    const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& eye,
+    const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& target,
+    const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& up
+) {
     const auto finite = [](float component) { return std::isfinite(component); };
     if (!std::ranges::all_of(eye, finite) || !std::ranges::all_of(target, finite) || !std::ranges::all_of(up, finite)) {
         throw std::invalid_argument("camera_t::look_at requires finite eye, target, and up directions");
@@ -92,7 +102,7 @@ void camera_t::look_at(const vector3f_t& eye, const vector3f_t& target, const ve
         back[0] * right[1] - back[1] * right[0]
     };
     // These columns map the camera-local basis into world space.
-    const quaternion_t::matrix3_t basis {
+    const m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 3, 3> basis {
         float(right[0]),
         float(corrected_up[0]),
         float(back[0]),
@@ -103,7 +113,7 @@ void camera_t::look_at(const vector3f_t& eye, const vector3f_t& target, const ve
         float(corrected_up[2]),
         float(back[2])
     };
-    const auto rotation = quaternion_t::from_matrix(basis);
+    const auto rotation = m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>::from_matrix(basis);
     m_position = eye;
     m_rotation = rotation;
 }
@@ -113,12 +123,12 @@ const projection_t& camera_t::projection() const { return m_projection; }
 view_rect_t& camera_t::view_rect() { return m_view_rect; }
 const view_rect_t& camera_t::view_rect() const { return m_view_rect; }
 
-matrix4f_t camera_t::world_to_view() const {
+m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> camera_t::world_to_view() const {
     if (!std::ranges::all_of(m_position, [](float component) { return std::isfinite(component); })) {
         throw std::invalid_argument("camera_t::world_to_view requires a finite position");
     }
     const auto rotation = m_rotation.to_matrix();
-    matrix4f_t view(0.0F);
+    m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> view(0.0F);
     for (std::size_t row = 0; row < 3; ++row) {
         double offset = 0;
         for (std::size_t column = 0; column < 3; ++column) {
@@ -134,11 +144,11 @@ matrix4f_t camera_t::world_to_view() const {
     return view;
 }
 
-matrix4f_t camera_t::world_to_clip() const {
+m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> camera_t::world_to_clip() const {
     if (m_view_rect.is_empty()) {
         throw std::invalid_argument("camera_t::world_to_clip requires a nonempty view rectangle");
     }
-    matrix4f_t projection(0.0F);
+    m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> projection(0.0F);
     std::visit([&](const auto& description) {
         const double near = description.near_distance(), far = description.far_distance();
         if constexpr (std::is_same_v<std::remove_cvref_t<decltype(description)>, perspective_t>) {
@@ -164,7 +174,7 @@ matrix4f_t camera_t::world_to_clip() const {
         }
     }, m_projection);
     const auto view = world_to_view();
-    matrix4f_t result;
+    m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> result;
     for (std::size_t row = 0; row < 4; ++row) {
         for (std::size_t column = 0; column < 4; ++column) {
             double coefficient = 0;
@@ -178,7 +188,7 @@ matrix4f_t camera_t::world_to_clip() const {
     return result;
 }
 
-vector3f_t camera_t::to_view(const vector3f_t& world_position) const {
+m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> camera_t::to_view(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& world_position) const {
     if (!std::ranges::all_of(world_position, [](float component) { return std::isfinite(component); })) {
         throw std::invalid_argument("camera_t::to_view requires a finite world position");
     }
@@ -193,7 +203,7 @@ vector3f_t camera_t::to_view(const vector3f_t& world_position) const {
     }
     const double width = std::int64_t(m_view_rect[0][1]) - std::int64_t(m_view_rect[0][0]);
     const double height = std::int64_t(m_view_rect[1][1]) - std::int64_t(m_view_rect[1][0]);
-    const vector3f_t result {
+    const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> result {
         float(double(m_view_rect[0][0]) + (clip[0] / clip[3] + 1) * width / 2),
         float(double(m_view_rect[1][0]) + (1 - clip[1] / clip[3]) * height / 2),
         float((clip[2] / clip[3] + 1) / 2)
