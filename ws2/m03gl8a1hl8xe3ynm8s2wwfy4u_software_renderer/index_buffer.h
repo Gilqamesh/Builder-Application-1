@@ -4,7 +4,6 @@
 # include <cstddef>
 # include <cstdint>
 # include <format>
-# include <stdexcept>
 # include <vector>
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {

@@ -1,5 +1,9 @@
 #include "geometry.h"
 
+#include <format>
+#include <stdexcept>
+#include <utility>
+
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 geometry_t::geometry_t(std::shared_ptr<index_buffer_t> index_buffer):
@@ -23,7 +27,7 @@ geometry_t::geometry_t(std::shared_ptr<index_buffer_t> index_buffer, index_range
     }
 
     const auto index_count = m_index_buffer->indices().size();
-    if (m_index_range.offset > index_count || m_index_range.count > index_count - m_index_range.offset) {
+    if (index_count < m_index_range.offset || index_count - m_index_range.offset < m_index_range.count) {
         throw std::out_of_range(std::format("geometry_t: index_range ({}) is out of bounds for index_buffer indices size ({})", m_index_range, index_count));
     }
 }
@@ -70,7 +74,9 @@ void geometry_t::finalize() {
             expected_index_count_divisor = 1;
             expected_minimum_index_count = 3;
         } break;
-        default: throw std::runtime_error(std::format("geometry_t::finalize: unknown vertex_primitive_topology_t: {}", m_primitive_topology));
+        default: {
+            throw std::runtime_error(std::format("geometry_t::finalize: unknown vertex_primitive_topology_t: {}", m_primitive_topology));
+        }
     }
 
     if (indices.size() < expected_minimum_index_count) {
@@ -117,7 +123,7 @@ index_range_t geometry_t::index_range() const {
 std::span<const index_buffer_t::index_t> geometry_t::indices() const {
     const auto& indices = static_cast<const index_buffer_t&>(*m_index_buffer).indices();
     const auto index_count = indices.size();
-    if (m_index_range.offset > index_count || m_index_range.count > index_count - m_index_range.offset) {
+    if (index_count < m_index_range.offset || index_count - m_index_range.offset < m_index_range.count) {
         throw std::out_of_range(std::format("geometry_t::indices: index_range ({}) is out of bounds for index_buffer indices size ({})", m_index_range, index_count));
     }
     return std::span<const index_buffer_t::index_t>(indices).subspan(m_index_range.offset, m_index_range.count);

@@ -9,8 +9,6 @@
 # include <format>
 # include <memory>
 # include <span>
-# include <stdexcept>
-# include <vector>
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
@@ -24,6 +22,11 @@ public:
     explicit geometry_t(std::shared_ptr<index_buffer_t> index_buffer);
     geometry_t(std::shared_ptr<index_buffer_t> index_buffer, index_range_t index_range);
 
+    /**
+     * @brief Validates the current mesh, selected index range, and primitive topology.
+     *
+     * Resources remain mutable after validation. Each draw validates their current state again.
+     */
     void finalize();
 
     std::shared_ptr<mesh_t>& mesh();
@@ -45,6 +48,16 @@ private:
 };
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
+
+namespace std {
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::index_range_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::geometry_t>;
+
+} // namespace std
 
 namespace std {
 
@@ -71,13 +84,6 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::index_range_t> {
         return out;
     }
 };
-
-template <>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::geometry_t>;
-
-} // namespace std
-
-namespace std {
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::geometry_t> {

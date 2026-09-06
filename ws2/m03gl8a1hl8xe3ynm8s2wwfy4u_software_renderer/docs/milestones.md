@@ -78,7 +78,7 @@ Checks obtained during staging: current-source public validation built with GNU 
 boundary walks and fraction comparisons; analytical depth/reciprocal-W/varying checks.
 The existing matrix implementations were also compared byte-for-byte with the reviewed base.
 
-The normal Builder library phase automatically compiles `detail/rasterization.cpp` and
+The normal Builder library phase automatically compiles `helpers.cpp` and
 runs `test/public_api.cpp`, including its private geometry checks. Re-run the installed
 validation executable after building the module:
 

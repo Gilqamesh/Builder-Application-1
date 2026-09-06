@@ -66,17 +66,39 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_
         auto out = ctx.out();
 
         switch (type) {
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::R32: out = std::format_to(out, "R32"); break;
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::R64: out = std::format_to(out, "R64"); break;
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::I8:  out = std::format_to(out, "I8");  break;
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::I16: out = std::format_to(out, "I16"); break;
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::I32: out = std::format_to(out, "I32"); break;
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::I64: out = std::format_to(out, "I64"); break;
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::U8:  out = std::format_to(out, "U8");  break;
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::U16: out = std::format_to(out, "U16"); break;
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::U32: out = std::format_to(out, "U32"); break;
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::U64: out = std::format_to(out, "U64"); break;
-            default: throw std::runtime_error(std::format("formatter<vertex_attribute_type_t>::format: unknown vertex attribute type ({})", static_cast<int>(type)));
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::R32: {
+                out = std::format_to(out, "R32");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::R64: {
+                out = std::format_to(out, "R64");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::I8: {
+                out = std::format_to(out, "I8");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::I16: {
+                out = std::format_to(out, "I16");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::I32: {
+                out = std::format_to(out, "I32");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::I64: {
+                out = std::format_to(out, "I64");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::U8: {
+                out = std::format_to(out, "U8");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::U16: {
+                out = std::format_to(out, "U16");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::U32: {
+                out = std::format_to(out, "U32");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_type_t::U64: {
+                out = std::format_to(out, "U64");
+            } break;
+            default: {
+                throw std::runtime_error(std::format("formatter<vertex_attribute_type_t>::format: unknown vertex attribute type ({})", static_cast<int>(type)));
+            }
         }
 
         return out;
@@ -96,7 +118,8 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_attribute_t& attribute, auto& ctx) const {
         auto out = ctx.out();
 
-        out = std::format_to(out, "{} x {}", attribute.component_count(), attribute.type());
+        out = std::format_to(out, "{}", attribute.component_count());
+        out = std::format_to(out, " x {}", attribute.type());
 
         return out;
     }

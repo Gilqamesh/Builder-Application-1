@@ -2,8 +2,7 @@
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
-mesh_t::mesh_t()
-{
+mesh_t::mesh_t() {
 }
 
 const m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays::erased_structure_of_arrays_t& mesh_t::vertex_streams() const& {

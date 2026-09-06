@@ -1,17 +1,26 @@
-#include "rasterization.h"
+#include "helpers.h"
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <format>
 #include <limits>
 #include <numeric>
+#include <optional>
+#include <span>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
+#include <variant>
+#include <vector>
 
-namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::detail {
+namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 static_assert(std::numeric_limits<float>::is_iec559 && std::numeric_limits<float>::digits == 24);
 static_assert(std::numeric_limits<double>::is_iec559 && std::numeric_limits<double>::digits == 53);
-namespace {
 
 void clear(clipping_buffer_t& buffer) {
     buffer.m_vertices.clear();
@@ -39,7 +48,8 @@ varying_t interpolate(const varying_t& from, const varying_t& to, double factor)
             }
             return result;
         }
-    }, from);
+    },
+        from);
 }
 
 void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t first, pipeline_vertex_view_t second, std::size_t plane) {
@@ -98,8 +108,7 @@ void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t 
 }
 
 bool between(grid_point_t p, grid_point_t a, grid_point_t b) {
-    return std::min(a[0], b[0]) <= p[0] && p[0] <= std::max(a[0], b[0])
-        && std::min(a[1], b[1]) <= p[1] && p[1] <= std::max(a[1], b[1]);
+    return std::min(a[0], b[0]) <= p[0] && p[0] <= std::max(a[0], b[0]) && std::min(a[1], b[1]) <= p[1] && p[1] <= std::max(a[1], b[1]);
 }
 
 bool opposite(std::int64_t a, std::int64_t b) {
@@ -109,9 +118,10 @@ bool opposite(std::int64_t a, std::int64_t b) {
 bool intersects(grid_point_t a, grid_point_t b, grid_point_t c, grid_point_t d) {
     const auto ac = edge(a, b, c), ad = edge(a, b, d);
     const auto ca = edge(c, d, a), cb = edge(c, d, b);
-    return (opposite(ac, ad) && opposite(ca, cb))
-        || (ac == 0 && between(c, a, b)) || (ad == 0 && between(d, a, b))
-        || (ca == 0 && between(a, c, d)) || (cb == 0 && between(b, c, d));
+    const bool crosses_interior = opposite(ac, ad) && opposite(ca, cb);
+    const bool first_touches = (ac == 0 && between(c, a, b)) || (ad == 0 && between(d, a, b));
+    const bool second_touches = (ca == 0 && between(a, c, d)) || (cb == 0 && between(b, c, d));
+    return crosses_interior || first_touches || second_touches;
 }
 
 bool simple_boundary(const raster_workspace_t& workspace) {
@@ -145,8 +155,7 @@ bool triangulate(raster_workspace_t& workspace) {
     std::size_t start = 0;
     bool found = false;
     for (std::size_t i = 0; i < ring.size(); ++i) {
-        if (point(ring[i]) != point(ring[(i + ring.size() - 1) % ring.size()])
-            && (!found || point(ring[i]) < point(ring[start]))) {
+        if (point(ring[i]) != point(ring[(i + ring.size() - 1) % ring.size()]) && (!found || point(ring[i]) < point(ring[start]))) {
             start = i;
             found = true;
         }
@@ -162,8 +171,7 @@ bool triangulate(raster_workspace_t& workspace) {
             }
             const bool blocked = std::ranges::any_of(ring, [&](std::size_t other) {
                 const auto p = point(other);
-                return p != a && p != b && p != c
-                    && 0 <= edge(a, b, p) && 0 <= edge(b, c, p) && 0 <= edge(c, a, p);
+                return p != a && p != b && p != c && 0 <= edge(a, b, p) && 0 <= edge(b, c, p) && 0 <= edge(c, a, p);
             });
             if (!blocked) {
                 workspace.m_triangles.push_back(ids);
@@ -205,8 +213,7 @@ bool crossed_facing(std::span<const projected_vertex_t> vertices) {
                     if (a < b) {
                         start = candidate;
                         reversed = candidate_reversed;
-                    }
-                    break;
+                    } break;
                 }
             }
         }
@@ -244,7 +251,8 @@ int compare_varying(const varying_t& a, const varying_t& b) {
             }
             return 0;
         }
-    }, a);
+    },
+        a);
 }
 
 int compare_record(const projected_vertex_t& a, const projected_vertex_t& b) {
@@ -281,8 +289,6 @@ bool edge_record_less(const scan_event_t& a, const scan_event_t& b, std::span<co
     const int lower = compare_record(vertices[a.m_lower], vertices[b.m_lower]);
     return lower != 0 ? lower < 0 : compare_record(vertices[a.m_upper], vertices[b.m_upper]) < 0;
 }
-
-} // namespace
 
 pipeline_vertex_view_t view(const pipeline_vertex_t& vertex, const varying_values_t& values) {
     return {vertex.m_clip_position, std::span<const varying_entry_t>(values).subspan(vertex.m_outputs[0], vertex.m_outputs[1])};
@@ -444,8 +450,8 @@ void prepare_polygon(raster_workspace_t& workspace) {
         geometry.pop_back();
     }
     if (geometry.size() < 3 || std::ranges::all_of(geometry, [&](std::size_t i) {
-        return edge(vertices[geometry[0]].m_point, vertices[geometry[1]].m_point, vertices[i].m_point) == 0;
-    })) {
+            return edge(vertices[geometry[0]].m_point, vertices[geometry[1]].m_point, vertices[i].m_point) == 0;
+        })) {
         return;
     }
     workspace.m_empty = false;
@@ -476,10 +482,11 @@ void prepare_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex
         const double reciprocal = projectable_reciprocal_w(p[3]);
         const double ndc_x = double(p[0]) / double(p[3]);
         const double ndc_y = double(p[1]) / double(p[3]);
-        workspace.m_vertices.push_back({
-            {snap((ndc_x + 1.0) * (double(width) / 2.0), width), snap((1.0 - ndc_y) * (double(height) / 2.0), height)},
-            double(p[2]) / double(p[3]), reciprocal, source
-        });
+        const grid_point_t point {
+            snap((ndc_x + 1.0) * (double(width) / 2.0), width),
+            snap((1.0 - ndc_y) * (double(height) / 2.0), height)
+        };
+        workspace.m_vertices.push_back({point, double(p[2]) / double(p[3]), reciprocal, source});
     }
     prepare_polygon(workspace);
 }
@@ -518,9 +525,14 @@ sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::s
     const double across = dl / (dl + dr);
     const double along_left = double(py - vertices[left.m_lower].m_point[1]) / double(left.m_x[1]);
     const double along_right = double(py - vertices[right.m_lower].m_point[1]) / double(right.m_x[1]);
-    return {x, y, {left.m_lower, left.m_upper, right.m_lower, right.m_upper},
-        {(1.0 - across) * (1.0 - along_left), (1.0 - across) * along_left,
-         across * (1.0 - along_right), across * along_right}, 4};
+    const std::array indices {left.m_lower, left.m_upper, right.m_lower, right.m_upper};
+    const std::array weights {
+        (1.0 - across) * (1.0 - along_left),
+        (1.0 - across) * along_left,
+        across * (1.0 - along_right),
+        across * along_right
+    };
+    return {x, y, indices, weights, 4};
 }
 
 std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, varying_values_t& outputs) {
@@ -554,8 +566,11 @@ std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> ver
                     }
                     const auto& typed = std::get<type_t>(vertex.m_source.m_outputs[output].second);
                     const double value = [&] {
-                        if constexpr (std::is_same_v<type_t, float>) { return double(typed); }
-                        else { return double(typed[axis]); }
+                        if constexpr (std::is_same_v<type_t, float>) {
+                            return double(typed);
+                        } else {
+                            return double(typed[axis]);
+                        }
                     }();
                     numerator += sample.m_weights[i] * (vertex.m_reciprocal_w * value);
                     minimum = std::min(minimum, value);
@@ -574,10 +589,468 @@ std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> ver
                 }
                 return result;
             }
-        }, first);
+        },
+            first);
         outputs.emplace_back(location, interpolated);
     }
     return {ndc_z * 0.5 + 0.5, reciprocal};
 }
 
-} // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::detail
+framebuffer_t validated_framebuffer(framebuffer_t framebuffer) {
+    const std::size_t pixel_count = framebuffer_pixel_count(framebuffer.width, framebuffer.height);
+    if (framebuffer.pixels.size() != pixel_count) {
+        throw std::invalid_argument(std::format(
+            "software renderer framebuffer has {} pixels, expected {} for dimensions {}x{}",
+            framebuffer.pixels.size(),
+            pixel_count,
+            framebuffer.width,
+            framebuffer.height
+        ));
+    }
+
+    return framebuffer;
+}
+
+bool finite(const vector4f_t& vector) {
+    return std::ranges::all_of(vector, [](float component) { return std::isfinite(component); });
+}
+
+std::size_t shader_component_count(shader::shader_data_type_t type) {
+    switch (type.category()) {
+        case shader::shader_data_category_t::scalar: {
+            return 1;
+        }
+        case shader::shader_data_category_t::vector: {
+            return type.rows();
+        }
+        default: {
+            return 0;
+        }
+    }
+}
+
+vertex_attribute_type_t expected_attribute_type(shader::shader_scalar_type_t type) {
+    switch (type) {
+        case shader::shader_scalar_type_t::floating_point: {
+            return vertex_attribute_type_t::R32;
+        }
+        case shader::shader_scalar_type_t::signed_integer: {
+            return vertex_attribute_type_t::I32;
+        }
+        case shader::shader_scalar_type_t::unsigned_integer: {
+            return vertex_attribute_type_t::U32;
+        }
+        default: {
+            throw std::invalid_argument("software renderer does not support this shader vertex input scalar type");
+        }
+    }
+}
+
+void validate_vertex_attribute(
+    const vertex_attribute_t& attribute,
+    shader::shader_data_type_t input_type
+) {
+    const std::size_t component_count = shader_component_count(input_type);
+    if (component_count == 0 || 4 < component_count) {
+        throw std::invalid_argument("software renderer only supports scalar and vector vertex inputs");
+    }
+    if (attribute.type() != expected_attribute_type(input_type.scalar()) || attribute.component_count() != component_count) {
+        throw std::invalid_argument("mesh vertex attribute is incompatible with the reflected shader input");
+    }
+}
+
+void set_vertex_input(
+    software_shader::vertex_io_t& io,
+    const shader::shader_interface_element_t& input,
+    const type_erased_array::type_erased_array_t& stream,
+    const vertex_attribute_t& attribute,
+    std::uint32_t vertex_index
+) {
+    switch (attribute.type()) {
+        case vertex_attribute_type_t::R32: {
+            set_vertex_input_components<float>(io, input.index, stream, vertex_index, attribute.component_count());
+        } break;
+        case vertex_attribute_type_t::I32: {
+            set_vertex_input_components<std::int32_t>(io, input.index, stream, vertex_index, attribute.component_count());
+        } break;
+        case vertex_attribute_type_t::U32: {
+            set_vertex_input_components<std::uint32_t>(io, input.index, stream, vertex_index, attribute.component_count());
+        } break;
+        default: {
+            throw std::logic_error("unsupported validated vertex attribute type");
+        }
+    }
+}
+
+bool supported_fragment_input(shader::shader_data_type_t type) {
+    if (type.scalar() != shader::shader_scalar_type_t::floating_point) {
+        return false;
+    }
+    if (type.category() == shader::shader_data_category_t::scalar) {
+        return true;
+    }
+    return type.category() == shader::shader_data_category_t::vector && 2 <= type.rows() && type.rows() <= 4 && type.columns() == 1;
+}
+
+varying_t vertex_output(
+    const software_shader::vertex_io_t& io,
+    const shader::shader_interface_element_t& input
+) {
+    if (input.type == shader::shader_data_type<float>()) {
+        return require_vertex_output<float>(io, input.index);
+    }
+    if (input.type == shader::shader_data_type<vector2f_t>()) {
+        return require_vertex_output<vector2f_t>(io, input.index);
+    }
+    if (input.type == shader::shader_data_type<vector3f_t>()) {
+        return require_vertex_output<vector3f_t>(io, input.index);
+    }
+    if (input.type == shader::shader_data_type<vector4f_t>()) {
+        return require_vertex_output<vector4f_t>(io, input.index);
+    }
+    throw std::logic_error("unsupported validated fragment input type");
+}
+
+std::optional<screen_vertex_t> project(
+    const pipeline_vertex_view_t& vertex,
+    int width,
+    int height
+) {
+    const float w = vertex.m_clip_position[3];
+    if (w == 0.0F) {
+        return std::nullopt;
+    }
+    const float reciprocal_w = float(projectable_reciprocal_w(w));
+    const float ndc_x = vertex.m_clip_position[0] * reciprocal_w;
+    const float ndc_y = vertex.m_clip_position[1] * reciprocal_w;
+    const float ndc_z = vertex.m_clip_position[2] * reciprocal_w;
+    const float x = (ndc_x * 0.5F + 0.5F) * static_cast<float>(width);
+    const float y = (0.5F - ndc_y * 0.5F) * static_cast<float>(height);
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(ndc_z) || !std::isfinite(reciprocal_w)) {
+        return std::nullopt;
+    }
+    return screen_vertex_t {
+        .m_x = x,
+        .m_y = y,
+        .m_ndc_z = ndc_z,
+        .m_reciprocal_w = reciprocal_w,
+        .m_outputs = vertex.m_outputs
+    };
+}
+
+void set_fragment_inputs(
+    software_shader::fragment_io_t& io,
+    std::span<const varying_entry_t> inputs
+) {
+    for (const auto& [location, input] : inputs) {
+        std::visit([&](const auto& typed_input) { io.input(location, typed_input); }, input);
+    }
+}
+
+std::uint8_t to_unorm8(float component) {
+    if (std::isnan(component) || component == -std::numeric_limits<float>::infinity()) {
+        return 0;
+    }
+    if (component == std::numeric_limits<float>::infinity()) {
+        return 255;
+    }
+    const float clamped = std::clamp(component, 0.0F, 1.0F);
+    return static_cast<std::uint8_t>(std::floor(clamped * 255.0F + 0.5F));
+}
+
+rgba8_t to_rgba8(const vector4f_t& color) {
+    return {
+        .red = to_unorm8(color[0]),
+        .green = to_unorm8(color[1]),
+        .blue = to_unorm8(color[2]),
+        .alpha = to_unorm8(color[3])
+    };
+}
+
+void shade_sample(
+    const software_shader::program_t& program,
+    const software_shader::bindings_t& bindings,
+    int width,
+    int height,
+    std::span<rgba8_t> framebuffer,
+    int x,
+    int y,
+    float depth,
+    float reciprocal_w,
+    bool front_facing,
+    std::span<const varying_entry_t> inputs,
+    software_shader::fragment_io_t& io
+) {
+    if (x < 0 || y < 0 || width <= x || height <= y) {
+        return;
+    }
+
+    io.reset(
+        vector4f_t({static_cast<float>(x) + 0.5F,
+            static_cast<float>(y) + 0.5F,
+            std::clamp(depth, 0.0F, 1.0F),
+            reciprocal_w}),
+        front_facing
+    );
+    set_fragment_inputs(io, inputs);
+    program.run(bindings, io);
+    if (io.discarded()) {
+        return;
+    }
+    const auto color = io.color();
+    if (!color) {
+        return;
+    }
+    framebuffer[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)] = to_rgba8(*color);
+}
+
+void rasterize_point(
+    const software_shader::program_t& program,
+    const software_shader::bindings_t& bindings,
+    int width,
+    int height,
+    std::span<rgba8_t> framebuffer,
+    const pipeline_vertex_view_t& vertex,
+    varying_values_t& fragment_inputs,
+    software_shader::fragment_io_t& fragment_io
+) {
+    if (!inside_clip_volume(vertex)) {
+        return;
+    }
+    const auto screen = project(vertex, width, height);
+    if (!screen) {
+        return;
+    }
+
+    constexpr int radius = 3;
+    constexpr int radius_squared = radius * radius;
+    const int center_x = static_cast<int>(std::floor(screen->m_x));
+    const int center_y = static_cast<int>(std::floor(screen->m_y));
+    const float depth = screen->m_ndc_z * 0.5F + 0.5F;
+    for (int y = center_y - radius; y <= center_y + radius; ++y) {
+        for (int x = center_x - radius; x <= center_x + radius; ++x) {
+            const int dx = x - center_x;
+            const int dy = y - center_y;
+            if (dx * dx + dy * dy <= radius_squared) {
+                fragment_inputs.assign(screen->m_outputs.begin(), screen->m_outputs.end());
+                shade_sample(
+                    program,
+                    bindings,
+                    width,
+                    height,
+                    framebuffer,
+                    x,
+                    y,
+                    depth,
+                    screen->m_reciprocal_w,
+                    true,
+                    fragment_inputs,
+                    fragment_io
+                );
+            }
+        }
+    }
+}
+
+void rasterize_line(
+    const software_shader::program_t& program,
+    const software_shader::bindings_t& bindings,
+    int width,
+    int height,
+    std::span<rgba8_t> framebuffer,
+    const pipeline_vertex_view_t& first,
+    const pipeline_vertex_view_t& second,
+    clipping_workspace_t& clipping,
+    varying_values_t& fragment_inputs,
+    software_shader::fragment_io_t& fragment_io
+) {
+    const auto clipped_index = clip_line(first, second, clipping);
+    if (!clipped_index) {
+        return;
+    }
+    const auto& clipped = clipping.m_buffers[*clipped_index];
+    const auto clipped_first = view(clipped.m_vertices[0], clipped.m_values);
+    const auto clipped_second = view(clipped.m_vertices[1], clipped.m_values);
+    const auto first_screen = project(clipped_first, width, height);
+    const auto second_screen = project(clipped_second, width, height);
+    if (!first_screen || !second_screen) {
+        return;
+    }
+
+    int x = static_cast<int>(std::floor(first_screen->m_x));
+    int y = static_cast<int>(std::floor(first_screen->m_y));
+    const int target_x = static_cast<int>(std::floor(second_screen->m_x));
+    const int target_y = static_cast<int>(std::floor(second_screen->m_y));
+    const int dx = std::abs(target_x - x);
+    const int step_x = x < target_x ? 1 : -1;
+    const int dy = -std::abs(target_y - y);
+    const int step_y = y < target_y ? 1 : -1;
+    int error = dx + dy;
+
+    const std::array<projected_vertex_t, 2> endpoints {{
+        {{0, 0}, first_screen->m_ndc_z, first_screen->m_reciprocal_w, clipped_first},
+        {{0, 0}, second_screen->m_ndc_z, second_screen->m_reciprocal_w, clipped_second}
+    }};
+    const float line_x = second_screen->m_x - first_screen->m_x;
+    const float line_y = second_screen->m_y - first_screen->m_y;
+    const float line_length_squared = line_x * line_x + line_y * line_y;
+    while (true) {
+        float factor = 0.0F;
+        if (line_length_squared != 0.0F) {
+            factor = ((static_cast<float>(x) + 0.5F - first_screen->m_x) * line_x + (static_cast<float>(y) + 0.5F - first_screen->m_y) * line_y) / line_length_squared;
+            factor = std::clamp(factor, 0.0F, 1.0F);
+        }
+
+        const sample_t sample {x, y, {0, 1, 0, 0}, {1.0 - double(factor), double(factor), 0.0, 0.0}, 2};
+        const auto depth_w = interpolate_sample(endpoints, sample, fragment_inputs);
+        shade_sample(program, bindings, width, height, framebuffer, x, y, float(depth_w[0]), float(depth_w[1]), true, fragment_inputs, fragment_io);
+
+        if (x == target_x && y == target_y) {
+            break;
+        }
+        const int twice_error = error * 2;
+        if (dy <= twice_error) {
+            error += dy;
+            x += step_x;
+        }
+        if (twice_error <= dx) {
+            error += dx;
+            y += step_y;
+        }
+    }
+}
+
+void rasterize_triangle(
+    const software_shader::program_t& program,
+    const software_shader::bindings_t& bindings,
+    int width,
+    int height,
+    std::span<rgba8_t> framebuffer,
+    const pipeline_vertex_view_t& first,
+    const pipeline_vertex_view_t& second,
+    const pipeline_vertex_view_t& third,
+    raster_workspace_t& workspace,
+    varying_values_t& fragment_inputs,
+    software_shader::fragment_io_t& fragment_io
+) {
+    prepare_triangle(first, second, third, width, height, workspace);
+    visit_samples(workspace, width, height, [&](const sample_t& sample) {
+        const auto depth_w = interpolate_sample(workspace.m_vertices, sample, fragment_inputs);
+        shade_sample(
+            program,
+            bindings,
+            width,
+            height,
+            framebuffer,
+            sample.m_x,
+            sample.m_y,
+            float(depth_w[0]),
+            float(depth_w[1]),
+            workspace.m_front_facing,
+            fragment_inputs,
+            fragment_io
+        );
+    });
+}
+
+matrix4f_t object_to_world_matrix(const render_item_t& render_item) {
+    const auto& translation = render_item.translation();
+    const auto& scale = render_item.scale();
+    const float sine = std::sin(render_item.rotation());
+    const float cosine = std::cos(render_item.rotation());
+
+    const matrix4f_t translation_matrix {
+        1.0F,
+        0.0F,
+        0.0F,
+        translation[0],
+        0.0F,
+        1.0F,
+        0.0F,
+        translation[1],
+        0.0F,
+        0.0F,
+        1.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F
+    };
+    const matrix4f_t rotation_matrix {
+        cosine,
+        -sine,
+        0.0F,
+        0.0F,
+        sine,
+        cosine,
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F
+    };
+    const matrix4f_t scale_matrix {
+        scale[0],
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        scale[1],
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F
+    };
+    return translation_matrix * rotation_matrix * scale_matrix;
+}
+
+matrix4f_t world_to_clip_matrix(
+    const camera_t<float, int, 2>& camera,
+    framebuffer_t framebuffer
+) {
+    const auto& world_rect = camera.world_rect();
+    const auto& view_rect = camera.view_rect();
+    const float world_width = world_rect[0].length();
+    const float world_height = world_rect[1].length();
+    const float view_world_scale_x = static_cast<float>(view_rect[0].length()) / world_width;
+    const float view_world_scale_y = static_cast<float>(view_rect[1].length()) / world_height;
+    const float framebuffer_width = static_cast<float>(framebuffer.width);
+    const float framebuffer_height = static_cast<float>(framebuffer.height);
+    const float scale_x = view_world_scale_x * 2.0F / framebuffer_width;
+    const float scale_y = view_world_scale_y * -2.0F / framebuffer_height;
+    const float offset_x = (static_cast<float>(view_rect[0][0]) - world_rect[0][0] * view_world_scale_x) * 2.0F / framebuffer_width - 1.0F;
+    const float offset_y = 1.0F - (static_cast<float>(view_rect[1][0]) - world_rect[1][0] * view_world_scale_y) * 2.0F / framebuffer_height;
+
+    return {
+        scale_x,
+        0.0F,
+        0.0F,
+        offset_x,
+        0.0F,
+        scale_y,
+        0.0F,
+        offset_y,
+        0.0F,
+        0.0F,
+        1.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F
+    };
+}
+
+} // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

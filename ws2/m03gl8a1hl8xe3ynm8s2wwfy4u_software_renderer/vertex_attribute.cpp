@@ -1,5 +1,8 @@
 #include "vertex_attribute.h"
 
+#include <format>
+#include <stdexcept>
+
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 std::size_t vertex_attribute_type_size(vertex_attribute_type_t type) {
@@ -14,11 +17,14 @@ std::size_t vertex_attribute_type_size(vertex_attribute_type_t type) {
         case vertex_attribute_type_t::U16: return 2;
         case vertex_attribute_type_t::U32: return 4;
         case vertex_attribute_type_t::U64: return 8;
-        default: throw std::runtime_error("vertex_attribute_type_size: unknown vertex attribute type");
+        default: {
+            throw std::runtime_error("vertex_attribute_type_size: unknown vertex attribute type");
+        }
     }
 }
 
-vertex_attribute_t::vertex_attribute_t(): vertex_attribute_t(vertex_attribute_type_t::R32, 1)
+vertex_attribute_t::vertex_attribute_t():
+    vertex_attribute_t(vertex_attribute_type_t::R32, 1)
 {
 }
 

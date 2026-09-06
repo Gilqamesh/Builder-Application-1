@@ -2,6 +2,7 @@
 # define M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_VERTEX_PRIMITIVE_TOPOLOGY_H
 
 # include <format>
+# include <stdexcept>
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 

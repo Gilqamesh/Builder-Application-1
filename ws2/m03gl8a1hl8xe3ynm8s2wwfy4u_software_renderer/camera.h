@@ -167,7 +167,10 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::camera_t<WorldT, 
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::camera_t<WorldT, ViewT, N>& camera, auto& ctx) const {
         auto out = ctx.out();
 
-        out = std::format_to(out, "{{ world_rect: {}, view_rect: {} }}", camera.world_rect(), camera.view_rect());
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "world_rect: {}", camera.world_rect());
+        out = std::format_to(out, ", view_rect: {}", camera.view_rect());
+        out = std::format_to(out, " }}");
 
         return out;
     }

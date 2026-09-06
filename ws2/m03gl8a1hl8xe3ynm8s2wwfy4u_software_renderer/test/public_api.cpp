@@ -3,7 +3,7 @@
 #include <m03gagbht2l61mj6qitacwbmea_byte_stream/byte_stream.h>
 #include <m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays/api.h>
 #include <m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/software_renderer.h>
-#include <m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/detail/rasterization.h>
+#include <m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/helpers.h>
 #include <m03gn97n4iusbtl7uthb01wu9m_test_framework/test_framework.h>
 #include <m03gsy25j4v7nccgmsdov9ioft_shader/api.h>
 #include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
@@ -26,11 +26,13 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
+namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
+
 namespace api = m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer;
-namespace raster = api::detail;
-namespace fixtures = raster::fixtures;
+namespace raster = api;
 namespace byte_stream = m03gagbht2l61mj6qitacwbmea_byte_stream;
 namespace soa = m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays;
 namespace test = m03gn97n4iusbtl7uthb01wu9m_test_framework;
@@ -38,11 +40,7 @@ namespace shader = m03gsy25j4v7nccgmsdov9ioft_shader;
 namespace texture = m03gt0l0q3l4b1k27eab5k7py1_texture;
 namespace software_shader = m03gt1djvvy5atia5evkbg6rqy_software_shader;
 
-namespace {
-
 using position_t = std::array<float, 2>;
-using vector2f_t = shader::vector_t<float, 2>;
-using vector4f_t = shader::vector_t<float, 4>;
 using program_ptr_t = std::shared_ptr<const software_shader::program_t>;
 
 constexpr api::rgba8_t clear_color {3, 5, 7, 11};
@@ -855,60 +853,76 @@ program_ptr_t make_clip_program(bool facing = false) {
     shader::vertex_shader_ast_builder_t vertex;
     vertex.position(vertex.input<vector4f_t>(0));
     shader::fragment_shader_ast_builder_t fragment;
-    fragment.color(vector4f_t({0,0,1,1}));
+    fragment.color(vector4f_t({0, 0, 1, 1}));
     if (facing) {
-        fragment.branch(fragment.front_facing(), [&] { fragment.color(vector4f_t({1,0,0,1})); });
+        fragment.branch(fragment.front_facing(), [&] { fragment.color(vector4f_t({1, 0, 0, 1})); });
     }
     return std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
 }
 
-std::vector<api::rgba8_t> draw_clip_scene(const std::vector<fixtures::position_t>& positions, api::index_buffer_t::indices_t indices,
-    api::vertex_primitive_topology_t topology, program_ptr_t program) {
-    std::vector<api::rgba8_t> pixels(32*32, clear_color);
-    api::software_renderer_t renderer({.pixels=pixels, .width=32, .height=32});
-    const auto item = make_render_item(make_typed_geometry(positions, api::vertex_attribute_t(api::vertex_attribute_type_t::R32,4), std::move(indices), topology), std::make_shared<api::material_t>(program));
-    renderer.draw(make_camera(32,32), item);
+std::vector<api::rgba8_t> draw_clip_scene(const std::vector<clip_position_fixture_t>& positions, api::index_buffer_t::indices_t indices, api::vertex_primitive_topology_t topology, program_ptr_t program) {
+    std::vector<api::rgba8_t> pixels(32 * 32, clear_color);
+    api::software_renderer_t renderer({.pixels = pixels, .width = 32, .height = 32});
+    const api::vertex_attribute_t attribute(api::vertex_attribute_type_t::R32, 4);
+    const auto geometry = make_typed_geometry(positions, attribute, std::move(indices), topology);
+    const auto material = std::make_shared<api::material_t>(program);
+    const auto item = make_render_item(geometry, material);
+    renderer.draw(make_camera(32, 32), item);
     return pixels;
 }
 
 void test_grid_public_pipeline() {
     const auto program = make_clip_program();
-    for (const auto bounds : {fixtures::fractional, fixtures::clipped}) {
-        const auto [xmin,xmax,ymin,ymax] = bounds;
-        const std::vector<fixtures::position_t> positions {{xmin,ymax,0,1},{xmax,ymin,0,1},{xmax,ymax,0,1},{xmin,ymin,0,1}};
-        for (const auto topology : {api::vertex_primitive_topology_t::triangle,api::vertex_primitive_topology_t::triangle_strip,api::vertex_primitive_topology_t::triangle_fan}) {
-            api::index_buffer_t::indices_t indices = topology == api::vertex_primitive_topology_t::triangle ? api::index_buffer_t::indices_t{0,1,2,1,0,3}
-                : (topology == api::vertex_primitive_topology_t::triangle_strip ? api::index_buffer_t::indices_t{2,0,1,3} : api::index_buffer_t::indices_t{0,2,1,3});
-            for (bool reversed : {false,true}) {
-                if (reversed) { std::reverse(indices.begin(),indices.end()); }
-                const auto pixels = draw_clip_scene(positions,indices,topology,program);
-                const auto facing_pixels = draw_clip_scene(positions,indices,topology,make_clip_program(true));
-                const bool front = topology == api::vertex_primitive_topology_t::triangle ? !reversed
-                    : (topology == api::vertex_primitive_topology_t::triangle_fan && reversed);
-                for (int y=0;y<32;++y) { for(int x=0;x<32;++x) {
-                    const bool expected = bounds == fixtures::clipped || (4<=x && x<=28 && 8<=y && y<=24);
-                    expect_color(pixels[pixel_index(x,y,32)], expected ? blue : clear_color);
-                    expect_color(facing_pixels[pixel_index(x,y,32)], expected ? (front ? red : blue) : clear_color);
-                } }
+    for (const auto bounds : {fractional, clipped}) {
+        const auto [xmin, xmax, ymin, ymax] = bounds;
+        const std::vector<clip_position_fixture_t> positions {{xmin, ymax, 0, 1}, {xmax, ymin, 0, 1}, {xmax, ymax, 0, 1}, {xmin, ymin, 0, 1}};
+        for (const auto topology : {api::vertex_primitive_topology_t::triangle, api::vertex_primitive_topology_t::triangle_strip, api::vertex_primitive_topology_t::triangle_fan}) {
+            api::index_buffer_t::indices_t indices;
+            switch (topology) {
+                case api::vertex_primitive_topology_t::triangle: {
+                    indices = {0, 1, 2, 1, 0, 3};
+                } break;
+                case api::vertex_primitive_topology_t::triangle_strip: {
+                    indices = {2, 0, 1, 3};
+                } break;
+                default: {
+                    indices = {0, 2, 1, 3};
+                } break;
+            }
+            for (bool reversed : {false, true}) {
+                if (reversed) {
+                    std::reverse(indices.begin(), indices.end());
+                }
+                const auto pixels = draw_clip_scene(positions, indices, topology, program);
+                const auto facing_pixels = draw_clip_scene(positions, indices, topology, make_clip_program(true));
+                const bool front = topology == api::vertex_primitive_topology_t::triangle ? !reversed : (topology == api::vertex_primitive_topology_t::triangle_fan && reversed);
+                for (int y = 0; y < 32; ++y) {
+                    for (int x = 0; x < 32; ++x) {
+                        const bool expected = bounds == clipped || (4 <= x && x <= 28 && 8 <= y && y <= 24);
+                        expect_color(pixels[pixel_index(x, y, 32)], expected ? blue : clear_color);
+                        expect_color(facing_pixels[pixel_index(x, y, 32)], expected ? (front ? red : blue) : clear_color);
+                    }
+                }
             }
         }
     }
     const auto facing_program = make_clip_program(true);
-    for (const auto& input : {fixtures::crossing,fixtures::concave}) {
-        for (bool reversed : {false,true}) {
-            const auto pixels = draw_clip_scene({input.begin(),input.end()},reversed ? api::index_buffer_t::indices_t{2,1,0} : api::index_buffer_t::indices_t{0,1,2},api::vertex_primitive_topology_t::triangle,facing_program);
-            test::expect(std::equal_to<>(),colored_pixel_count(pixels),std::size_t(1));
-            expect_color(pixels[0],reversed ? red : blue);
+    for (const auto& input : {crossing, concave}) {
+        for (bool reversed : {false, true}) {
+            const auto indices = reversed ? api::index_buffer_t::indices_t {2, 1, 0} : api::index_buffer_t::indices_t {0, 1, 2};
+            const auto pixels = draw_clip_scene({input.begin(), input.end()}, indices, api::vertex_primitive_topology_t::triangle, facing_program);
+            test::expect(std::equal_to<>(), colored_pixel_count(pixels), std::size_t(1));
+            expect_color(pixels[0], reversed ? red : blue);
         }
     }
-    for (const auto& input : fixtures::collapsed) {
-        const auto pixels = draw_clip_scene({input.begin(),input.end()},{0,1,2},api::vertex_primitive_topology_t::triangle,program);
-        test::expect(std::equal_to<>(),colored_pixel_count(pixels),std::size_t(0));
+    for (const auto& input : collapsed) {
+        const auto pixels = draw_clip_scene({input.begin(), input.end()}, {0, 1, 2}, api::vertex_primitive_topology_t::triangle, program);
+        test::expect(std::equal_to<>(), colored_pixel_count(pixels), std::size_t(0));
     }
-    for (const auto& indices : {api::index_buffer_t::indices_t{0,1},api::index_buffer_t::indices_t{1,0}}) {
-        const auto pixels = draw_clip_scene({{-2,0,0,1},{-1,0,0,1}},indices,api::vertex_primitive_topology_t::line,program);
-        test::expect(std::equal_to<>(),colored_pixel_count(pixels),std::size_t(1));
-        expect_color(pixels[pixel_index(0,16,32)],blue);
+    for (const auto& indices : {api::index_buffer_t::indices_t {0, 1}, api::index_buffer_t::indices_t {1, 0}}) {
+        const auto pixels = draw_clip_scene({{-2, 0, 0, 1}, {-1, 0, 0, 1}}, indices, api::vertex_primitive_topology_t::line, program);
+        test::expect(std::equal_to<>(), colored_pixel_count(pixels), std::size_t(1));
+        expect_color(pixels[pixel_index(0, 16, 32)], blue);
     }
 }
 
@@ -916,40 +930,41 @@ void test_grid_fragment_state() {
     shader::vertex_shader_ast_builder_t vertex;
     vertex.position(vertex.input<vector4f_t>(0));
     shader::fragment_shader_ast_builder_t fragment;
-    fragment.color(fragment.fragment_coordinate()/vector4f_t({32,32,1,1}));
-    const auto coordinates_program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(),std::move(fragment).finalize());
-    const auto pixels = draw_clip_scene({{-1,1,-0.5F,1},{1,1,-0.5F,1},{-1,-1,-0.5F,1}},{0,1,2},api::vertex_primitive_topology_t::triangle,coordinates_program);
-    expect_color(pixels[0],{4,4,64,255});
+    fragment.color(fragment.fragment_coordinate() / vector4f_t({32, 32, 1, 1}));
+    const auto coordinates_program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+    const auto pixels = draw_clip_scene({{-1, 1, -0.5F, 1}, {1, 1, -0.5F, 1}, {-1, -1, -0.5F, 1}}, {0, 1, 2}, api::vertex_primitive_topology_t::triangle, coordinates_program);
+    expect_color(pixels[0], {4, 4, 64, 255});
 
     shader::vertex_shader_ast_builder_t varying_vertex;
     varying_vertex.position(varying_vertex.input<vector4f_t>(0));
     const auto value = varying_vertex.local(0.0F);
-    varying_vertex.branch(varying_vertex.vertex_index()==std::int32_t(1),[&] { varying_vertex.assign(value,1.0F); });
-    varying_vertex.branch(varying_vertex.vertex_index()==std::int32_t(2),[&] { varying_vertex.assign(value,2.0F); });
-    varying_vertex.output(7,value);
+    varying_vertex.branch(varying_vertex.vertex_index() == std::int32_t(1), [&] { varying_vertex.assign(value, 1.0F); });
+    varying_vertex.branch(varying_vertex.vertex_index() == std::int32_t(2), [&] { varying_vertex.assign(value, 2.0F); });
+    varying_vertex.output(7, value);
     shader::fragment_shader_ast_builder_t varying_fragment;
     const auto coordinate = varying_fragment.fragment_coordinate();
-    varying_fragment.color(varying_fragment.construct<vector4f_t>(varying_fragment.input<float>(7),shader::swizzle<2>(coordinate),shader::swizzle<3>(coordinate),1.0F));
-    const auto varying_program = std::make_shared<const software_shader::program_t>(std::move(varying_vertex).finalize(),std::move(varying_fragment).finalize());
-    const auto perspective = draw_clip_scene({{-1,1,-0.5F,1},{2,2,-1,2},{-4,-4,-2,4}},{0,1,2},api::vertex_primitive_topology_t::triangle,varying_program);
-    expect_color(perspective[0],{4,64,250,255});
+    const auto color = varying_fragment.construct<vector4f_t>(
+        varying_fragment.input<float>(7),
+        shader::swizzle<2>(coordinate),
+        shader::swizzle<3>(coordinate),
+        1.0F
+    );
+    varying_fragment.color(color);
+    const auto varying_program = std::make_shared<const software_shader::program_t>(std::move(varying_vertex).finalize(), std::move(varying_fragment).finalize());
+    const auto perspective = draw_clip_scene({{-1, 1, -0.5F, 1}, {2, 2, -1, 2}, {-4, -4, -2, 4}}, {0, 1, 2}, api::vertex_primitive_topology_t::triangle, varying_program);
+    expect_color(perspective[0], {4, 64, 250, 255});
 
     test::expect_throws<std::out_of_range>([&] {
         const float w = std::numeric_limits<float>::denorm_min();
-        (void)draw_clip_scene({{0,0,0,w},{w,0,0,w},{0,w,0,w}},{0,1,2},api::vertex_primitive_topology_t::triangle,make_clip_program());
+        (void)draw_clip_scene({{0, 0, 0, w}, {w, 0, 0, w}, {0, w, 0, w}}, {0, 1, 2}, api::vertex_primitive_topology_t::triangle, make_clip_program());
     });
-    const auto zero_w = draw_clip_scene({{0,0,0,0},{0,0,0,0},{0,0,0,0}},{0,1,2},api::vertex_primitive_topology_t::triangle,make_clip_program());
-    test::expect(std::equal_to<>(),colored_pixel_count(zero_w),std::size_t(0));
-    std::vector<api::rgba8_t> wide_pixels(std::size_t(raster::maximum_extent)+1);
-    api::software_renderer_t wide({.pixels=wide_pixels,.width=raster::maximum_extent+1,.height=1});
-    const auto item = make_render_item(make_geometry({{0,0}},{0},api::vertex_primitive_topology_t::point),make_material(make_unorm_texture(red)));
-    test::expect_throws<std::out_of_range>([&] { wide.draw(make_camera(32,32),item); });
+    const auto zero_w = draw_clip_scene({{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}}, {0, 1, 2}, api::vertex_primitive_topology_t::triangle, make_clip_program());
+    test::expect(std::equal_to<>(), colored_pixel_count(zero_w), std::size_t(0));
+    std::vector<api::rgba8_t> wide_pixels(std::size_t(raster::maximum_extent) + 1);
+    api::software_renderer_t wide({.pixels = wide_pixels, .width = raster::maximum_extent + 1, .height = 1});
+    const auto item = make_render_item(make_geometry({{0, 0}}, {0}, api::vertex_primitive_topology_t::point), make_material(make_unorm_texture(red)));
+    test::expect_throws<std::out_of_range>([&] { wide.draw(make_camera(32, 32), item); });
 }
-
-} // namespace
-
-namespace raster_tests {
-namespace {
 
 using mask_t = std::set<std::array<int, 2>>;
 
@@ -961,11 +976,11 @@ void near(double actual, double expected) {
     require(std::abs(actual - expected) <= 2e-6 * std::max(1.0, std::abs(expected)));
 }
 
-raster::pipeline_vertex_view_t vertex(fixtures::position_t p) {
+raster::pipeline_vertex_view_t vertex(clip_position_fixture_t p) {
     return {raster::vector4f_t(p), {}};
 }
 
-void prepare(fixtures::triangle_t input, raster::raster_workspace_t& workspace) {
+void prepare(clip_triangle_fixture_t input, raster::raster_workspace_t& workspace) {
     raster::prepare_triangle(vertex(input[0]), vertex(input[1]), vertex(input[2]), 32, 32, workspace);
 }
 
@@ -978,10 +993,10 @@ mask_t count_samples(raster::raster_workspace_t& workspace, int width = 32, int 
     return result;
 }
 
-mask_t rectangle(int x0, int y0, int x1, int y1) {
+mask_t rectangle(int first_x, int first_y, int end_x, int end_y) {
     mask_t result;
-    for (int y = y0; y < y1; ++y) {
-        for (int x = x0; x < x1; ++x) {
+    for (int y = first_y; y < end_y; ++y) {
+        for (int x = first_x; x < end_x; ++x) {
             result.insert({x, y});
         }
     }
@@ -1016,16 +1031,20 @@ mask_t winding_oracle(std::span<const raster::projected_vertex_t> vertices, int 
 }
 
 void test_original_shared_edges() {
-    for (const auto bounds : {fixtures::fractional, fixtures::clipped}) {
+    for (const auto bounds : {fractional, clipped}) {
         const auto [xmin, xmax, ymin, ymax] = bounds;
-        const fixtures::position_t a {xmin, ymax, 0, 1}, b {xmax, ymin, 0, 1};
-        const fixtures::position_t c {xmax, ymax, 0, 1}, d {xmin, ymin, 0, 1};
-        const auto expected = bounds == fixtures::fractional ? rectangle(4, 8, 29, 25) : rectangle(0, 0, 32, 32);
+        const clip_position_fixture_t a {xmin, ymax, 0, 1}, b {xmax, ymin, 0, 1};
+        const clip_position_fixture_t c {xmax, ymax, 0, 1}, d {xmin, ymin, 0, 1};
+        const auto expected = bounds == fractional ? rectangle(4, 8, 29, 25) : rectangle(0, 0, 32, 32);
         for (bool reverse_first : {false, true}) {
             for (bool reverse_second : {false, true}) {
-                std::array<fixtures::triangle_t, 2> inputs {{{a, b, c}, {b, a, d}}};
-                if (reverse_first) { std::reverse(inputs[0].begin(), inputs[0].end()); }
-                if (reverse_second) { std::reverse(inputs[1].begin(), inputs[1].end()); }
+                std::array<clip_triangle_fixture_t, 2> inputs {{{a, b, c}, {b, a, d}}};
+                if (reverse_first) {
+                    std::reverse(inputs[0].begin(), inputs[0].end());
+                }
+                if (reverse_second) {
+                    std::reverse(inputs[1].begin(), inputs[1].end());
+                }
                 std::array<mask_t, 2> masks;
                 raster::raster_workspace_t workspace;
                 for (std::size_t i = 0; i < inputs.size(); ++i) {
@@ -1048,24 +1067,28 @@ void test_original_shared_edges() {
 }
 
 void test_clipped_boundaries() {
-    for (const auto& original : {fixtures::crossing, fixtures::concave}) {
+    for (const auto& original : {crossing, concave}) {
         for (bool unequal_w : {false, true}) {
             for (bool reversed : {false, true}) {
                 for (std::size_t rotation = 0; rotation < 3; ++rotation) {
                     auto input = original;
                     if (unequal_w) {
                         for (std::size_t i = 0; i < 3; ++i) {
-                            for (float& component : input[i]) { component *= float(1 << i); }
+                            for (float& component : input[i]) {
+                                component *= float(1 << i);
+                            }
                         }
                     }
-                    if (reversed) { std::reverse(input.begin(), input.end()); }
+                    if (reversed) {
+                        std::reverse(input.begin(), input.end());
+                    }
                     std::rotate(input.begin(), input.begin() + rotation, input.end());
                     raster::raster_workspace_t workspace;
                     prepare(input, workspace);
-                    require(workspace.m_use_triangles == (original == fixtures::concave));
+                    require(workspace.m_use_triangles == (original == concave));
                     require(workspace.m_front_facing == reversed);
-                    require(count_samples(workspace) == mask_t{{0, 0}});
-                    require(winding_oracle(workspace.m_vertices, 32, 32) == mask_t{{0, 0}});
+                    require(count_samples(workspace) == mask_t {{0, 0}});
+                    require(winding_oracle(workspace.m_vertices, 32, 32) == mask_t {{0, 0}});
                     for (const auto& v : workspace.m_vertices) {
                         for (std::size_t plane = 0; plane < 6; ++plane) {
                             require(0.0 <= raster::clip_distance(v.m_source, plane));
@@ -1076,7 +1099,7 @@ void test_clipped_boundaries() {
         }
     }
     raster::raster_workspace_t workspace;
-    for (const auto input : fixtures::collapsed) {
+    for (const auto input : collapsed) {
         prepare(input, workspace);
         require(count_samples(workspace).empty());
     }
@@ -1095,7 +1118,9 @@ void test_polygon(std::vector<raster::grid_point_t> points, const mask_t& expect
     for (bool reversed : {false, true}) {
         for (std::size_t rotation = 0; rotation < points.size(); ++rotation) {
             workspace.m_vertices = originals;
-            if (reversed) { std::reverse(workspace.m_vertices.begin(), workspace.m_vertices.end()); }
+            if (reversed) {
+                std::reverse(workspace.m_vertices.begin(), workspace.m_vertices.end());
+            }
             std::rotate(workspace.m_vertices.begin(), workspace.m_vertices.begin() + rotation, workspace.m_vertices.end());
             raster::prepare_polygon(workspace);
             require(count_samples(workspace, 8, 8) == expected);
@@ -1112,9 +1137,13 @@ void test_polygon(std::vector<raster::grid_point_t> points, const mask_t& expect
                 facing = workspace.m_front_facing;
             } else {
                 for (std::size_t i = 0; i < actual.size(); ++i) {
-                    for (std::size_t j = 0; j < 3; ++j) { near(actual[i][j], baseline[i][j]); }
+                    for (std::size_t j = 0; j < 3; ++j) {
+                        near(actual[i][j], baseline[i][j]);
+                    }
                 }
-                if (!expected.empty()) { require(workspace.m_front_facing == (reversed ? !facing : facing)); }
+                if (!expected.empty()) {
+                    require(workspace.m_front_facing == (reversed ? !facing : facing));
+                }
             }
             workspace.m_use_triangles = false;
             require(count_samples(workspace, 8, 8) == expected);
@@ -1125,27 +1154,27 @@ void test_polygon(std::vector<raster::grid_point_t> points, const mask_t& expect
 void test_general_boundaries() {
     auto l_mask = rectangle(0, 0, 6, 2);
     l_mask.merge(rectangle(0, 2, 2, 6));
-    test_polygon({{0,0},{1536,0},{1536,512},{512,512},{512,1536},{0,1536}}, l_mask);
-    test_polygon({{124,129},{129,127},{133,125},{131,130}}, {{0,0}});
-    test_polygon({{126,128},{132,127},{134,126},{127,129}}, {{0,0}});
-    test_polygon({{0,0},{1024,1024},{0,1024},{1024,0}}, {{0,0},{1,0},{2,0},{1,1},{1,2},{0,3},{1,3},{2,3}});
-    test_polygon({{0,0},{768,0},{1536,0},{1536,1536},{0,1536}}, rectangle(0,0,6,6));
-    test_polygon({{0,0},{0,0},{1536,0},{1536,0},{1536,1536},{1536,1536},{0,1536},{0,1536}}, rectangle(0,0,6,6));
-    test_polygon({{0,0},{1536,0},{1536,1536},{0,1536},{0,0},{1536,0},{1536,1536},{0,1536}}, rectangle(0,0,6,6));
-    test_polygon({{0,0},{1536,0},{1536,1536},{0,1536},{0,1536},{1536,1536},{1536,0},{0,0}}, {});
-    auto touching = rectangle(0,0,2,2);
-    touching.merge(rectangle(2,2,4,4));
-    test_polygon({{0,0},{512,0},{512,512},{1024,512},{1024,1024},{512,1024},{512,512},{0,512}}, touching);
-    test_polygon({{128,128},{128,128},{128,128}}, {});
-    test_polygon({{0,0},{128,128},{256,256},{128,128}}, {});
-    test_polygon({{128,128},{512,128},{128,128}}, {});
+    test_polygon({{0, 0}, {1536, 0}, {1536, 512}, {512, 512}, {512, 1536}, {0, 1536}}, l_mask);
+    test_polygon({{124, 129}, {129, 127}, {133, 125}, {131, 130}}, {{0, 0}});
+    test_polygon({{126, 128}, {132, 127}, {134, 126}, {127, 129}}, {{0, 0}});
+    test_polygon({{0, 0}, {1024, 1024}, {0, 1024}, {1024, 0}}, {{0, 0}, {1, 0}, {2, 0}, {1, 1}, {1, 2}, {0, 3}, {1, 3}, {2, 3}});
+    test_polygon({{0, 0}, {768, 0}, {1536, 0}, {1536, 1536}, {0, 1536}}, rectangle(0, 0, 6, 6));
+    test_polygon({{0, 0}, {0, 0}, {1536, 0}, {1536, 0}, {1536, 1536}, {1536, 1536}, {0, 1536}, {0, 1536}}, rectangle(0, 0, 6, 6));
+    test_polygon({{0, 0}, {1536, 0}, {1536, 1536}, {0, 1536}, {0, 0}, {1536, 0}, {1536, 1536}, {0, 1536}}, rectangle(0, 0, 6, 6));
+    test_polygon({{0, 0}, {1536, 0}, {1536, 1536}, {0, 1536}, {0, 1536}, {1536, 1536}, {1536, 0}, {0, 0}}, {});
+    auto touching = rectangle(0, 0, 2, 2);
+    touching.merge(rectangle(2, 2, 4, 4));
+    test_polygon({{0, 0}, {512, 0}, {512, 512}, {1024, 512}, {1024, 1024}, {512, 1024}, {512, 512}, {0, 512}}, touching);
+    test_polygon({{128, 128}, {128, 128}, {128, 128}}, {});
+    test_polygon({{0, 0}, {128, 128}, {256, 256}, {128, 128}}, {});
+    test_polygon({{128, 128}, {512, 128}, {128, 128}}, {});
 
     std::mt19937 random(20260905);
     for (int iteration = 0; iteration < 200; ++iteration) {
         raster::raster_workspace_t workspace;
         const auto count = 3 + random() % 7;
         for (std::size_t i = 0; i < count; ++i) {
-            workspace.m_vertices.push_back({{std::int64_t(random() % 1025), std::int64_t(random() % 1025)}, 0, 1, {raster::vector4f_t({0,0,0,1}), {}}});
+            workspace.m_vertices.push_back({{std::int64_t(random() % 1025), std::int64_t(random() % 1025)}, 0, 1, {raster::vector4f_t({0, 0, 0, 1}), {}}});
         }
         raster::prepare_polygon(workspace);
         require(count_samples(workspace, 4, 4) == winding_oracle(workspace.m_vertices, 4, 4));
@@ -1153,14 +1182,14 @@ void test_general_boundaries() {
 }
 
 void test_interpolation() {
-    const std::array<raster::grid_point_t, 4> points {{{126,128},{132,127},{134,126},{127,129}}};
+    const std::array<raster::grid_point_t, 4> points {{{126, 128}, {132, 127}, {134, 126}, {127, 129}}};
     const std::array q {1.0, 0.5, 0.25, 0.125};
     const std::array z {-0.5, 0.0, 0.5, 0.75};
     std::array<raster::varying_values_t, 4> payloads;
     raster::raster_workspace_t workspace;
     for (std::size_t i = 0; i < points.size(); ++i) {
         payloads[i] = {{3, float(i)}, {5, raster::vector2f_t({float(i), 7.0F})}, {7, raster::vector3f_t(float(i))}, {9, raster::vector4f_t(float(i))}};
-        workspace.m_vertices.push_back({points[i], z[i], q[i], {raster::vector4f_t({0,0,0,1}), payloads[i]}});
+        workspace.m_vertices.push_back({points[i], z[i], q[i], {raster::vector4f_t({0, 0, 0, 1}), payloads[i]}});
     }
     raster::prepare_polygon(workspace);
     int hits = 0;
@@ -1168,7 +1197,8 @@ void test_interpolation() {
         ++hits;
         raster::varying_values_t output;
         const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, output);
-        near(dq[0], 0.6); near(dq[1], 0.5);
+        near(dq[0], 0.6);
+        near(dq[1], 0.5);
         near(std::get<float>(output[0].second), 0.5);
         near(std::get<raster::vector2f_t>(output[1].second)[0], 0.5);
         near(std::get<raster::vector2f_t>(output[1].second)[1], 7.0);
@@ -1178,20 +1208,22 @@ void test_interpolation() {
     require(hits == 1);
     // Triangle sample: grid (0,0),(1024,0),(0,1024), lambda=(3/4,1/8,1/8).
     workspace.m_vertices.resize(3);
-    workspace.m_vertices[0].m_point = {0,0};
-    workspace.m_vertices[1].m_point = {1024,0};
-    workspace.m_vertices[2].m_point = {0,1024};
+    workspace.m_vertices[0].m_point = {0, 0};
+    workspace.m_vertices[1].m_point = {1024, 0};
+    workspace.m_vertices[2].m_point = {0, 1024};
     raster::prepare_polygon(workspace);
     raster::visit_samples(workspace, 4, 4, [&](const auto& sample) {
         if (sample.m_x == 0 && sample.m_y == 0) {
             raster::varying_values_t output;
             const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, output);
-            near(dq[1], 27.0/32.0);
-            near(dq[0], 11.0/32.0);
-            near(std::get<float>(output[0].second), 4.0/27.0);
+            near(dq[1], 27.0 / 32.0);
+            near(dq[0], 11.0 / 32.0);
+            near(std::get<float>(output[0].second), 4.0 / 27.0);
         }
     });
-    for (auto& payload : payloads) { payload = {{3, std::numeric_limits<float>::max()}}; }
+    for (auto& payload : payloads) {
+        payload = {{3, std::numeric_limits<float>::max()}};
+    }
     for (std::size_t i = 0; i < workspace.m_vertices.size(); ++i) {
         workspace.m_vertices[i].m_source.m_outputs = payloads[i];
         workspace.m_vertices[i].m_reciprocal_w = std::numeric_limits<float>::max();
@@ -1206,63 +1238,114 @@ void test_interpolation() {
 
 void test_plane_coverage() {
     for (std::size_t plane = 0; plane < 7; ++plane) {
-        float xmin=-0.75F, xmax=0.75F, ymin=-0.75F, ymax=0.75F;
-        int x0=4, x1=28, y0=4, y1=28;
-        if (plane==0) { xmin=-2; xmax=0.5F; x0=0; x1=24; }
-        if (plane==1) { xmin=-0.5F; xmax=2; x0=8; x1=32; }
-        if (plane==2) { ymin=-2; ymax=0.5F; y0=8; y1=32; }
-        if (plane==3) { ymin=-0.5F; ymax=2; y0=0; y1=24; }
-        if (plane==4 || plane==5) { x1=16; }
-        if (plane==6) { xmin=-2; xmax=2; ymin=-2; ymax=2; x0=0; x1=32; y0=0; y1=32; }
+        float xmin = -0.75F, xmax = 0.75F, ymin = -0.75F, ymax = 0.75F;
+        int first_x = 4, end_x = 28, first_y = 4, end_y = 28;
+        if (plane == 0) {
+            xmin = -2;
+            xmax = 0.5F;
+            first_x = 0;
+            end_x = 24;
+        }
+        if (plane == 1) {
+            xmin = -0.5F;
+            xmax = 2;
+            first_x = 8;
+            end_x = 32;
+        }
+        if (plane == 2) {
+            ymin = -2;
+            ymax = 0.5F;
+            first_y = 8;
+            end_y = 32;
+        }
+        if (plane == 3) {
+            ymin = -0.5F;
+            ymax = 2;
+            first_y = 0;
+            end_y = 24;
+        }
+        if (plane == 4 || plane == 5) {
+            end_x = 16;
+        }
+        if (plane == 6) {
+            xmin = -2;
+            xmax = 2;
+            ymin = -2;
+            ymax = 2;
+            first_x = 0;
+            end_x = 32;
+            first_y = 0;
+            end_y = 32;
+        }
         mask_t expected;
-        for (int y=y0;y<y1;++y) { for(int x=x0;x<x1;++x) {
-            if (plane!=6 || (-16<=x-y && x-y<16)) { expected.insert({x,y}); }
-        } }
-        const std::array<fixtures::position_t,4> unscaled {{{xmin,ymax,0,1},{xmax,ymin,0,1},{xmax,ymax,0,1},{xmin,ymin,0,1}}};
-        for (bool unequal_w : {false,true}) {
-            auto positions=unscaled;
-            for (std::size_t i=0;i<4;++i) {
-                if (plane==4 || plane==5) { positions[i][2]=(plane==4 ? -1.0F : 1.0F)*(positions[i][0]+1.0F); }
-                if (plane==6) { positions[i][2]=positions[i][0]+positions[i][1]; }
-                if (unequal_w) { for(float& c:positions[i]) { c*=float(1<<i); } }
+        for (int y = first_y; y < end_y; ++y) {
+            for (int x = first_x; x < end_x; ++x) {
+                if (plane != 6 || (-16 <= x - y && x - y < 16)) {
+                    expected.insert({x, y});
+                }
             }
-            for (bool reversed : {false,true}) {
+        }
+        const std::array<clip_position_fixture_t, 4> unscaled {{{xmin, ymax, 0, 1}, {xmax, ymin, 0, 1}, {xmax, ymax, 0, 1}, {xmin, ymin, 0, 1}}};
+        for (bool unequal_w : {false, true}) {
+            auto positions = unscaled;
+            for (std::size_t i = 0; i < 4; ++i) {
+                if (plane == 4 || plane == 5) {
+                    positions[i][2] = (plane == 4 ? -1.0F : 1.0F) * (positions[i][0] + 1.0F);
+                }
+                if (plane == 6) {
+                    positions[i][2] = positions[i][0] + positions[i][1];
+                }
+                if (unequal_w) {
+                    for (float& c : positions[i]) {
+                        c *= float(1 << i);
+                    }
+                }
+            }
+            for (bool reversed : {false, true}) {
                 mask_t united;
-                for (auto ids : {std::array<std::size_t,3>{0,1,2},std::array<std::size_t,3>{1,0,3}}) {
-                    if (reversed) { std::reverse(ids.begin(),ids.end()); }
+                for (auto ids : {std::array<std::size_t, 3> {0, 1, 2}, std::array<std::size_t, 3> {1, 0, 3}}) {
+                    if (reversed) {
+                        std::reverse(ids.begin(), ids.end());
+                    }
                     raster::raster_workspace_t workspace;
-                    prepare({positions[ids[0]],positions[ids[1]],positions[ids[2]]},workspace);
-                    const auto mask=count_samples(workspace);
-                    require(mask==winding_oracle(workspace.m_vertices,32,32));
-                    for(const auto p:mask) { require(united.insert(p).second); }
-                    if (4<=plane) {
+                    prepare({positions[ids[0]], positions[ids[1]], positions[ids[2]]}, workspace);
+                    const auto mask = count_samples(workspace);
+                    require(mask == winding_oracle(workspace.m_vertices, 32, 32));
+                    for (const auto p : mask) {
+                        require(united.insert(p).second);
+                    }
+                    if (4 <= plane) {
                         raster::varying_values_t outputs;
-                        raster::visit_samples(workspace,32,32,[&](const auto& sample) {
-                            const auto dq=raster::interpolate_sample(workspace.m_vertices,sample,outputs);
-                            const double ndc_z=plane==6 ? double(sample.m_x-sample.m_y)/16.0
-                                : (plane==4 ? -1.0 : 1.0)*(double(sample.m_x)+0.5)/16.0;
-                            near(dq[0],0.5*ndc_z+0.5);
+                        raster::visit_samples(workspace, 32, 32, [&](const auto& sample) {
+                            const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, outputs);
+                            const double ndc_z = plane == 6 ? double(sample.m_x - sample.m_y) / 16.0
+                                                            : (plane == 4 ? -1.0 : 1.0) * (double(sample.m_x) + 0.5) / 16.0;
+                            near(dq[0], 0.5 * ndc_z + 0.5);
                         });
                     }
                 }
-                require(united==expected);
+                require(united == expected);
             }
         }
     }
     // Every generated vertex retains all processed constraints, even when W
     // crosses zero before reaching the final projectable part of the volume.
     std::mt19937 random(928);
-    std::uniform_real_distribution<float> coordinate(-8,8), w(-2,4);
-    for (int iteration=0;iteration<100;++iteration) {
-        std::array<raster::pipeline_vertex_view_t,3> input;
-        for(auto& v:input) { v=vertex({coordinate(random),coordinate(random),coordinate(random),w(random)}); }
+    std::uniform_real_distribution<float> coordinate(-8, 8), w(-2, 4);
+    for (int iteration = 0; iteration < 100; ++iteration) {
+        std::array<raster::pipeline_vertex_view_t, 3> input;
+        for (auto& v : input) {
+            v = vertex({coordinate(random), coordinate(random), coordinate(random), w(random)});
+        }
         raster::clipping_workspace_t clipping;
-        const auto index=raster::clip_triangle(input[0],input[1],input[2],clipping);
+        const auto index = raster::clip_triangle(input[0], input[1], input[2], clipping);
         if (index) {
-            const auto& polygon=clipping.m_buffers[*index];
-            for(const auto& v:polygon.m_vertices) { for(std::size_t plane=0;plane<6;++plane) {
-                require(0<=raster::clip_distance(raster::view(v,polygon.m_values),plane));
-            } }
+            const auto& polygon = clipping.m_buffers[*index];
+            for (const auto& v : polygon.m_vertices) {
+                for (std::size_t plane = 0; plane < 6; ++plane) {
+                    require(0 <= raster::clip_distance(raster::view(v, polygon.m_values), plane));
+                }
+            }
         }
     }
 }
@@ -1271,7 +1354,7 @@ void test_clipping() {
     raster::clipping_workspace_t workspace;
     const raster::varying_values_t from_values {{4, 0.0F}}, to_values {{4, 1.0F}};
     for (std::size_t plane = 0; plane < 6; ++plane) {
-        auto outside = vertex({0,0,0,1}), inside = outside;
+        auto outside = vertex({0, 0, 0, 1}), inside = outside;
         outside.m_clip_position[plane / 2] = plane % 2 == 0 ? -2.0F : 2.0F;
         outside.m_outputs = from_values;
         inside.m_outputs = to_values;
@@ -1297,7 +1380,7 @@ void test_clipping() {
         }
     }
     for (float sign : {-1.0F, 1.0F}) {
-        auto first = vertex({sign*2,sign*2,sign*2,1}), second = vertex({0,0,0,1});
+        auto first = vertex({sign * 2, sign * 2, sign * 2, 1}), second = vertex({0, 0, 0, 1});
         const auto index = raster::clip_line(first, second, workspace);
         require(index.has_value());
         for (const auto& v : workspace.m_buffers[*index].m_vertices) {
@@ -1308,58 +1391,63 @@ void test_clipping() {
     }
     const float huge = std::numeric_limits<float>::max();
     raster::raster_workspace_t polygon;
-    raster::prepare_triangle(vertex({-huge,-huge,0,huge}), vertex({huge,-huge,0,huge}), vertex({0,huge,0,huge}), 8, 8, polygon);
-    require(!count_samples(polygon,8,8).empty());
+    raster::prepare_triangle(vertex({-huge, -huge, 0, huge}), vertex({huge, -huge, 0, huge}), vertex({0, huge, 0, huge}), 8, 8, polygon);
+    require(!count_samples(polygon, 8, 8).empty());
     test::expect_throws<std::out_of_range>([] { raster::projectable_reciprocal_w(std::numeric_limits<float>::denorm_min()); });
     require(std::isfinite(float(raster::projectable_reciprocal_w(0x1p-127F))));
 }
 
 void test_integer_bounds() {
     constexpr std::int64_t limit = std::int64_t(1) << 31;
-    constexpr std::array<raster::grid_point_t, 4> corners {{{0,0},{limit,0},{limit,limit},{0,limit}}};
+    constexpr std::array<raster::grid_point_t, 4> corners {{{0, 0}, {limit, 0}, {limit, limit}, {0, limit}}};
     std::int64_t largest = 0;
-    for (auto a : corners) { for (auto b : corners) { for (auto p : corners) {
-        const auto determinant = raster::edge(a,b,p);
-        require(determinant == -raster::edge(b,a,p));
-        largest = std::max(largest, std::abs(determinant));
-    } } }
+    for (auto a : corners) {
+        for (auto b : corners) {
+            for (auto p : corners) {
+                const auto determinant = raster::edge(a, b, p);
+                require(determinant == -raster::edge(b, a, p));
+                largest = std::max(largest, std::abs(determinant));
+            }
+        }
+    }
     require(largest == (std::int64_t(1) << 62));
     require(raster::snap(raster::maximum_extent, raster::maximum_extent) == limit);
-    require(float(raster::maximum_extent-1)+0.5F == double(raster::maximum_extent)-0.5);
-    for (const std::int64_t i : {std::int64_t(0), std::int64_t(128), limit-1}) {
-        const double half = (double(i)+0.5)/256.0;
-        require(raster::snap(half,raster::maximum_extent) == i+1);
-        require(raster::snap(std::nextafter(half,-std::numeric_limits<double>::infinity()),raster::maximum_extent) == i);
-        require(raster::snap(std::nextafter(half,std::numeric_limits<double>::infinity()),raster::maximum_extent) == i+1);
+    require(float(raster::maximum_extent - 1) + 0.5F == double(raster::maximum_extent) - 0.5);
+    for (const std::int64_t i : {std::int64_t(0), std::int64_t(128), limit - 1}) {
+        const double half = (double(i) + 0.5) / 256.0;
+        require(raster::snap(half, raster::maximum_extent) == i + 1);
+        require(raster::snap(std::nextafter(half, -std::numeric_limits<double>::infinity()), raster::maximum_extent) == i);
+        require(raster::snap(std::nextafter(half, std::numeric_limits<double>::infinity()), raster::maximum_extent) == i + 1);
     }
     std::mt19937_64 random(20260905);
     for (int i = 0; i < 10000; ++i) {
-        const raster::fraction_t a {std::int64_t(random() % (std::uint64_t(1)<<62)), std::int64_t(1+random()%(limit-1))};
-        const raster::fraction_t b {std::int64_t(random() % (std::uint64_t(1)<<62)), std::int64_t(1+random()%(limit-1))};
-        const __int128 lhs = __int128(a[0])*b[1], rhs = __int128(b[0])*a[1];
-        require(raster::compare_fraction(a,b) == ((rhs<lhs)-(lhs<rhs)));
+        const raster::fraction_t a {std::int64_t(random() % (std::uint64_t(1) << 62)), std::int64_t(1 + random() % (limit - 1))};
+        const raster::fraction_t b {std::int64_t(random() % (std::uint64_t(1) << 62)), std::int64_t(1 + random() % (limit - 1))};
+        const __int128 lhs = __int128(a[0]) * b[1], rhs = __int128(b[0]) * a[1];
+        require(raster::compare_fraction(a, b) == ((rhs < lhs) - (lhs < rhs)));
     }
     // Both rational crossings round to the same double, but contain the last X center.
     raster::raster_workspace_t workspace;
-    for (const auto p : std::array<raster::grid_point_t,3>{{{limit-128,0},{limit-127,limit},{limit-129,limit}}}) {
-        workspace.m_vertices.push_back({p,0,1,{raster::vector4f_t({0,0,0,1}),{}}});
+    for (const auto p : std::array<raster::grid_point_t, 3> {{{limit - 128, 0}, {limit - 127, limit}, {limit - 129, limit}}}) {
+        workspace.m_vertices.push_back({p, 0, 1, {raster::vector4f_t({0, 0, 0, 1}), {}}});
     }
     raster::prepare_polygon(workspace);
     workspace.m_use_triangles = false;
     int hits = 0;
-    raster::visit_samples(workspace,raster::maximum_extent,1,[&](const auto& sample) {
+    raster::visit_samples(workspace, raster::maximum_extent, 1, [&](const auto& sample) {
         ++hits;
-        require(sample.m_x == raster::maximum_extent-1 && sample.m_y == 0);
+        require(sample.m_x == raster::maximum_extent - 1 && sample.m_y == 0);
         double sum = 0;
-        for (double w : sample.m_weights) { require(std::isfinite(w) && 0 <= w); sum += w; }
-        near(sum,1.0);
+        for (double w : sample.m_weights) {
+            require(std::isfinite(w) && 0 <= w);
+            sum += w;
+        }
+        near(sum, 1.0);
     });
     require(hits == 1);
 }
 
-} // namespace
-
-void run() {
+void run_raster_tests() {
     test_original_shared_edges();
     test_clipped_boundaries();
     test_general_boundaries();
@@ -1369,27 +1457,40 @@ void run() {
     test_integer_bounds();
 }
 
-} // namespace raster_tests
+void run_resource_tests() {
+    test_resource_model();
+    test_vertex_layout_rejection();
+    test_material_resource_mapping();
+    test_selected_range_indices_and_pre_raster_validation();
+    test_fragment_bindings_are_validated_before_clipped_geometry();
+}
+
+void run_framebuffer_tests() {
+    test_framebuffer();
+    test_empty_framebuffer();
+}
+
+void run_pipeline_tests() {
+    test_topologies_and_clipping();
+    test_shared_edge_coverage();
+    test_texture_coordinate_interpolation();
+    test_shared_material_transform_semantics();
+    test_matrix_zw_and_sparse_consumed_outputs();
+    test_explicit_color_and_rgba8_conversion();
+    test_nonfinite_clip_position_rejection();
+    test_grid_public_pipeline();
+    test_grid_fragment_state();
+}
+
+} // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
 
 int main() {
-    return test::run([] {
-        static_assert(sizeof(api::rgba8_t) == 4);
-        test_resource_model();
-        test_framebuffer();
-        test_empty_framebuffer();
-        test_topologies_and_clipping();
-        test_shared_edge_coverage();
-        test_texture_coordinate_interpolation();
-        test_shared_material_transform_semantics();
-        test_matrix_zw_and_sparse_consumed_outputs();
-        test_selected_range_indices_and_pre_raster_validation();
-        test_fragment_bindings_are_validated_before_clipped_geometry();
-        test_explicit_color_and_rgba8_conversion();
-        test_vertex_layout_rejection();
-        test_material_resource_mapping();
-        test_nonfinite_clip_position_rejection();
-        test_grid_public_pipeline();
-        test_grid_fragment_state();
-        raster_tests::run();
+    namespace renderer = m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer;
+    return m03gn97n4iusbtl7uthb01wu9m_test_framework::run([] {
+        static_assert(sizeof(renderer::rgba8_t) == 4);
+        renderer::run_resource_tests();
+        renderer::run_framebuffer_tests();
+        renderer::run_pipeline_tests();
+        renderer::run_raster_tests();
     });
 }

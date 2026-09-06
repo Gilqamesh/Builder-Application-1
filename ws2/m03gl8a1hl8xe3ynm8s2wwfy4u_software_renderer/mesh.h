@@ -61,7 +61,7 @@ mesh_t::mesh_t(m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays::structure_of_arra
         } else if (m_vertex_streams[i].element_count() != element_count) {
             throw std::logic_error(std::format("mesh_t::mesh_t: vertex stream {} element count ({}) does not match vertex stream 0 element count ({})", i, m_vertex_streams[i].element_count(), element_count));
         }
-        
+
         const auto& attribute = m_vertex_attributes[i];
         const auto& stream = m_vertex_streams[i];
         const auto stream_element_size = stream.element_size();
