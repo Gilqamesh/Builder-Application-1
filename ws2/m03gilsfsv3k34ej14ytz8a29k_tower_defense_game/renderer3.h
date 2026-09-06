@@ -37,7 +37,7 @@ public:
     int height() const noexcept;
 
     void draw(
-        const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::camera_t<float, int, 2>& camera,
+        const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::camera_t& camera,
         const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::render_item_t& render_item
     );
 

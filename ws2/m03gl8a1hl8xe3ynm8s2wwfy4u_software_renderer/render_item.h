@@ -3,6 +3,7 @@
 
 # include "geometry.h"
 # include "material.h"
+# include "types.h"
 
 # include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
 
@@ -12,10 +13,14 @@
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 /**
- * @brief Selects geometry and material with a 2D float transform for one draw.
+ * @brief Selects geometry and material with a 3D float transform for one draw.
  *
- * Rotation is counter-clockwise in radians about the local origin. The transform
- * uses column vectors and applies scale, then rotation, then translation.
+ * The object-to-world matrix uses column vectors and applies scale, then
+ * quaternion rotation, then translation. Zero and negative scale components are valid.
+ * Translation and scale must be finite when deriving the matrix.
+ * Rotation setters store a normalized copy, rejecting zero or non-finite
+ * quaternions. Euler input uses finite radians about fixed X, then Y, then Z
+ * axes. Failed rotation updates preserve the previous orientation.
  */
 class render_item_t {
 public:
@@ -27,21 +32,24 @@ public:
     std::shared_ptr<material_t>& material();
     const std::shared_ptr<material_t>& material() const;
 
-    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& translation();
-    const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& translation() const;
+    vector3f_t& translation();
+    const vector3f_t& translation() const;
 
-    float& rotation();
-    const float& rotation() const;
+    void rotation(const quaternion_t& rotation);
+    void rotation(const vector3f_t& euler_xyz);
+    const quaternion_t& rotation() const;
 
-    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& scale();
-    const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& scale() const;
+    vector3f_t& scale();
+    const vector3f_t& scale() const;
+
+    matrix4f_t object_to_world() const;
 
 private:
     std::shared_ptr<geometry_t> m_geometry;
     std::shared_ptr<material_t> m_material;
-    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2> m_translation;
-    float m_rotation;
-    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2> m_scale;
+    vector3f_t m_translation;
+    quaternion_t m_rotation;
+    vector3f_t m_scale;
 };
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

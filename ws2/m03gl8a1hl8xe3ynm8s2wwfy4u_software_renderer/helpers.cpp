@@ -22,6 +22,24 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 static_assert(std::numeric_limits<float>::is_iec559 && std::numeric_limits<float>::digits == 24);
 static_assert(std::numeric_limits<double>::is_iec559 && std::numeric_limits<double>::digits == 53);
 
+raster_bounds_t::raster_bounds_t(int width, int height, const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<int, 2>& view_rect):
+    m_width(width),
+    m_height(height),
+    m_x(view_rect[0][0]),
+    m_y(view_rect[1][0]),
+    m_view_width(std::int64_t(view_rect[0][1]) - m_x),
+    m_view_height(std::int64_t(view_rect[1][1]) - m_y),
+    m_first_x(std::max<std::int64_t>(0, -std::int64_t(m_x))),
+    m_first_y(std::max<std::int64_t>(0, -std::int64_t(m_y))),
+    m_end_x(std::min(m_view_width, std::int64_t(width) - m_x)),
+    m_end_y(std::min(m_view_height, std::int64_t(height) - m_y))
+{
+}
+
+bool raster_bounds_t::empty() const {
+    return m_end_x <= m_first_x || m_end_y <= m_first_y;
+}
+
 void clear(clipping_buffer_t& buffer) {
     buffer.m_vertices.clear();
     buffer.m_values.clear();
@@ -112,7 +130,7 @@ bool between(grid_point_t p, grid_point_t a, grid_point_t b) {
     return std::min(a[0], b[0]) <= p[0] && p[0] <= std::max(a[0], b[0]) && std::min(a[1], b[1]) <= p[1] && p[1] <= std::max(a[1], b[1]);
 }
 
-bool opposite(std::int64_t a, std::int64_t b) {
+bool opposite(edge_value_t a, edge_value_t b) {
     return (a < 0 && 0 < b) || (b < 0 && 0 < a);
 }
 
@@ -227,10 +245,10 @@ bool crossed_facing(std::span<const projected_vertex_t> vertices) {
             }
         }
     }
-    std::int64_t largest = 0;
+    edge_value_t largest = 0;
     for (std::size_t i = 1; i + 1 < count; ++i) {
         const auto area = edge(at(start, reversed, 0), at(start, reversed, i), at(start, reversed, i + 1));
-        if (std::abs(largest) < std::abs(area)) {
+        if ((largest < 0 ? -largest : largest) < (area < 0 ? -area : area)) {
             largest = area;
         }
     }
@@ -401,7 +419,7 @@ double projectable_reciprocal_w(float w) {
     return reciprocal;
 }
 
-std::int64_t snap(double screen, int extent) {
+std::int64_t snap(double screen, std::int64_t extent) {
     const double scaled = screen * double(subpixels);
     if (!std::isfinite(scaled) || scaled < 0.0 || double(extent) * double(subpixels) < scaled) {
         throw std::out_of_range("software renderer projected position is outside its subpixel grid");
@@ -410,18 +428,18 @@ std::int64_t snap(double screen, int extent) {
     return std::int64_t(lower) + (0.5 <= scaled - lower ? 1 : 0);
 }
 
-std::int64_t edge(grid_point_t a, grid_point_t b, grid_point_t p) {
-    // All three points are in [0,2^31]^2: each product AND the determinant
-    // are bounded by 2^62. Do not replace this with a polygon-area sum.
-    return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+edge_value_t edge(grid_point_t a, grid_point_t b, grid_point_t p) {
+    // Signed-int rectangle endpoints give viewport-local coordinates below 2^40
+    // on the subpixel grid. Determinants fit in 81 signed bits.
+    return edge_value_t(b[0] - a[0]) * (p[1] - a[1]) - edge_value_t(b[1] - a[1]) * (p[0] - a[0]);
 }
 
-std::int64_t ceil_div(std::int64_t numerator, std::int64_t denominator) {
+edge_value_t ceil_div(edge_value_t numerator, edge_value_t denominator) {
     return numerator / denominator + (0 < numerator % denominator ? 1 : 0);
 }
 
 int compare_fraction(fraction_t a, fraction_t b) {
-    // Quotient/remainder comparison avoids the ~93-bit cross products of n/d.
+    // Quotient/remainder comparison keeps rational comparisons within their operand bounds.
     // Reciprocating the positive remainders reverses their order.
     int sign = 1;
     for (;;) {
@@ -439,9 +457,9 @@ int compare_fraction(fraction_t a, fraction_t b) {
     }
 }
 
-int sample_bound(fraction_t crossing, int extent) {
+std::int64_t sample_bound(fraction_t crossing, std::int64_t extent) {
     const auto bound = ceil_div(crossing[0] - center_offset * crossing[1], subpixels * crossing[1]);
-    return int(std::clamp<std::int64_t>(bound, 0, extent));
+    return std::int64_t(std::clamp<edge_value_t>(bound, 0, extent));
 }
 
 void prepare_polygon(raster_workspace_t& workspace) {
@@ -481,7 +499,7 @@ void prepare_polygon(raster_workspace_t& workspace) {
     }
 }
 
-void prepare_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, int width, int height, raster_workspace_t& workspace) {
+void prepare_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, std::int64_t width, std::int64_t height, raster_workspace_t& workspace) {
     workspace.m_empty = true;
     workspace.m_vertices.clear();
     const auto clipped = clip_triangle(first, second, third, workspace.m_clipping);
@@ -518,7 +536,7 @@ void scanline_events(std::span<const projected_vertex_t> vertices, std::int64_t 
         const auto a = vertices[lower].m_point, b = vertices[upper].m_point;
         if (a[1] <= y && y < b[1]) {
             const auto denominator = b[1] - a[1];
-            const auto numerator = a[0] * (b[1] - y) + b[0] * (y - a[1]);
+            const auto numerator = edge_value_t(a[0]) * (b[1] - y) + edge_value_t(b[0]) * (y - a[1]);
             events.push_back({{numerator, denominator}, lower, upper, delta});
         }
     }
@@ -528,7 +546,7 @@ void scanline_events(std::span<const projected_vertex_t> vertices, std::int64_t 
     });
 }
 
-sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::span<const projected_vertex_t> vertices, int x, int y) {
+sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::span<const projected_vertex_t> vertices, std::int64_t x, std::int64_t y) {
     // Non-simple polygons use winding scanline spans. These weights interpolate
     // reciprocal W, Z/W and varying/W along each boundary edge and across the span.
     const auto px = std::int64_t(x) * subpixels + center_offset;
@@ -715,19 +733,19 @@ varying_t vertex_output(
 
 std::optional<screen_vertex_t> project(
     const pipeline_vertex_view_t& vertex,
-    int width,
-    int height
+    std::int64_t width,
+    std::int64_t height
 ) {
     const float w = vertex.m_clip_position[3];
     if (w == 0.0F) {
         return std::nullopt;
     }
-    const float reciprocal_w = float(projectable_reciprocal_w(w));
-    const float ndc_x = vertex.m_clip_position[0] * reciprocal_w;
-    const float ndc_y = vertex.m_clip_position[1] * reciprocal_w;
-    const float ndc_z = vertex.m_clip_position[2] * reciprocal_w;
-    const float x = (ndc_x * 0.5F + 0.5F) * static_cast<float>(width);
-    const float y = (0.5F - ndc_y * 0.5F) * static_cast<float>(height);
+    const double reciprocal_w = projectable_reciprocal_w(w);
+    const double ndc_x = double(vertex.m_clip_position[0]) / double(w);
+    const double ndc_y = double(vertex.m_clip_position[1]) / double(w);
+    const double ndc_z = double(vertex.m_clip_position[2]) / double(w);
+    const double x = (ndc_x + 1.0) * (double(width) / 2.0);
+    const double y = (1.0 - ndc_y) * (double(height) / 2.0);
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(ndc_z) || !std::isfinite(reciprocal_w)) {
         return std::nullopt;
     }
@@ -772,21 +790,22 @@ rgba8_t to_rgba8(const vector4f_t& color) {
 void shade_sample(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
-    int width,
-    int height,
+    const raster_bounds_t& bounds,
     std::span<rgba8_t> framebuffer,
-    int x,
-    int y,
+    std::int64_t x,
+    std::int64_t y,
     float depth,
     float reciprocal_w,
     bool front_facing,
     std::span<const varying_entry_t> inputs,
     software_shader::fragment_io_t& io
 ) {
-    if (x < 0 || y < 0 || width <= x || height <= y) {
+    if (x < bounds.m_first_x || y < bounds.m_first_y || bounds.m_end_x <= x || bounds.m_end_y <= y) {
         return;
     }
 
+    x += bounds.m_x;
+    y += bounds.m_y;
     io.reset(
         vector4f_t({static_cast<float>(x) + 0.5F,
             static_cast<float>(y) + 0.5F,
@@ -803,14 +822,13 @@ void shade_sample(
     if (!color) {
         return;
     }
-    framebuffer[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)] = to_rgba8(*color);
+    framebuffer[static_cast<std::size_t>(y) * static_cast<std::size_t>(bounds.m_width) + static_cast<std::size_t>(x)] = to_rgba8(*color);
 }
 
 void rasterize_point(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
-    int width,
-    int height,
+    const raster_bounds_t& bounds,
     std::span<rgba8_t> framebuffer,
     const pipeline_vertex_view_t& vertex,
     varying_values_t& fragment_inputs,
@@ -819,27 +837,26 @@ void rasterize_point(
     if (!inside_clip_volume(vertex)) {
         return;
     }
-    const auto screen = project(vertex, width, height);
+    const auto screen = project(vertex, bounds.m_view_width, bounds.m_view_height);
     if (!screen) {
         return;
     }
 
     constexpr int radius = 3;
     constexpr int radius_squared = radius * radius;
-    const int center_x = static_cast<int>(std::floor(screen->m_x));
-    const int center_y = static_cast<int>(std::floor(screen->m_y));
+    const auto center_x = static_cast<std::int64_t>(std::floor(screen->m_x));
+    const auto center_y = static_cast<std::int64_t>(std::floor(screen->m_y));
     const float depth = screen->m_ndc_z * 0.5F + 0.5F;
-    for (int y = center_y - radius; y <= center_y + radius; ++y) {
-        for (int x = center_x - radius; x <= center_x + radius; ++x) {
-            const int dx = x - center_x;
-            const int dy = y - center_y;
+    for (auto y = center_y - radius; y <= center_y + radius; ++y) {
+        for (auto x = center_x - radius; x <= center_x + radius; ++x) {
+            const auto dx = x - center_x;
+            const auto dy = y - center_y;
             if (dx * dx + dy * dy <= radius_squared) {
                 fragment_inputs.assign(screen->m_outputs.begin(), screen->m_outputs.end());
                 shade_sample(
                     program,
                     bindings,
-                    width,
-                    height,
+                    bounds,
                     framebuffer,
                     x,
                     y,
@@ -857,8 +874,7 @@ void rasterize_point(
 void rasterize_line(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
-    int width,
-    int height,
+    const raster_bounds_t& bounds,
     std::span<rgba8_t> framebuffer,
     const pipeline_vertex_view_t& first,
     const pipeline_vertex_view_t& second,
@@ -873,63 +889,53 @@ void rasterize_line(
     const auto& clipped = clipping.m_buffers[*clipped_index];
     const auto clipped_first = view(clipped.m_vertices[0], clipped.m_values);
     const auto clipped_second = view(clipped.m_vertices[1], clipped.m_values);
-    const auto first_screen = project(clipped_first, width, height);
-    const auto second_screen = project(clipped_second, width, height);
+    const auto first_screen = project(clipped_first, bounds.m_view_width, bounds.m_view_height);
+    const auto second_screen = project(clipped_second, bounds.m_view_width, bounds.m_view_height);
     if (!first_screen || !second_screen) {
         return;
     }
 
-    // Inclusive Bresenham coverage between the floored projected endpoints.
-    int x = static_cast<int>(std::floor(first_screen->m_x));
-    int y = static_cast<int>(std::floor(first_screen->m_y));
-    const int target_x = static_cast<int>(std::floor(second_screen->m_x));
-    const int target_y = static_cast<int>(std::floor(second_screen->m_y));
-    const int dx = std::abs(target_x - x);
-    const int step_x = x < target_x ? 1 : -1;
-    const int dy = -std::abs(target_y - y);
-    const int step_y = y < target_y ? 1 : -1;
-    int error = dx + dy;
-
+    // Direct evaluation of inclusive Bresenham samples lets us skip invisible
+    // major-axis steps without changing endpoint rounding or tie ownership.
+    const auto start_x = std::int64_t(std::floor(first_screen->m_x));
+    const auto start_y = std::int64_t(std::floor(first_screen->m_y));
+    const auto target_x = std::int64_t(std::floor(second_screen->m_x));
+    const auto target_y = std::int64_t(std::floor(second_screen->m_y));
+    const auto dx = std::abs(target_x - start_x), dy = std::abs(target_y - start_y);
+    const std::int64_t step_x = start_x < target_x ? 1 : -1, step_y = start_y < target_y ? 1 : -1;
+    const bool horizontal = dy <= dx;
+    const auto major = horizontal ? dx : dy, minor = horizontal ? dy : dx;
+    const auto start = horizontal ? start_x : start_y, step = horizontal ? step_x : step_y;
+    const auto first_pixel = horizontal ? bounds.m_first_x : bounds.m_first_y;
+    const auto end = horizontal ? bounds.m_end_x : bounds.m_end_y;
+    const auto first_step = std::max<std::int64_t>(0, step == 1 ? first_pixel - start : start - end + 1);
+    const auto last_step = std::min(major, step == 1 ? end - 1 - start : start - first_pixel);
     const std::array<projected_vertex_t, 2> endpoints {{
         {{0, 0}, first_screen->m_ndc_z, first_screen->m_reciprocal_w, clipped_first},
         {{0, 0}, second_screen->m_ndc_z, second_screen->m_reciprocal_w, clipped_second}
     }};
-    const float line_x = second_screen->m_x - first_screen->m_x;
-    const float line_y = second_screen->m_y - first_screen->m_y;
-    const float line_length_squared = line_x * line_x + line_y * line_y;
-    while (true) {
-        // Interpolate by the clamped projection of the pixel center onto the
-        // projected segment; a zero-length segment uses its first endpoint's values.
-        float factor = 0.0F;
-        if (line_length_squared != 0.0F) {
-            factor = ((static_cast<float>(x) + 0.5F - first_screen->m_x) * line_x + (static_cast<float>(y) + 0.5F - first_screen->m_y) * line_y) / line_length_squared;
-            factor = std::clamp(factor, 0.0F, 1.0F);
+    const double line_x = second_screen->m_x - first_screen->m_x;
+    const double line_y = second_screen->m_y - first_screen->m_y;
+    const double length_squared = line_x * line_x + line_y * line_y;
+    for (auto i = first_step; i <= last_step; ++i) {
+        const auto offset = major == 0 ? 0 : std::int64_t((edge_value_t(i) * minor + major / 2) / major);
+        const auto x = start_x + step_x * (horizontal ? i : offset);
+        const auto y = start_y + step_y * (horizontal ? offset : i);
+        double factor = 0.0;
+        if (length_squared != 0.0) {
+            factor = ((double(x) + 0.5 - first_screen->m_x) * line_x + (double(y) + 0.5 - first_screen->m_y) * line_y) / length_squared;
+            factor = std::clamp(factor, 0.0, 1.0);
         }
-
-        const sample_t sample {x, y, {0, 1, 0, 0}, {1.0 - double(factor), double(factor), 0.0, 0.0}, 2};
+        const sample_t sample {x, y, {0, 1, 0, 0}, {1.0 - factor, factor, 0.0, 0.0}, 2};
         const auto depth_w = interpolate_sample(endpoints, sample, fragment_inputs);
-        shade_sample(program, bindings, width, height, framebuffer, x, y, float(depth_w[0]), float(depth_w[1]), true, fragment_inputs, fragment_io);
-
-        if (x == target_x && y == target_y) {
-            break;
-        }
-        const int twice_error = error * 2;
-        if (dy <= twice_error) {
-            error += dy;
-            x += step_x;
-        }
-        if (twice_error <= dx) {
-            error += dx;
-            y += step_y;
-        }
+        shade_sample(program, bindings, bounds, framebuffer, x, y, float(depth_w[0]), float(depth_w[1]), true, fragment_inputs, fragment_io);
     }
 }
 
 void rasterize_triangle(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
-    int width,
-    int height,
+    const raster_bounds_t& bounds,
     std::span<rgba8_t> framebuffer,
     const pipeline_vertex_view_t& first,
     const pipeline_vertex_view_t& second,
@@ -938,14 +944,13 @@ void rasterize_triangle(
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io
 ) {
-    prepare_triangle(first, second, third, width, height, workspace);
-    visit_samples(workspace, width, height, [&](const sample_t& sample) {
+    prepare_triangle(first, second, third, bounds.m_view_width, bounds.m_view_height, workspace);
+    visit_samples(workspace, bounds.m_end_x, bounds.m_end_y, [&](const sample_t& sample) {
         const auto depth_w = interpolate_sample(workspace.m_vertices, sample, fragment_inputs);
         shade_sample(
             program,
             bindings,
-            width,
-            height,
+            bounds,
             framebuffer,
             sample.m_x,
             sample.m_y,
@@ -955,107 +960,8 @@ void rasterize_triangle(
             fragment_inputs,
             fragment_io
         );
-    });
+    }, bounds.m_first_x, bounds.m_first_y);
 }
 
-matrix4f_t object_to_world_matrix(const render_item_t& render_item) {
-    const auto& translation = render_item.translation();
-    const auto& scale = render_item.scale();
-    const float sine = std::sin(render_item.rotation());
-    const float cosine = std::cos(render_item.rotation());
-
-    const matrix4f_t translation_matrix {
-        1.0F,
-        0.0F,
-        0.0F,
-        translation[0],
-        0.0F,
-        1.0F,
-        0.0F,
-        translation[1],
-        0.0F,
-        0.0F,
-        1.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-        1.0F
-    };
-    const matrix4f_t rotation_matrix {
-        cosine,
-        -sine,
-        0.0F,
-        0.0F,
-        sine,
-        cosine,
-        0.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-        1.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-        1.0F
-    };
-    const matrix4f_t scale_matrix {
-        scale[0],
-        0.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-        scale[1],
-        0.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-        1.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-        1.0F
-    };
-    return translation_matrix * rotation_matrix * scale_matrix;
-}
-
-matrix4f_t world_to_clip_matrix(
-    const camera_t<float, int, 2>& camera,
-    framebuffer_t framebuffer
-) {
-    const auto& world_rect = camera.world_rect();
-    const auto& view_rect = camera.view_rect();
-    const float world_width = world_rect[0].length();
-    const float world_height = world_rect[1].length();
-    const float view_world_scale_x = static_cast<float>(view_rect[0].length()) / world_width;
-    const float view_world_scale_y = static_cast<float>(view_rect[1].length()) / world_height;
-    const float framebuffer_width = static_cast<float>(framebuffer.width());
-    const float framebuffer_height = static_cast<float>(framebuffer.height());
-    const float scale_x = view_world_scale_x * 2.0F / framebuffer_width;
-    const float scale_y = view_world_scale_y * -2.0F / framebuffer_height;
-    const float offset_x = (static_cast<float>(view_rect[0][0]) - world_rect[0][0] * view_world_scale_x) * 2.0F / framebuffer_width - 1.0F;
-    const float offset_y = 1.0F - (static_cast<float>(view_rect[1][0]) - world_rect[1][0] * view_world_scale_y) * 2.0F / framebuffer_height;
-
-    return {
-        scale_x,
-        0.0F,
-        0.0F,
-        offset_x,
-        0.0F,
-        scale_y,
-        0.0F,
-        offset_y,
-        0.0F,
-        0.0F,
-        1.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-        0.0F,
-        1.0F
-    };
-}
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

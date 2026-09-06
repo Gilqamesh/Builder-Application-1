@@ -1,10 +1,10 @@
 # Software renderer milestones
 
-Status: milestone 0 is implemented; later milestones remain proposed and unstarted. Public behavior is owned by the module headers.
+Status: milestones 0 and 1 are implemented and validated. Later milestones remain proposed and unstarted. Public behavior is owned by the module headers.
 
 Baseline: [Builder-Modules at 540bbede71740d24292cc3b7cd9c8ed126eca0c3](https://github.com/Gilqamesh/Builder-Modules/tree/540bbede71740d24292cc3b7cd9c8ed126eca0c3).
 
-Develop a general-purpose headless 3D CPU rasterizer while retaining the existing 2D path. Design and implementation follow the shared [agent workflow](../../../../Builder/docs/agent-workflow.md).
+Develop a general-purpose headless 3D CPU rasterizer with planar scenes using the same 3D model. Design and implementation follow the shared [agent workflow](../../../../Builder/docs/agent-workflow.md).
 
 Keep later milestones at outcome level until their dependencies are settled. Existing tests inform validation; they do not determine the design. A milestone is complete when its behavior works through the public API, with focused evidence and updated contracts.
 
@@ -24,11 +24,42 @@ Status: implemented; automated validation passed. Consumer smoke validation is r
 
 ## 1. 3D transforms, cameras, viewport, and scissor
 
-Status: unstarted.
+Status: implemented; automated and visible integration validation passed.
 
-- Outcome: perspective and orthographic scenes through the public API, with separate viewport mapping and scissor clipping.
-- Open decisions: how callers supply object/view/projection transforms; which camera and transform helpers remain conveniences; how the 2D path maps into the same pipeline; viewport/scissor ownership and clear behavior.
-- Acceptance criteria: a textured 3D object transforms and crosses the near plane correctly, perspective texture mapping is demonstrated, and a bounded view cannot overwrite pixels outside its scissor. Existing 2D scenes retain the agreed behavior.
+- Outcome: perspective and orthographic scenes use `draw(camera, render_item)`.
+  A camera owns one rendering rectangle for viewport mapping and write bounds.
+  See [camera.h](../camera.h) and [software_renderer.h](../software_renderer.h).
+- Placement: [render_item_t](../render_item.h) owns 3D translation, rotation, and
+  scale. Cameras and items share [quaternion_t<float>](../../../ws1/m03gtgtrh2smvh28qlwgm7gdl4_quaternion/api.h); both `rotation`
+  overloads update the authoritative quaternion. There is no Euler getter.
+- Mapping and clearing: partial overlap retains the original projection and
+  viewport mapping; empty intersections perform no work. Explicit camera-based
+  clearing uses only the rectangle.
+- Callers: the renderer demo displays a textured, rotating 3D surface crossing
+  the near plane. Tower-defense scenes use an orthographic camera and explicit
+  planar placement, including their existing screen orientation.
+- Acceptance evidence: public tests cover camera pose/inverse view, both
+  projections, analytical texture sampling across the near plane, all primitive
+  topologies in bounded rectangles, original aspect after intersection, explicit
+  clearing, empty regions, and the previous planar rendering regressions.
+
+Representative caller (with geometry and material already assigned):
+
+```cpp
+namespace renderer = m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer;
+renderer::camera_t camera(
+    {{0, width}, {0, height}},
+    renderer::perspective_t(std::numbers::pi_v<float> / 3, 0.5F, 20.0F)
+);
+camera.look_at({0, 0, 4}, {0, 0, 0}, {0, 1, 0});
+item.translation() = {0, 0, 0};
+item.scale() = {1, 1, 1};
+item.rotation(renderer::vector3f_t {0.25F, 0.5F, 0});
+// Quaternion input uses the same setter:
+item.rotation(renderer::quaternion_t(1, 0, 0, 0));
+software_renderer.clear(camera, {0, 0, 0, 255});
+software_renderer.draw(camera, item);
+```
 
 ## 2. Depth testing and face culling
 
@@ -124,6 +155,101 @@ No milestone 0 semantic decision remains open. The numerical limits in the publi
 draw contract are intentional; performance optimization and later milestones remain
 unimplemented. The smoke test establishes presentation and integration, not a
 performance target or an exhaustive rendering proof.
+
+### Milestone 1 implementation record — 2026-09-06
+
+Reviewed base: `Builder-Modules` revision
+`602dd360f4d2d26eadacffd46d4043209c01dd4d`. Implementation is in the working
+tree; no commit was created by this task.
+
+The settled camera and transform contracts are in [camera.h](../camera.h),
+[the quaternion module](../../../ws1/m03gtgtrh2smvh28qlwgm7gdl4_quaternion/api.h), [render_item.h](../render_item.h), and
+[software_renderer.h](../software_renderer.h). The old 2D camera template and
+mutable scalar rotation were replaced throughout the renderer demo, tests, and
+all tower-defense rendering paths. No `to_world` callers existed to migrate.
+
+Rasterization now works in viewport-local coordinates and restricts traversal
+and writes to the framebuffer intersection. Supporting the complete signed-int
+rectangle endpoint range requires grid coordinates below `2^40` and determinants
+that fit in 81 signed bits; coverage uses 128-bit integer intermediates. Line
+traversal skips invisible major-axis steps while preserving its inclusive
+Bresenham coverage. These changes retain milestone 0's shared-edge rules.
+
+Automated checks passed:
+
+- `python3 /tmp/renderer-m1-implementation/build.py public_api`: GNU C++23,
+  `-Wall -Wextra -ftrapv`, all existing and new public pipeline tests.
+- `/tmp/renderer-m0-implementation/install_library m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer`:
+  native Clang C++23 library build and automatic public validation.
+- `env -u WAYLAND_DISPLAY XDG_SESSION_TYPE=x11 ./cli m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer`:
+  rebuilt the final header change, reran automatic validation, and built the demo.
+  Its sandboxed launch could not access the display; desktop validation followed.
+- `artifacts/m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/latest/library/build/validation/public_api/runner`:
+  explicitly reran the installed validation executable, exit 0.
+- `/tmp/renderer-m0-implementation/install_library m03gilsfsv3k34ej14ytz8a29k_tower_defense_game`
+  and `/tmp/renderer-m1-implementation/install_binary m03gilsfsv3k34ej14ytz8a29k_tower_defense_game`:
+  native consumer library and executable builds, including experimental rendering paths.
+- Focused staging checks exercised quaternion extremes and composition, full-range
+  viewport arithmetic, and 10,000 rational comparisons. An independent comparison
+  checked direct line evaluation against the prior stepping algorithm for all
+  4,225 endpoint deltas in `[-32,32]^2`.
+- `git -C /home/gilqamesh/Projects/Builder-Modules diff --check`: passed.
+
+The public suite includes an analytical ray/plane texture oracle for a tilted
+surface crossing the near plane in both projections, zero Z scale, camera/item
+translation equivalence, camera inverse pose and look-at, near/far depth, all
+seven topologies in bounded views, original perspective aspect after intersection,
+absolute fragment coordinates, pose-independent clearing, and empty-region no-ops.
+Look-at regressions include exactly parallel diagonal up vectors; the cross
+product precedes normalization to preserve their rejection.
+
+Visible desktop checks used X11 and each module's working directory for assets:
+
+```sh
+python3 /tmp/renderer-m1-implementation/smoke.py m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer 'Software Renderer' renderer
+python3 /tmp/renderer-m1-implementation/smoke.py m03gilsfsv3k34ej14ytz8a29k_tower_defense_game 'Tower Defense Game' tower-defense
+```
+
+Both applications presented textured geometry and closed normally with exit 0.
+The renderer capture shows perspective texture mapping at 960x540; the
+1600x1200 tower-defense capture retains the configured 400x200 camera region.
+Captures are `/tmp/renderer-m1-implementation/renderer-smoke-0.png` and
+`/tmp/renderer-m1-implementation/tower-defense-smoke-0.png`. Build, validation,
+and smoke logs and the temporary helper sources are in the same directory.
+
+No milestone 1 semantic decision remains open. The inactive tower-defense
+rendering backends were migrated and compiled; only its active software-renderer
+path was visually checked. The smoke checks establish presentation and integration,
+not a performance target. Depth/stencil, culling, blending, and later milestones
+remain unimplemented.
+
+### Quaternion module integration — 2026-09-06
+
+The renderer now consumes
+[`m03gtgtrh2smvh28qlwgm7gdl4_quaternion`](../../../ws1/m03gtgtrh2smvh28qlwgm7gdl4_quaternion/AGENTS.md).
+The local quaternion implementation was removed. [types.h](../types.h) exposes a
+float alias of the module type; camera and render-item setters normalize a copy
+with `unit()`, while Euler and look-at conversions use `from_euler_xyz()` and
+`from_matrix()`. The shared module supplies rotation matrices through `to_matrix()`.
+The pose owners retain read-only rotation access and reject invalid assignments
+without changing the previous orientation. No quaternion-module source changed.
+
+Validation passed:
+
+```sh
+python3 /tmp/renderer-quaternion-reuse/build.py public_api
+/tmp/renderer-m1-implementation/install_binary m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
+/tmp/renderer-m1-implementation/install_binary m03gilsfsv3k34ej14ytz8a29k_tower_defense_game
+python3 /tmp/renderer-quaternion-reuse/smoke.py m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer 'Software Renderer' renderer
+python3 /tmp/renderer-quaternion-reuse/smoke.py m03gilsfsv3k34ej14ytz8a29k_tower_defense_game 'Tower Defense Game' tower-defense
+```
+
+The GNU staging suite and native Clang renderer validation passed. Both native
+application builds and both visible smoke checks exited 0. Renderer tests verify
+type identity with the shared module, normalization at both pose setters, copying
+of mutable inputs, invalid-update state preservation, and Euler input semantics.
+`git diff --check` passed. Logs, helper scripts, and window captures are in
+`/tmp/renderer-quaternion-reuse`. Existing milestone limitations remain unchanged.
 
 ## Deferred scope
 

@@ -17,6 +17,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -94,8 +95,12 @@ game_t::game_t():
     m_pixels(),
     m_software_renderer(software_renderer::framebuffer_t(m_pixels, 0, 0)),
     m_opengl_renderer(m_window),
-    m_camera({{-400, 400}, {-300, 300}}, {{0, 400}, {0, 200}})
+    m_camera({{0, 400}, {0, 200}}, software_renderer::orthographic_t({{-400, 400}, {-300, 300}}, 0.0F, 2.0F))
 {
+    // Keep the game's world +Y direction pointing down the framebuffer.
+    m_camera.position() = {0.0F, 0.0F, -1.0F};
+    m_camera.rotation(software_renderer::quaternion_t(0.0F, 1.0F, 0.0F, 0.0F));
+
     std::vector<std::shared_ptr<texture_api::texture_t>> tile_textures;
     std::vector<std::string> tile_texture_paths = {
         "assets/grass.png",
@@ -190,19 +195,21 @@ game_t::game_t():
 
         const auto max_horizontal_translation = 5000;
         const auto max_vertical_translation = 3000;
-        m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2> translation = {
+        software_renderer::vector3f_t translation = {
             static_cast<float>(rand() % max_horizontal_translation - max_horizontal_translation / 2),
-            static_cast<float>(rand() % max_vertical_translation - max_vertical_translation / 2)
+            static_cast<float>(rand() % max_vertical_translation - max_vertical_translation / 2),
+            0.0F
         };
         render_item.translation() = translation;
 
-        render_item.rotation() = 0.0F;
+        render_item.rotation(software_renderer::quaternion_t());
 
         const auto max_horizontal_scale = 30;
         const auto max_vertical_scale = 20;
-        m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2> scale = {
+        software_renderer::vector3f_t scale = {
             static_cast<float>(rand() % max_horizontal_scale + 1),
-            static_cast<float>(rand() % max_vertical_scale + 1)
+            static_cast<float>(rand() % max_vertical_scale + 1),
+            1.0F
         };
         render_item.scale() = scale;
 
@@ -242,12 +249,12 @@ void game_t::update(float dt) {
     const auto& current_input_state = input_states.history(0);
 
     auto camera_view_dp = m03ginwy24ng8o487c4beoms6l_vector::vector_t<int, 2>{0, 0};
-    auto camera_world_dp = m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>{0, 0};
+    auto camera_world_dp = software_renderer::vector3f_t{0.0F, 0.0F, 0.0F};
     auto camera_view_lengths_dp = m03ginwy24ng8o487c4beoms6l_vector::vector_t<int, 2>{0, 0};
     auto camera_world_lengths_dp = m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>{0, 0};
 
-    const auto camera_world_rect = m_camera.world_rect();
-    const auto& camera_world_rect_bounds = camera_world_rect.bounds();
+    const auto& projection = std::get<software_renderer::orthographic_t>(m_camera.projection());
+    const auto& camera_world_rect_bounds = projection.bounds().bounds();
     const auto camera_world_rect_horizontal_length = camera_world_rect_bounds[0].length();
     const auto camera_world_rect_vertical_length = camera_world_rect_bounds[1].length();
     const auto camera_world_horizontal_speed = std::max(1.0f, camera_world_rect_horizontal_length * dt);
@@ -299,8 +306,11 @@ void game_t::update(float dt) {
         camera_view_lengths_dp -= m03ginwy24ng8o487c4beoms6l_vector::vector_t<int, 2>{std::max(1, static_cast<int>(camera_view_rect_horizontal_length * dt)), std::max(1, static_cast<int>(camera_view_rect_vertical_length * dt))};
     }
 
-    m_camera.world_rect() += camera_world_dp;
-    m_camera.world_rect() = m_camera.world_rect().inflate(camera_world_lengths_dp);
+    m_camera.position() += camera_world_dp;
+    const auto projection_bounds = projection.bounds().inflate(camera_world_lengths_dp);
+    if (!projection_bounds.is_empty()) {
+        m_camera.projection() = software_renderer::orthographic_t(projection_bounds, projection.near_distance(), projection.far_distance());
+    }
     m_camera.view_rect() += camera_view_dp;
     m_camera.view_rect() = m_camera.view_rect().inflate(camera_view_lengths_dp);
 }

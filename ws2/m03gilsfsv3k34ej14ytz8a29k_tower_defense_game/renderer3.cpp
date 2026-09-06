@@ -21,7 +21,6 @@ namespace texture_api = m03gt0l0q3l4b1k27eab5k7py1_texture;
 
 using renderer3_color_t = tower_defense_api::renderer3_color_t;
 using vector2f_t = vector_api::vector_t<float, 2>;
-using vector2i_t = vector_api::vector_t<int, 2>;
 
 struct gl_color_t {
     GLfloat red;
@@ -39,8 +38,7 @@ struct render_item_data_t {
     const m03gjfvd6i5jzbmngb2ldoooza_type_erased_array::type_erased_array_t* vertex_stream;
     std::span<const std::uint32_t> indices;
     software_renderer_api::vertex_primitive_topology_t primitive_topology;
-    vector2f_t translation;
-    vector2f_t scale;
+    software_renderer_api::matrix4f_t object_to_world;
 };
 
 constexpr renderer3_color_t ray_white_color() noexcept {
@@ -194,13 +192,13 @@ vector2f_t read_position(
     return { values[0], values[1] };
 }
 
-vector2i_t transform_position(
-    const software_renderer_api::camera_t<float, int, 2>& camera,
+software_renderer_api::vector3f_t transform_position(
+    const software_renderer_api::camera_t& camera,
     vector2f_t position,
-    vector2f_t translation,
-    vector2f_t scale
+    const software_renderer_api::matrix4f_t& object_to_world
 ) {
-    return camera.to_view(position * scale + translation);
+    const auto world_position = object_to_world * vector_api::vector_t<float, 4>{position[0], position[1], 0.0F, 1.0F};
+    return camera.to_view({world_position[0], world_position[1], world_position[2]});
 }
 
 void require_supported_texture_format(texture_api::format_t format) {
@@ -270,13 +268,12 @@ render_item_data_t validate_render_item(const software_renderer_api::render_item
         .vertex_stream = &vertex_stream,
         .indices = geometry->indices(),
         .primitive_topology = geometry->primitive_topology(),
-        .translation = render_item.translation(),
-        .scale = render_item.scale()
+        .object_to_world = render_item.object_to_world()
     };
 }
 
 std::vector<gl_position_t> build_view_positions(
-    const software_renderer_api::camera_t<float, int, 2>& camera,
+    const software_renderer_api::camera_t& camera,
     const render_item_data_t& render_data
 ) {
     std::vector<gl_position_t> view_positions;
@@ -284,7 +281,7 @@ std::vector<gl_position_t> build_view_positions(
 
     for (std::size_t i = 0; i < render_data.vertex_stream->element_count(); ++i) {
         const auto position = read_position(*render_data.vertex_stream, static_cast<std::uint32_t>(i));
-        const auto view_position = transform_position(camera, position, render_data.translation, render_data.scale);
+        const auto view_position = transform_position(camera, position, render_data.object_to_world);
         view_positions.push_back({
             .x = static_cast<GLfloat>(view_position[0]),
             .y = static_cast<GLfloat>(view_position[1])
@@ -432,9 +429,13 @@ int renderer3_t::height() const noexcept {
 }
 
 void renderer3_t::draw(
-    const software_renderer_api::camera_t<float, int, 2>& camera,
+    const software_renderer_api::camera_t& camera,
     const software_renderer_api::render_item_t& render_item
 ) {
+    if (camera.view_rect().is_empty()) {
+        return;
+    }
+
     if (!m_frame_active) {
         throw std::runtime_error("renderer3_t::draw: begin_frame must be called before draw");
     }

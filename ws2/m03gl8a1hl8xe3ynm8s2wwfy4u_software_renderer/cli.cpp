@@ -11,11 +11,13 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <exception>
 #include <format>
 #include <iostream>
 #include <memory>
+#include <numbers>
 #include <span>
 #include <stdexcept>
 #include <thread>
@@ -36,14 +38,15 @@ namespace texture = m03gt0l0q3l4b1k27eab5k7py1_texture;
 using steady_clock_t = std::chrono::steady_clock;
 using rgba8_t = software_renderer_api::rgba8_t;
 using vector2f_t = shader::vector_t<float, 2>;
+using vector3f_t = shader::vector_t<float, 3>;
 using vector4f_t = shader::vector_t<float, 4>;
 
 std::shared_ptr<const software_shader::program_t> make_program() {
     shader::vertex_shader_ast_builder_t vertex;
-    const auto position = vertex.input<vector2f_t>(0);
-    const auto local = vertex.construct<vector4f_t>(position, 0.0F, 1.0F);
+    const auto position = vertex.input<vector3f_t>(0);
+    const auto local = vertex.construct<vector4f_t>(position, 1.0F);
     vertex.position(vertex.world_to_clip() * vertex.object_to_world() * local);
-    vertex.output(0, position * 0.5F + vector2f_t({0.5F, 0.5F}));
+    vertex.output(0, shader::swizzle<0, 1>(position) * 0.5F + vector2f_t({0.5F, 0.5F}));
 
     shader::fragment_shader_ast_builder_t fragment;
     const auto coordinates = fragment.input<vector2f_t>(0);
@@ -58,12 +61,12 @@ std::shared_ptr<const software_shader::program_t> make_program() {
 }
 
 std::shared_ptr<software_renderer_api::geometry_t> make_geometry() {
-    soa::structure_of_arrays_t<std::array<float, 2>> streams;
+    soa::structure_of_arrays_t<std::array<float, 3>> streams;
     for (const auto& position : std::array {
-        std::array {-1.0F, -1.0F},
-        std::array {-1.0F, 1.0F},
-        std::array {1.0F, -1.0F},
-        std::array {1.0F, 1.0F}
+        std::array {-1.0F, -1.0F, 0.0F},
+        std::array {-1.0F, 1.0F, 0.0F},
+        std::array {1.0F, -1.0F, 0.0F},
+        std::array {1.0F, 1.0F, 0.0F}
     }) {
         streams.push_back(position);
     }
@@ -72,7 +75,7 @@ std::shared_ptr<software_renderer_api::geometry_t> make_geometry() {
         std::vector<software_renderer_api::vertex_attribute_t> {
             software_renderer_api::vertex_attribute_t(
                 software_renderer_api::vertex_attribute_type_t::R32,
-                2
+                3
             )
         }
     );
@@ -128,7 +131,7 @@ int main() {
         software_renderer_api::render_item_t render_item;
         render_item.geometry() = make_geometry();
         render_item.material() = std::move(material);
-        render_item.scale() = {0.72F, 0.72F};
+        render_item.scale() = {0.72F, 0.72F, 1.0F};
 
         const auto started_at = steady_clock_t::now();
         auto previous_frame_started_at = started_at;
@@ -151,10 +154,11 @@ int main() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             } else {
                 renderer.clear({0, 0, 0, 255});
-                render_item.rotation() = seconds * 0.35F;
-                const software_renderer_api::camera_t<float, int, 2> camera(
-                    {{-1.0F, 1.0F}, {-1.0F, 1.0F}},
-                    {{0, framebuffer.width()}, {0, framebuffer.height()}}
+                render_item.rotation(vector3f_t({0.25F, seconds * 0.35F, 0.0F}));
+                render_item.translation() = {0.0F, 0.0F, -1.1F + 0.7F * std::sin(seconds * 0.4F)};
+                const software_renderer_api::camera_t camera(
+                    {{0, framebuffer.width()}, {0, framebuffer.height()}},
+                    software_renderer_api::perspective_t(std::numbers::pi_v<float> / 3, 0.5F, 20.0F)
                 );
                 renderer.draw(camera, render_item);
                 opengl_renderer.present_rgba8(

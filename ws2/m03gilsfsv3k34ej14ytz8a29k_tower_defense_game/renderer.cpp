@@ -76,9 +76,13 @@ const m03ginwy24ng8o487c4beoms6l_vector::vector_t<int, 2>& renderer_t::window_bo
 }
 
 void renderer_t::draw(
-    const software_renderer_api::camera_t<float, int, 2>& camera,
+    const software_renderer_api::camera_t& camera,
     const software_renderer_api::render_item_t& render_item
 ) {
+    if (camera.view_rect().is_empty()) {
+        return;
+    }
+
     const auto geometry = render_item.geometry();
     if (!geometry || !geometry->mesh()) {
         throw std::runtime_error("renderer_t::draw: render item has incomplete geometry");
@@ -91,9 +95,11 @@ void renderer_t::draw(
     if (!material) {
         throw std::runtime_error("renderer_t::draw: render item has no material");
     }
-    const auto& translation = render_item.translation();
-    const auto& rotation = render_item.rotation();
-    const auto& scale = render_item.scale();
+    const auto object_to_world = render_item.object_to_world();
+    const auto transform_position = [&](const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& position) {
+        const auto world_position = object_to_world * m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 4>{position[0], position[1], 0.0F, 1.0F};
+        return camera.to_view({world_position[0], world_position[1], world_position[2]});
+    };
 
     const auto& vertex_streams = mesh->vertex_streams();
     if (vertex_streams.size() == 0) {
@@ -129,69 +135,45 @@ void renderer_t::draw(
     switch (primitive_topology) {
         case software_renderer_api::vertex_primitive_topology_t::point: {
             for (size_t i = 0; i < indices.size(); ++i) {
-                const auto scaled_position = positions[indices[i]] * scale;
-                // todo: implement rotation for 2D
-                const auto translated_position = scaled_position + translation;
-                const auto view_position = camera.to_view(translated_position);
-                m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<int, 2> view_rect({
-                    { view_position[0], view_position[0] + 1 },
-                    { view_position[1], view_position[1] + 1 }
-                });
-                const auto rendered_view_rect = view_rect.intersect(camera.view_rect());
-                if (rendered_view_rect.is_empty()) {
+                const auto view_position = transform_position(positions[indices[i]]);
+                const auto& view_bounds = camera.view_rect().bounds();
+                if (view_position[0] < static_cast<double>(view_bounds[0][0]) || static_cast<double>(view_bounds[0][1]) <= view_position[0]
+                    || view_position[1] < static_cast<double>(view_bounds[1][0]) || static_cast<double>(view_bounds[1][1]) <= view_position[1]) {
                     continue;
                 }
                 
                 const auto point_size = 3.0f;
                 const auto point_color = GREEN;
                 // const auto point_color = GetImageColor(image, view_position[0], view_position[1]);
-                DrawCircle(view_position[0], view_position[1], point_size, point_color);
+                DrawCircleV({view_position[0], view_position[1]}, point_size, point_color);
             }
         } break;
         case software_renderer_api::vertex_primitive_topology_t::line: {
             for (size_t i = 0; i < indices.size(); i += 2) {
-                const auto scaled_position_0 = positions[indices[i]] * scale;
-                const auto translated_position_0 = scaled_position_0 + translation;
-                const auto view_position_0 = camera.to_view(translated_position_0);
-                const auto scaled_position_1 = positions[indices[i + 1]] * scale;
-                const auto translated_position_1 = scaled_position_1 + translation;
-                const auto view_position_1 = camera.to_view(translated_position_1);
-                DrawLine(view_position_0[0], view_position_0[1], view_position_1[0], view_position_1[1], GREEN);
+                const auto view_position_0 = transform_position(positions[indices[i]]);
+                const auto view_position_1 = transform_position(positions[indices[i + 1]]);
+                DrawLineV({view_position_0[0], view_position_0[1]}, {view_position_1[0], view_position_1[1]}, GREEN);
             }
         } break;
         case software_renderer_api::vertex_primitive_topology_t::line_strip: {
             for (size_t i = 0; i + 1 < indices.size(); ++i) {
-                const auto scaled_position_0 = positions[indices[i]] * scale;
-                const auto translated_position_0 = scaled_position_0 + translation;
-                const auto view_position_0 = camera.to_view(translated_position_0);
-                const auto scaled_position_1 = positions[indices[i + 1]] * scale;
-                const auto translated_position_1 = scaled_position_1 + translation;
-                const auto view_position_1 = camera.to_view(translated_position_1);
-                DrawLine(view_position_0[0], view_position_0[1], view_position_1[0], view_position_1[1], GREEN);
+                const auto view_position_0 = transform_position(positions[indices[i]]);
+                const auto view_position_1 = transform_position(positions[indices[i + 1]]);
+                DrawLineV({view_position_0[0], view_position_0[1]}, {view_position_1[0], view_position_1[1]}, GREEN);
             }
         } break;
         case software_renderer_api::vertex_primitive_topology_t::line_loop: {
             for (size_t i = 0; i < indices.size(); ++i) {
-                const auto scaled_position_0 = positions[indices[i]] * scale;
-                const auto translated_position_0 = scaled_position_0 + translation;
-                const auto view_position_0 = camera.to_view(translated_position_0);
-                const auto scaled_position_1 = positions[indices[(i + 1) % indices.size()]] * scale;
-                const auto translated_position_1 = scaled_position_1 + translation;
-                const auto view_position_1 = camera.to_view(translated_position_1);
-                DrawLine(view_position_0[0], view_position_0[1], view_position_1[0], view_position_1[1], GREEN);
+                const auto view_position_0 = transform_position(positions[indices[i]]);
+                const auto view_position_1 = transform_position(positions[indices[(i + 1) % indices.size()]]);
+                DrawLineV({view_position_0[0], view_position_0[1]}, {view_position_1[0], view_position_1[1]}, GREEN);
             }
         } break;
         case software_renderer_api::vertex_primitive_topology_t::triangle: {
             for (size_t i = 0; i + 2 < indices.size(); i += 3) {
-                const auto scaled_position_0 = positions[indices[i]] * scale;
-                const auto translated_position_0 = scaled_position_0 + translation;
-                const auto view_position_0 = camera.to_view(translated_position_0);
-                const auto scaled_position_1 = positions[indices[i + 1]] * scale;
-                const auto translated_position_1 = scaled_position_1 + translation;
-                const auto view_position_1 = camera.to_view(translated_position_1);
-                const auto scaled_position_2 = positions[indices[i + 2]] * scale;
-                const auto translated_position_2 = scaled_position_2 + translation;
-                const auto view_position_2 = camera.to_view(translated_position_2);
+                const auto view_position_0 = transform_position(positions[indices[i]]);
+                const auto view_position_1 = transform_position(positions[indices[i + 1]]);
+                const auto view_position_2 = transform_position(positions[indices[i + 2]]);
                 DrawTriangle(
                     {static_cast<float>(view_position_0[0]), static_cast<float>(view_position_0[1])},
                     {static_cast<float>(view_position_1[0]), static_cast<float>(view_position_1[1])},
@@ -202,15 +184,9 @@ void renderer_t::draw(
         } break;
         case software_renderer_api::vertex_primitive_topology_t::triangle_strip: {
             for (size_t i = 0; i + 2 < indices.size(); ++i) {
-                const auto scaled_position_0 = positions[indices[i]] * scale;
-                const auto translated_position_0 = scaled_position_0 + translation;
-                const auto view_position_0 = camera.to_view(translated_position_0);
-                const auto scaled_position_1 = positions[indices[i + 1]] * scale;
-                const auto translated_position_1 = scaled_position_1 + translation;
-                const auto view_position_1 = camera.to_view(translated_position_1);
-                const auto scaled_position_2 = positions[indices[i + 2]] * scale;
-                const auto translated_position_2 = scaled_position_2 + translation;
-                const auto view_position_2 = camera.to_view(translated_position_2);
+                const auto view_position_0 = transform_position(positions[indices[i]]);
+                const auto view_position_1 = transform_position(positions[indices[i + 1]]);
+                const auto view_position_2 = transform_position(positions[indices[i + 2]]);
                 if (i % 2 == 0) {
                     DrawTriangle(
                         {static_cast<float>(view_position_1[0]), static_cast<float>(view_position_1[1])},
@@ -230,15 +206,9 @@ void renderer_t::draw(
         } break;
         case software_renderer_api::vertex_primitive_topology_t::triangle_fan: {
             for (size_t i = 1; i + 1 < indices.size(); ++i) {
-                const auto scaled_position_0 = positions[indices[0]] * scale;
-                const auto translated_position_0 = scaled_position_0 + translation;
-                const auto view_position_0 = camera.to_view(translated_position_0);
-                const auto scaled_position_1 = positions[indices[i]] * scale;
-                const auto translated_position_1 = scaled_position_1 + translation;
-                const auto view_position_1 = camera.to_view(translated_position_1);
-                const auto scaled_position_2 = positions[indices[i + 1]] * scale;
-                const auto translated_position_2 = scaled_position_2 + translation;
-                const auto view_position_2 = camera.to_view(translated_position_2);
+                const auto view_position_0 = transform_position(positions[indices[0]]);
+                const auto view_position_1 = transform_position(positions[indices[i]]);
+                const auto view_position_2 = transform_position(positions[indices[i + 1]]);
                 DrawTriangle(
                     {static_cast<float>(view_position_0[0]), static_cast<float>(view_position_0[1])},
                     {static_cast<float>(view_position_1[0]), static_cast<float>(view_position_1[1])},

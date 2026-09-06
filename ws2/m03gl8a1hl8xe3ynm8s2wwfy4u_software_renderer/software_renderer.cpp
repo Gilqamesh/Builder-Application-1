@@ -30,15 +30,25 @@ void software_renderer_t::clear(rgba8_t color) {
     std::ranges::fill(m_framebuffer.pixels(), color);
 }
 
+void software_renderer_t::clear(const camera_t& camera, rgba8_t color) {
+    const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
+    if (bounds.empty()) {
+        return;
+    }
+    const auto pixels = m_framebuffer.pixels();
+    for (auto y = bounds.m_first_y; y < bounds.m_end_y; ++y) {
+        const auto offset = std::size_t(y + bounds.m_y) * std::size_t(bounds.m_width) + std::size_t(bounds.m_first_x + bounds.m_x);
+        std::ranges::fill(pixels.subspan(offset, std::size_t(bounds.m_end_x - bounds.m_first_x)), color);
+    }
+}
+
 void software_renderer_t::draw(
-    const camera_t<float, int, 2>& camera,
+    const camera_t& camera,
     const render_item_t& render_item
 ) {
-    // Validate framebuffer dimensions, current geometry, material bindings, camera
-    // bounds, then shader interfaces before vertex execution. Check each selected
-    // index and shader result while collecting all vertices before rasterization.
-    if (m_framebuffer.width() == 0 || m_framebuffer.height() == 0) {
-        throw std::invalid_argument("software_renderer_t::draw requires a non-empty framebuffer");
+    const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
+    if (bounds.empty()) {
+        return;
     }
 
     if (maximum_extent < m_framebuffer.width() || maximum_extent < m_framebuffer.height()) {
@@ -58,17 +68,8 @@ void software_renderer_t::draw(
     const auto& bindings = material->bindings();
     program.validate_bindings(bindings);
 
-    const auto& world_rect = camera.world_rect();
-    const float world_width = world_rect[0].length();
-    const float world_height = world_rect[1].length();
-    if (world_width == 0.0F || world_height == 0.0F) {
-        throw std::invalid_argument("software_renderer_t::draw requires non-empty camera world bounds");
-    }
-
-    const auto object_to_world = object_to_world_matrix(render_item);
-    const auto world_to_clip = world_to_clip_matrix(camera, m_framebuffer);
-    const int width = m_framebuffer.width();
-    const int height = m_framebuffer.height();
+    const auto object_to_world = render_item.object_to_world();
+    const auto world_to_clip = camera.world_to_clip();
     const auto framebuffer = m_framebuffer.pixels();
     const auto mesh = geometry->mesh();
     const auto& streams = mesh->vertex_streams();
@@ -128,8 +129,7 @@ void software_renderer_t::draw(
                 rasterize_point(
                     program,
                     bindings,
-                    width,
-                    height,
+                    bounds,
                     framebuffer,
                     vertex(index),
                     scratch.m_fragment_inputs,
@@ -142,8 +142,7 @@ void software_renderer_t::draw(
                 rasterize_line(
                     program,
                     bindings,
-                    width,
-                    height,
+                    bounds,
                     framebuffer,
                     vertex(index),
                     vertex(index + 1),
@@ -158,8 +157,7 @@ void software_renderer_t::draw(
                 rasterize_line(
                     program,
                     bindings,
-                    width,
-                    height,
+                    bounds,
                     framebuffer,
                     vertex(index),
                     vertex(index + 1),
@@ -174,8 +172,7 @@ void software_renderer_t::draw(
                 rasterize_line(
                     program,
                     bindings,
-                    width,
-                    height,
+                    bounds,
                     framebuffer,
                     vertex(index),
                     vertex((index + 1) % indices.size()),
@@ -190,8 +187,7 @@ void software_renderer_t::draw(
                 rasterize_triangle(
                     program,
                     bindings,
-                    width,
-                    height,
+                    bounds,
                     framebuffer,
                     vertex(index),
                     vertex(index + 1),
@@ -208,8 +204,7 @@ void software_renderer_t::draw(
                     rasterize_triangle(
                         program,
                         bindings,
-                        width,
-                        height,
+                        bounds,
                         framebuffer,
                         vertex(index + 1),
                         vertex(index),
@@ -222,8 +217,7 @@ void software_renderer_t::draw(
                     rasterize_triangle(
                         program,
                         bindings,
-                        width,
-                        height,
+                        bounds,
                         framebuffer,
                         vertex(index),
                         vertex(index + 1),
@@ -240,8 +234,7 @@ void software_renderer_t::draw(
                 rasterize_triangle(
                     program,
                     bindings,
-                    width,
-                    height,
+                    bounds,
                     framebuffer,
                     vertex(0),
                     vertex(index),

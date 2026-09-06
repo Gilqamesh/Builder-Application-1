@@ -18,8 +18,9 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
  * scalars or vectors, with perspective-correct interpolation of primitive-local values.
  *
  * Vertex invocations receive render_item_t's object-to-world transform and a
- * world-to-clip matrix composing camera_t's world-to-view mapping with framebuffer-to-clip
- * conversion. Both matrices preserve Z and W.
+ * world-to-clip matrix derived from camera_t's pose and projection. The camera's
+ * view rectangle supplies both viewport mapping and half-open pixel bounds.
+ * Partial framebuffer overlap restricts writes without changing that mapping.
  *
  * Shader positions must be finite homogeneous clip coordinates; X, Y and Z are
  * clipped to [-W,W]. Surviving zero-W vertices make their primitive empty; positive W
@@ -56,13 +57,23 @@ public:
     void clear(rgba8_t color);
 
     /**
+     * @brief Fills the intersection of the camera rectangle and framebuffer.
+     *
+     * Camera pose, projection, materials, and shader state do not affect clearing.
+     * Empty intersections do no work.
+     */
+    void clear(const camera_t& camera, rgba8_t color);
+
+    /**
      * @brief Draws a render item using its material's program and the camera.
      *
-     * Requires geometry and material, non-empty camera world bounds, and
-     * framebuffer dimensions in [1, 2^23]. Validates current geometry,
-     * material bindings, and shader-interface compatibility before vertex execution.
+     * Empty framebuffers, empty camera rectangles, and empty intersections return
+     * before validating draw resources or deriving matrices. Otherwise requires
+     * geometry, material, finite transforms, and framebuffer dimensions in [1, 2^23].
+     * Validates current geometry, material bindings, and shader interfaces before
+     * vertex execution. Camera rectangles support the full signed-int endpoint range.
      */
-    void draw(const camera_t<float, int, 2>& camera, const render_item_t& render_item);
+    void draw(const camera_t& camera, const render_item_t& render_item);
 
 private:
     framebuffer_t m_framebuffer;

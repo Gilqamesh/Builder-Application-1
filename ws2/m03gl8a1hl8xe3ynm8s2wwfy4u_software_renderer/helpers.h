@@ -4,6 +4,7 @@
 # include "camera.h"
 # include "framebuffer.h"
 # include "render_item.h"
+# include "types.h"
 # include "vertex_attribute.h"
 
 # include <m03gjfvd6i5jzbmngb2ldoooza_type_erased_array/api.h>
@@ -28,9 +29,7 @@ namespace software_shader = m03gt1djvvy5atia5evkbg6rqy_software_shader;
 namespace shader = m03gsy25j4v7nccgmsdov9ioft_shader;
 namespace type_erased_array = m03gjfvd6i5jzbmngb2ldoooza_type_erased_array;
 
-using matrix4f_t = shader::matrix_t<float, 4, 4>;
 using vector2f_t = m03gsy25j4v7nccgmsdov9ioft_shader::vector_t<float, 2>;
-using vector3f_t = m03gsy25j4v7nccgmsdov9ioft_shader::vector_t<float, 3>;
 using vector4f_t = m03gsy25j4v7nccgmsdov9ioft_shader::vector_t<float, 4>;
 using varying_t = std::variant<float, vector2f_t, vector3f_t, vector4f_t>;
 using varying_entry_t = std::pair<std::uint32_t, varying_t>;
@@ -38,11 +37,29 @@ using varying_values_t = std::vector<varying_entry_t>;
 using grid_point_t = std::array<std::int64_t, 2>;
 using triangle_t = std::array<std::size_t, 3>;
 // Unreduced nonnegative numerator and positive denominator.
-using fraction_t = std::array<std::int64_t, 2>;
+using edge_value_t = __int128;
+using fraction_t = std::array<edge_value_t, 2>;
 
 constexpr int maximum_extent = 1 << 23;
 constexpr std::int64_t subpixels = 256;
 constexpr std::int64_t center_offset = 128;
+
+// Bounds in viewport-local pixels; the intersection limits work without changing mapping.
+struct raster_bounds_t {
+    int m_width;
+    int m_height;
+    int m_x;
+    int m_y;
+    std::int64_t m_view_width;
+    std::int64_t m_view_height;
+    std::int64_t m_first_x;
+    std::int64_t m_first_y;
+    std::int64_t m_end_x;
+    std::int64_t m_end_y;
+
+    raster_bounds_t(int width, int height, const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<int, 2>& view_rect);
+    bool empty() const;
+};
 
 struct pipeline_vertex_t {
     vector4f_t m_clip_position;
@@ -78,8 +95,8 @@ struct scan_event_t {
 };
 
 struct sample_t {
-    int m_x;
-    int m_y;
+    std::int64_t m_x;
+    std::int64_t m_y;
     std::array<std::size_t, 4> m_vertices;
     std::array<double, 4> m_weights;
     std::size_t m_count;
@@ -98,10 +115,10 @@ struct raster_workspace_t {
 };
 
 struct screen_vertex_t {
-    float m_x;
-    float m_y;
-    float m_ndc_z;
-    float m_reciprocal_w;
+    double m_x;
+    double m_y;
+    double m_ndc_z;
+    double m_reciprocal_w;
     std::span<const varying_entry_t> m_outputs;
 };
 
@@ -126,7 +143,7 @@ void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t 
 
 bool between(grid_point_t p, grid_point_t a, grid_point_t b);
 
-bool opposite(std::int64_t a, std::int64_t b);
+bool opposite(edge_value_t a, edge_value_t b);
 
 bool intersects(grid_point_t a, grid_point_t b, grid_point_t c, grid_point_t d);
 
@@ -154,23 +171,23 @@ std::optional<std::size_t> clip_triangle(const pipeline_vertex_view_t& first, co
 
 double projectable_reciprocal_w(float w);
 
-std::int64_t snap(double screen, int extent);
+std::int64_t snap(double screen, std::int64_t extent);
 
-std::int64_t edge(grid_point_t a, grid_point_t b, grid_point_t p);
+edge_value_t edge(grid_point_t a, grid_point_t b, grid_point_t p);
 
-std::int64_t ceil_div(std::int64_t numerator, std::int64_t denominator);
+edge_value_t ceil_div(edge_value_t numerator, edge_value_t denominator);
 
 int compare_fraction(fraction_t a, fraction_t b);
 
-int sample_bound(fraction_t crossing, int extent);
+std::int64_t sample_bound(fraction_t crossing, std::int64_t extent);
 
 void prepare_polygon(raster_workspace_t& workspace);
 
-void prepare_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, int width, int height, raster_workspace_t& workspace);
+void prepare_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, std::int64_t width, std::int64_t height, raster_workspace_t& workspace);
 
 void scanline_events(std::span<const projected_vertex_t> vertices, std::int64_t y, std::vector<scan_event_t>& events);
 
-sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::span<const projected_vertex_t> vertices, int x, int y);
+sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::span<const projected_vertex_t> vertices, std::int64_t x, std::int64_t y);
 
 // Returns window depth and reciprocal W, and writes perspective-correct varyings.
 std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, varying_values_t& outputs);
@@ -230,8 +247,8 @@ varying_t vertex_output(
 
 std::optional<screen_vertex_t> project(
     const pipeline_vertex_view_t& vertex,
-    int width,
-    int height
+    std::int64_t width,
+    std::int64_t height
 );
 
 void set_fragment_inputs(
@@ -246,11 +263,10 @@ rgba8_t to_rgba8(const vector4f_t& color);
 void shade_sample(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
-    int width,
-    int height,
+    const raster_bounds_t& bounds,
     std::span<rgba8_t> framebuffer,
-    int x,
-    int y,
+    std::int64_t x,
+    std::int64_t y,
     float depth,
     float reciprocal_w,
     bool front_facing,
@@ -261,8 +277,7 @@ void shade_sample(
 void rasterize_point(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
-    int width,
-    int height,
+    const raster_bounds_t& bounds,
     std::span<rgba8_t> framebuffer,
     const pipeline_vertex_view_t& vertex,
     varying_values_t& fragment_inputs,
@@ -272,8 +287,7 @@ void rasterize_point(
 void rasterize_line(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
-    int width,
-    int height,
+    const raster_bounds_t& bounds,
     std::span<rgba8_t> framebuffer,
     const pipeline_vertex_view_t& first,
     const pipeline_vertex_view_t& second,
@@ -285,8 +299,7 @@ void rasterize_line(
 void rasterize_triangle(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
-    int width,
-    int height,
+    const raster_bounds_t& bounds,
     std::span<rgba8_t> framebuffer,
     const pipeline_vertex_view_t& first,
     const pipeline_vertex_view_t& second,
@@ -296,20 +309,16 @@ void rasterize_triangle(
     software_shader::fragment_io_t& fragment_io
 );
 
-matrix4f_t object_to_world_matrix(const render_item_t& render_item);
-
-matrix4f_t world_to_clip_matrix(
-    const camera_t<float, int, 2>& camera,
-    framebuffer_t framebuffer
-);
-
 // The renderer and validation consume the same pre-shading coverage events.
 template <typename Emit>
-void visit_samples(raster_workspace_t& workspace, int width, int height, Emit&& emit);
+void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, Emit&& emit, std::int64_t first_x = 0, std::int64_t first_y = 0);
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
 
 namespace std {
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_bounds_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::pipeline_vertex_t>;
@@ -404,7 +413,7 @@ T require_vertex_output(
 }
 
 template <typename Emit>
-void visit_samples(raster_workspace_t& workspace, int width, int height, Emit&& emit) {
+void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, Emit&& emit, std::int64_t clip_first_x, std::int64_t clip_first_y) {
     if (workspace.m_empty) {
         return;
     }
@@ -421,12 +430,12 @@ void visit_samples(raster_workspace_t& workspace, int width, int height, Emit&& 
                 return to[1] < from[1] || (to[1] == from[1] && from[0] < to[0]);
             };
             const std::array top_left {inclusive(b, c), inclusive(c, a), inclusive(a, b)};
-            const int first_x = sample_bound({std::min({a[0], b[0], c[0]}), 1}, width);
-            const int end_x = sample_bound({std::max({a[0], b[0], c[0]}) + 1, 1}, width);
-            const int first_y = sample_bound({std::min({a[1], b[1], c[1]}), 1}, height);
-            const int end_y = sample_bound({std::max({a[1], b[1], c[1]}) + 1, 1}, height);
-            for (int y = first_y; y < end_y; ++y) {
-                for (int x = first_x; x < end_x; ++x) {
+            const auto first_x = std::max(clip_first_x, sample_bound({std::min({a[0], b[0], c[0]}), 1}, width));
+            const auto end_x = sample_bound({std::max({a[0], b[0], c[0]}) + 1, 1}, width);
+            const auto first_y = std::max(clip_first_y, sample_bound({std::min({a[1], b[1], c[1]}), 1}, height));
+            const auto end_y = sample_bound({std::max({a[1], b[1], c[1]}) + 1, 1}, height);
+            for (auto y = first_y; y < end_y; ++y) {
+                for (auto x = first_x; x < end_x; ++x) {
                     const grid_point_t p {std::int64_t(x) * subpixels + center_offset, std::int64_t(y) * subpixels + center_offset};
                     const std::array values {edge(b, c, p), edge(c, a, p), edge(a, b, p)};
                     bool covered = true;
@@ -449,9 +458,9 @@ void visit_samples(raster_workspace_t& workspace, int width, int height, Emit&& 
     }
 
     const auto [minimum, maximum] = std::ranges::minmax_element(vertices, {}, [](const auto& vertex) { return vertex.m_point[1]; });
-    const int first_y = sample_bound({minimum->m_point[1], 1}, height);
-    const int end_y = sample_bound({maximum->m_point[1], 1}, height);
-    for (int y = first_y; y < end_y; ++y) {
+    const auto first_y = std::max(clip_first_y, sample_bound({minimum->m_point[1], 1}, height));
+    const auto end_y = sample_bound({maximum->m_point[1], 1}, height);
+    for (auto y = first_y; y < end_y; ++y) {
         scanline_events(vertices, std::int64_t(y) * subpixels + center_offset, workspace.m_events);
         const auto& events = workspace.m_events;
         int winding = 0;
@@ -474,9 +483,9 @@ void visit_samples(raster_workspace_t& workspace, int width, int height, Emit&& 
                 if (winding == 0) {
                     left = boundary;
                 } else {
-                    const int first_x = sample_bound(left.m_x, width);
-                    const int end_x = sample_bound(boundary.m_x, width);
-                    for (int x = first_x; x < end_x; ++x) {
+                    const auto first_x = std::max(clip_first_x, sample_bound(left.m_x, width));
+                    const auto end_x = sample_bound(boundary.m_x, width);
+                    for (auto x = first_x; x < end_x; ++x) {
                         emit(span_sample(left, boundary, vertices, x, y));
                     }
                 }
@@ -490,6 +499,18 @@ void visit_samples(raster_workspace_t& workspace, int width, int height, Emit&& 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
 
 namespace std {
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_bounds_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_bounds_t& bounds, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ origin: ({}, {})", bounds.m_x, bounds.m_y);
+        out = std::format_to(out, ", size: ({}, {})", bounds.m_view_width, bounds.m_view_height);
+        out = std::format_to(out, ", intersection: [{}, {}) x [{}, {}) }}", bounds.m_first_x, bounds.m_end_x, bounds.m_first_y, bounds.m_end_y);
+        return out;
+    }
+};
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::pipeline_vertex_t> {

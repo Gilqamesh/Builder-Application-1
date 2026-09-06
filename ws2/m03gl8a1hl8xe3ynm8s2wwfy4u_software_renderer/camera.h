@@ -1,161 +1,177 @@
 #ifndef M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_CAMERA_H
 # define M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_CAMERA_H
 
-# include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
+# include "types.h"
+
 # include <m03gintxczohr63y44o77b4pyj_hyperrectangle/api.h>
 
-# include <cstddef>
 # include <format>
-# include <stdexcept>
-# include <typeinfo>
+# include <variant>
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
+using view_rect_t = m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<int, 2>;
+using projection_bounds_t = m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<float, 2>;
+
 /**
- * @brief Maps corresponding world and view rectangle axes without changing their orientation.
+ * @brief Describes perspective projection with a vertical field of view in radians.
  *
- * The renderer's established 2D mapping sends increasing world Y toward increasing
- * framebuffer Y. Mathematical counter-clockwise object rotation consequently appears
- * clockwise in the top-left-origin framebuffer.
+ * Requires finite parameters, 0 < field of view < pi, and 0 < near < far.
+ * The camera derives aspect from its original view rectangle.
  */
-template <typename WorldT, typename ViewT, std::size_t N>
-class camera_t {
+class perspective_t {
 public:
-    camera_t(const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N>& world_rect, const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N>& view_rect);
+    perspective_t(float vertical_fov, float near_distance, float far_distance);
 
-    m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N>& world_rect();
-    m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N>& view_rect();
-
-    const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N>& world_rect() const;
-    const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N>& view_rect() const;
-
-    m03ginwy24ng8o487c4beoms6l_vector::vector_t<ViewT, N> to_view(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<WorldT, N>& world_position) const;
-    m03ginwy24ng8o487c4beoms6l_vector::vector_t<WorldT, N> to_world(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<ViewT, N>& view_position) const;
-
-    m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N> to_view(const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N>& world_rect) const;
-    m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N> to_world(const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N>& view_rect) const;
+    float vertical_fov() const;
+    float near_distance() const;
+    float far_distance() const;
 
 private:
-    m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N> m_world_rect;
-    m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N> m_view_rect;
+    float m_vertical_fov;
+    float m_near_distance;
+    float m_far_distance;
+};
+
+/**
+ * @brief Describes orthographic bounds in camera-local X/Y and forward near/far distances.
+ *
+ * Requires positive-area bounds and finite distances with 0 <= near < far.
+ */
+class orthographic_t {
+public:
+    orthographic_t(const projection_bounds_t& bounds, float near_distance, float far_distance);
+
+    const projection_bounds_t& bounds() const;
+    float near_distance() const;
+    float far_distance() const;
+
+private:
+    projection_bounds_t m_bounds;
+    float m_near_distance;
+    float m_far_distance;
+};
+
+using projection_t = std::variant<perspective_t, orthographic_t>;
+
+/**
+ * @brief Owns a 3D viewing pose, projection, and one framebuffer rendering rectangle.
+ *
+ * Local +X is right, +Y is up, and -Z is forward. The quaternion maps local
+ * directions into world space; the view transform is the inverse pose. Near/far
+ * map to NDC Z -1/+1. Viewport mapping handles the top-left framebuffer origin.
+ *
+ * The half-open view rectangle supplies both viewport mapping and pixel bounds.
+ * Empty rectangles are valid. Framebuffer intersections restrict writes without
+ * changing mapping or perspective aspect. Position must be finite when deriving
+ * matrices; projection descriptions validate their own inputs.
+ *
+ * Rotation setters store a normalized copy, rejecting zero or non-finite
+ * quaternions. Euler input uses finite radians about fixed X, then Y, then Z
+ * axes. Failed rotation updates preserve the previous orientation.
+ */
+class camera_t {
+public:
+    camera_t(const view_rect_t& view_rect, projection_t projection);
+
+    vector3f_t& position();
+    const vector3f_t& position() const;
+
+    void rotation(const quaternion_t& rotation);
+    void rotation(const vector3f_t& euler_xyz);
+    const quaternion_t& rotation() const;
+
+    /**
+     * @brief Replaces position and rotation to look from eye toward target with the supplied world up direction.
+     *
+     * Rejects non-finite inputs, coincident eye/target, and zero or parallel up
+     * directions. Failed updates preserve the previous pose.
+     */
+    void look_at(const vector3f_t& eye, const vector3f_t& target, const vector3f_t& up);
+
+    projection_t& projection();
+    const projection_t& projection() const;
+
+    view_rect_t& view_rect();
+    const view_rect_t& view_rect() const;
+
+    matrix4f_t world_to_view() const;
+
+    /**
+     * @brief Derives projection times inverse pose, requiring a nonempty view rectangle and representable finite matrix coefficients.
+     */
+    matrix4f_t world_to_clip() const;
+
+    /**
+     * @brief Projects a world position to unclipped framebuffer X/Y and depth (NDC Z + 1) / 2.
+     *
+     * Requires a finite input, nonempty view rectangle, positive clip W, and
+     * representable finite results. This operation does not perform visibility tests.
+     */
+    vector3f_t to_view(const vector3f_t& world_position) const;
+
+private:
+    vector3f_t m_position;
+    quaternion_t m_rotation;
+    projection_t m_projection;
+    view_rect_t m_view_rect;
 };
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
 
 namespace std {
 
-template <typename WorldT, typename ViewT, std::size_t N>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::camera_t<WorldT, ViewT, N>>;
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::perspective_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::orthographic_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::camera_t>;
 
 } // namespace std
 
-namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
-
-template <typename WorldT, typename ViewT, std::size_t N>
-camera_t<WorldT, ViewT, N>::camera_t(const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N>& world_rect, const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N>& view_rect):
-    m_world_rect(world_rect),
-    m_view_rect(view_rect)
-{
-}
-
-template <typename WorldT, typename ViewT, std::size_t N>
-m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N>& camera_t<WorldT, ViewT, N>::world_rect() {
-    return m_world_rect;
-}
-
-template <typename WorldT, typename ViewT, std::size_t N>
-m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N>& camera_t<WorldT, ViewT, N>::view_rect() {
-    return m_view_rect;
-}
-
-template <typename WorldT, typename ViewT, std::size_t N>
-const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N>& camera_t<WorldT, ViewT, N>::world_rect() const {
-    return m_world_rect;
-}
-
-template <typename WorldT, typename ViewT, std::size_t N>
-const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N>& camera_t<WorldT, ViewT, N>::view_rect() const {
-    return m_view_rect;
-}
-
-template <typename WorldT, typename ViewT, std::size_t N>
-m03ginwy24ng8o487c4beoms6l_vector::vector_t<ViewT, N> camera_t<WorldT, ViewT, N>::to_view(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<WorldT, N>& world_position) const {
-    m03ginwy24ng8o487c4beoms6l_vector::vector_t<ViewT, N> result;
-    for (std::size_t i = 0; i < N; ++i) {
-        const auto& camera_world_interval = m_world_rect[i];
-        const auto& camera_view_interval = m_view_rect[i];
-        const auto camera_view_interval_length = camera_view_interval.length();
-        const auto camera_world_length = camera_world_interval.length();
-        if (camera_world_length == 0) {
-            throw std::runtime_error(std::format("camera_t<{}, {}, {}>::to_view: camera world rectangle has zero length in dimension {}", typeid(WorldT).name(), typeid(ViewT).name(), N, i));
-        }
-        result[i] = static_cast<ViewT>(camera_view_interval[0] + (world_position[i] - camera_world_interval[0]) * camera_view_interval_length / camera_world_length);
-    }
-    return result;
-}
-
-template <typename WorldT, typename ViewT, std::size_t N>
-m03ginwy24ng8o487c4beoms6l_vector::vector_t<WorldT, N> camera_t<WorldT, ViewT, N>::to_world(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<ViewT, N>& view_position) const {
-    m03ginwy24ng8o487c4beoms6l_vector::vector_t<WorldT, N> result;
-    for (std::size_t i = 0; i < N; ++i) {
-        const auto& camera_view_interval = m_view_rect[i];
-        const auto& camera_world_interval = m_world_rect[i];
-        const auto camera_world_interval_length = camera_world_interval.length();
-        const auto camera_view_length = camera_view_interval.length();
-        if (camera_view_length == 0) {
-            throw std::runtime_error(std::format("camera_t<{}, {}, {}>::to_world: camera view rectangle has zero length in dimension {}", typeid(WorldT).name(), typeid(ViewT).name(), N, i));
-        }
-        result[i] = static_cast<WorldT>(camera_world_interval[0] + (view_position[i] - camera_view_interval[0]) * camera_world_interval_length / camera_view_length);
-    }
-    return result;
-}
-
-template <typename WorldT, typename ViewT, std::size_t N>
-m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N> camera_t<WorldT, ViewT, N>::to_view(const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N>& world_rect) const {
-    m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N> result;
-    for (std::size_t i = 0; i < N; ++i) {
-        const auto& world_interval = world_rect[i];
-        const auto& camera_world_interval = m_world_rect[i];
-        const auto& camera_view_interval = m_view_rect[i];
-        const auto camera_view_interval_length = camera_view_interval.length();
-        const auto camera_world_length = camera_world_interval.length();
-        if (camera_world_length == 0) {
-            throw std::runtime_error(std::format("camera_t<{}, {}, {}>::to_view: camera world rectangle has zero length in dimension {}", typeid(WorldT).name(), typeid(ViewT).name(), N, i));
-        }
-        result[i] = {
-            static_cast<ViewT>(camera_view_interval[0] + (world_interval[0] - camera_world_interval[0]) * camera_view_interval_length / camera_world_length),
-            static_cast<ViewT>(camera_view_interval[1] + (world_interval[1] - camera_world_interval[1]) * camera_view_interval_length / camera_world_length)
-        };
-    }
-    return result;
-}
-
-template <typename WorldT, typename ViewT, std::size_t N>
-m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N> camera_t<WorldT, ViewT, N>::to_world(const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<ViewT, N>& view_rect) const {
-    m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<WorldT, N> result;
-    for (std::size_t i = 0; i < N; ++i) {
-        const auto& view_interval = view_rect[i];
-        const auto& camera_view_interval = m_view_rect[i];
-        const auto& camera_world_interval = m_world_rect[i];
-        const auto camera_world_interval_length = camera_world_interval.length();
-        const auto camera_view_length = camera_view_interval.length();
-        if (camera_view_length == 0) {
-            throw std::runtime_error(std::format("camera_t<{}, {}, {}>::to_world: camera view rectangle has zero length in dimension {}", typeid(WorldT).name(), typeid(ViewT).name(), N, i));
-        }
-        result[i] = {
-            static_cast<WorldT>(camera_world_interval[0] + (view_interval[0] - camera_view_interval[0]) * camera_world_interval_length / camera_view_length),
-            static_cast<WorldT>(camera_world_interval[1] + (view_interval[1] - camera_view_interval[1]) * camera_world_interval_length / camera_view_length)
-        };
-    }
-    return result;
-}
-
-} // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
-
 namespace std {
 
-template <typename WorldT, typename ViewT, std::size_t N>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::camera_t<WorldT, ViewT, N>> {
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::perspective_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid perspective_t format specifier");
+        }
+        return it;
+    }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::perspective_t& projection, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ vertical_fov: {}", projection.vertical_fov());
+        out = std::format_to(out, ", near: {}", projection.near_distance());
+        out = std::format_to(out, ", far: {} }}", projection.far_distance());
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::orthographic_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid orthographic_t format specifier");
+        }
+        return it;
+    }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::orthographic_t& projection, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ bounds: {}", projection.bounds());
+        out = std::format_to(out, ", near: {}", projection.near_distance());
+        out = std::format_to(out, ", far: {} }}", projection.far_distance());
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::camera_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
         if (it != ctx.end() && *it != '}') {
@@ -163,15 +179,12 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::camera_t<WorldT, 
         }
         return it;
     }
-
-    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::camera_t<WorldT, ViewT, N>& camera, auto& ctx) const {
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::camera_t& camera, auto& ctx) const {
         auto out = ctx.out();
-
-        out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "world_rect: {}", camera.world_rect());
-        out = std::format_to(out, ", view_rect: {}", camera.view_rect());
-        out = std::format_to(out, " }}");
-
+        out = std::format_to(out, "{{ position: {}", camera.position());
+        out = std::format_to(out, ", rotation: {}", camera.rotation());
+        std::visit([&](const auto& projection) { out = std::format_to(out, ", projection: {}", projection); }, camera.projection());
+        out = std::format_to(out, ", view_rect: {} }}", camera.view_rect());
         return out;
     }
 };

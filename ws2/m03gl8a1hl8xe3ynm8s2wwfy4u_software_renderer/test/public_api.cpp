@@ -9,6 +9,7 @@
 #include <m03gsy25j4v7nccgmsdov9ioft_shader/api.h>
 #include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
 #include <m03gt1djvvy5atia5evkbg6rqy_software_shader/api.h>
+#include <m03gtgtrh2smvh28qlwgm7gdl4_quaternion/api.h>
 
 #include <algorithm>
 #include <array>
@@ -24,6 +25,7 @@
 #include <random>
 #include <set>
 #include <span>
+#include <source_location>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -215,16 +217,20 @@ api::render_item_t make_render_item(
     api::render_item_t render_item;
     render_item.geometry() = std::move(geometry);
     render_item.material() = std::move(material);
-    render_item.translation() = {0.0F, 0.0F};
-    render_item.scale() = {1.0F, 1.0F};
+    render_item.translation() = {0.0F, 0.0F, 0.0F};
+    render_item.scale() = {1.0F, 1.0F, 1.0F};
     return render_item;
 }
 
-api::camera_t<float, int, 2> make_camera(int width, int height) {
-    return api::camera_t<float, int, 2>(
-        {{-1.0F, 1.0F}, {-1.0F, 1.0F}},
-        {{0, width}, {0, height}}
+api::camera_t make_camera(int width, int height) {
+    api::camera_t camera(
+        {{0, width}, {0, height}},
+        api::orthographic_t({{-1.0F, 1.0F}, {-1.0F, 1.0F}}, 0.0F, 2.0F)
     );
+    // Explicit planar migration: this camera looks along +world Z, with world Y down.
+    camera.position() = {0, 0, -1};
+    camera.rotation(api::quaternion_t(0, 1, 0, 0));
+    return camera;
 }
 
 std::vector<api::rgba8_t> draw_scene(
@@ -402,13 +408,13 @@ void test_empty_framebuffer() {
         make_geometry({{0.0F, 0.0F}}, {0}, api::vertex_primitive_topology_t::point),
         make_material(make_unorm_texture(red))
     );
-    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, render_item); });
+    test::expect_no_throw([&] { renderer.draw(camera, render_item); });
     renderer.framebuffer() = api::framebuffer_t(pixels, 4, 0);
     test::expect_no_throw([&] { renderer.clear(clear_color); });
-    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, render_item); });
+    test::expect_no_throw([&] { renderer.draw(camera, render_item); });
     renderer.framebuffer() = api::framebuffer_t(pixels, 0, 0);
     test::expect_no_throw([&] { renderer.clear(clear_color); });
-    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, render_item); });
+    test::expect_no_throw([&] { renderer.draw(camera, render_item); });
 }
 
 void test_topologies_and_clipping() {
@@ -517,8 +523,8 @@ void test_texture_coordinate_interpolation() {
         api::vertex_primitive_topology_t::triangle_strip
     );
     transformed.material() = make_material(make_unorm_texture(2, 2, texels));
-    transformed.translation() = {0.25F, 0.25F};
-    transformed.scale() = {0.5F, 0.5F};
+    transformed.translation() = {0.25F, 0.25F, 0.0F};
+    transformed.scale() = {0.5F, 0.5F, 1.0F};
     renderer.draw(make_camera(32, 32), transformed);
     expect_color(transformed_pixels[pixel_index(14, 14, 32)], red);
     expect_color(transformed_pixels[pixel_index(26, 14, 32)], green);
@@ -539,9 +545,9 @@ void test_shared_material_transform_semantics() {
         make_constant_program(vector4f_t({1.0F, 0.0F, 0.0F, 1.0F}))
     );
     auto left = make_render_item(geometry, material);
-    left.translation() = {-0.5F, 0.0F};
+    left.translation() = {-0.5F, 0.0F, 0.0F};
     auto right = make_render_item(geometry, material);
-    right.translation() = {0.5F, 0.0F};
+    right.translation() = {0.5F, 0.0F, 0.0F};
     renderer.draw(camera, left);
     renderer.draw(camera, right);
     expect_color(pixels[pixel_index(16, 32, 64)], red);
@@ -552,9 +558,9 @@ void test_shared_material_transform_semantics() {
         make_geometry({{0.25F, 0.0F}}, {0}, api::vertex_primitive_topology_t::point),
         material
     );
-    trs.scale() = {2.0F, 1.0F};
-    trs.rotation() = std::numbers::pi_v<float> * 0.5F;
-    trs.translation() = {0.25F, -0.25F};
+    trs.scale() = {2.0F, 1.0F, 1.0F};
+    trs.rotation(vector3f_t({0, 0, std::numbers::pi_v<float> * 0.5F}));
+    trs.translation() = {0.25F, -0.25F, 0.0F};
     renderer.draw(camera, trs);
     expect_color(pixels[pixel_index(40, 40, 64)], red);
     expect_color(pixels[pixel_index(48, 48, 64)], clear_color);
@@ -991,14 +997,14 @@ void test_grid_fragment_state() {
     test::expect_throws<std::out_of_range>([&] { wide.draw(make_camera(32, 32), item); });
 }
 
-using mask_t = std::set<std::array<int, 2>>;
+using mask_t = std::set<std::array<std::int64_t, 2>>;
 
-void require(bool condition) {
-    test::expect(std::identity(), condition);
+void require(bool condition, const std::source_location& location = std::source_location::current()) {
+    test::expect_at(location, std::identity(), condition);
 }
 
-void near(double actual, double expected) {
-    require(std::abs(actual - expected) <= 2e-6 * std::max(1.0, std::abs(expected)));
+void near(double actual, double expected, const std::source_location& location = std::source_location::current()) {
+    test::expect_at(location, [](double a, double b) { return std::abs(a - b) <= 2e-6 * std::max(1.0, std::abs(b)); }, actual, expected);
 }
 
 raster::pipeline_vertex_view_t vertex(clip_position_fixture_t p) {
@@ -1425,13 +1431,13 @@ void test_clipping() {
 void test_integer_bounds() {
     constexpr std::int64_t limit = std::int64_t(1) << 31;
     constexpr std::array<raster::grid_point_t, 4> corners {{{0, 0}, {limit, 0}, {limit, limit}, {0, limit}}};
-    std::int64_t largest = 0;
+    raster::edge_value_t largest = 0;
     for (auto a : corners) {
         for (auto b : corners) {
             for (auto p : corners) {
                 const auto determinant = raster::edge(a, b, p);
                 require(determinant == -raster::edge(b, a, p));
-                largest = std::max(largest, std::abs(determinant));
+                largest = std::max(largest, determinant < 0 ? -determinant : determinant);
             }
         }
     }
@@ -1472,6 +1478,54 @@ void test_integer_bounds() {
     require(hits == 1);
 }
 
+void test_wide_raster_bounds() {
+    const int minimum = std::numeric_limits<int>::min();
+    const int maximum = std::numeric_limits<int>::max();
+    const raster::raster_bounds_t bounds(8, 8, {{minimum, maximum}, {minimum, maximum}});
+    require(!bounds.empty());
+    require(bounds.m_view_width == std::int64_t(maximum) - minimum);
+    require(bounds.m_first_x == -std::int64_t(minimum));
+    require(bounds.m_end_x - bounds.m_first_x == 8);
+    const std::int64_t limit = bounds.m_view_width * raster::subpixels;
+    const std::array<raster::grid_point_t, 4> corners {{{0, 0}, {limit, 0}, {limit, limit}, {0, limit}}};
+    for (auto a : corners) {
+        for (auto b : corners) {
+            for (auto c : corners) {
+                const auto determinant = raster::edge(a, b, c);
+                require(determinant == -raster::edge(b, a, c));
+                require((determinant < 0 ? -determinant : determinant) <= raster::edge_value_t(limit) * limit);
+            }
+        }
+    }
+    raster::raster_workspace_t workspace;
+    const auto zero = vertex({0, 0, 0, 1});
+    for (auto point : corners) {
+        workspace.m_vertices.push_back({point, 0, 1, zero});
+    }
+    raster::prepare_polygon(workspace);
+    for (bool triangles : {true, false}) {
+        workspace.m_use_triangles = triangles;
+        mask_t actual;
+        raster::visit_samples(workspace, bounds.m_end_x, bounds.m_end_y, [&](const auto& sample) {
+            require(actual.insert({sample.m_x - bounds.m_first_x, sample.m_y - bounds.m_first_y}).second);
+            double sum = 0;
+            for (double weight : sample.m_weights) {
+                require(std::isfinite(weight) && 0 <= weight);
+                sum += weight;
+            }
+            near(sum, 1);
+        }, bounds.m_first_x, bounds.m_first_y);
+        require(actual == rectangle(0, 0, 8, 8));
+    }
+    std::mt19937_64 random(20260907);
+    for (int i = 0; i < 10000; ++i) {
+        const raster::fraction_t a {(raster::edge_value_t(random()) << 16) + (random() & 65535), 1 + (random() & ((std::uint64_t(1) << 40) - 1))};
+        const raster::fraction_t b {(raster::edge_value_t(random()) << 16) + (random() & 65535), 1 + (random() & ((std::uint64_t(1) << 40) - 1))};
+        const auto lhs = a[0] * b[1], rhs = b[0] * a[1];
+        require(raster::compare_fraction(a, b) == ((rhs < lhs) - (lhs < rhs)));
+    }
+}
+
 void run_raster_tests() {
     test_original_shared_edges();
     test_clipped_boundaries();
@@ -1480,9 +1534,297 @@ void run_raster_tests() {
     test_plane_coverage();
     test_clipping();
     test_integer_bounds();
+    test_wide_raster_bounds();
+}
+
+void test_rotation_and_item_transform() {
+    using shared_quaternion_t = m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>;
+    static_assert(std::is_same_v<api::quaternion_t, shared_quaternion_t>);
+    api::render_item_t item;
+    api::camera_t camera({{0, 16}, {0, 16}}, api::perspective_t(1, 1, 10));
+    const auto check_rotation_storage = [](auto& owner) {
+        static_assert(std::is_same_v<decltype(owner.rotation()), const shared_quaternion_t&>);
+        near(owner.rotation().w(), 1);
+        near(owner.rotation().x(), 0);
+        near(owner.rotation().y(), 0);
+        near(owner.rotation().z(), 0);
+        for (float magnitude : {std::numeric_limits<float>::denorm_min(), 1.0F, std::numeric_limits<float>::max()}) {
+            shared_quaternion_t input(magnitude, magnitude, magnitude, magnitude);
+            owner.rotation(input);
+            require(input.w() == magnitude);
+            input.x() = 0; // The setter owns a copy, not a reference to mutable components.
+            near(owner.rotation().w(), 0.5);
+            near(owner.rotation().x(), 0.5);
+            near(owner.rotation().y(), 0.5);
+            near(owner.rotation().z(), 0.5);
+        }
+        const auto previous = owner.rotation();
+        for (float invalid : {std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
+            const shared_quaternion_t input(invalid, 0, 0, 1);
+            test::expect_throws<std::invalid_argument>([&] { owner.rotation(input); });
+            test::expect_throws<std::invalid_argument>([&] { owner.rotation(vector3f_t({0, invalid, 0})); });
+            require(owner.rotation() == previous);
+        }
+        test::expect_throws<std::invalid_argument>([&] { owner.rotation(shared_quaternion_t(0, 0, 0, 0)); });
+        require(owner.rotation() == previous);
+    };
+    check_rotation_storage(item);
+    check_rotation_storage(camera);
+
+    const vector3f_t euler {0.31F, -0.72F, 1.27F};
+    item.rotation(euler);
+    camera.rotation(euler);
+    require(item.rotation() == camera.rotation());
+    const auto matrix = item.object_to_world();
+    const auto rotation = item.rotation();
+    item.rotation(shared_quaternion_t(-rotation.w(), -rotation.x(), -rotation.y(), -rotation.z()));
+    require(item.object_to_world() == matrix);
+
+    // Independent sequential Euler rotations establish the fixed-axis order.
+    vector3f_t point {0.4F, -0.3F, 0.9F};
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        const auto a = (axis + 1) % 3, b = (axis + 2) % 3;
+        const auto before = point;
+        point[a] = std::cos(euler[axis]) * before[a] - std::sin(euler[axis]) * before[b];
+        point[b] = std::sin(euler[axis]) * before[a] + std::cos(euler[axis]) * before[b];
+    }
+    const auto transformed = matrix * vector4f_t({0.4F, -0.3F, 0.9F, 1});
+    for (std::size_t axis = 0; axis < 3; ++axis) { near(transformed[axis], point[axis]); }
+
+    item.translation() = {1, 2, 3};
+    item.scale() = {2, 3, 0};
+    item.rotation(vector3f_t({0, 0, std::numbers::pi_v<float> / 2}));
+    const auto result = item.object_to_world() * vector4f_t({1, 0, 4, 1});
+    near(result[0], 1); near(result[1], 4); near(result[2], 3); near(result[3], 1);
+    item.translation()[0] = std::numeric_limits<float>::infinity();
+    test::expect_throws<std::invalid_argument>([&] { (void)item.object_to_world(); });
+    require(!std::format("{}", rotation).empty());
+}
+
+void test_camera_pose_and_projection() {
+    api::camera_t camera({{100, 900}, {50, 450}}, api::perspective_t(std::numbers::pi_v<float> / 2, 1, 9));
+    const auto projection = camera.world_to_clip();
+    near(projection(0, 0), 0.5);
+    near(projection(1, 1), 1);
+    for (float distance : {1.0F, 9.0F}) {
+        const auto clip = projection * vector4f_t({0, 0, -distance, 1});
+        near(clip[3], distance);
+        near(clip[2] / clip[3], distance == 1 ? -1 : 1);
+    }
+    auto screen = camera.to_view({0, 1, -1});
+    near(screen[0], 500); near(screen[1], 50); near(screen[2], 0);
+    screen = camera.to_view({2, 0, -1});
+    near(screen[0], 900); near(screen[1], 250);
+
+    camera.position() = {3, 2, 5};
+    camera.rotation(vector3f_t({0, std::numbers::pi_v<float> / 2, 0}));
+    const auto view = camera.world_to_view();
+    const auto local = view * vector4f_t({2, 2, 5, 1});
+    near(local[0], 0); near(local[1], 0); near(local[2], -1); near(local[3], 1);
+    const auto camera_origin = view * vector4f_t({3, 2, 5, 1});
+    for (std::size_t axis = 0; axis < 3; ++axis) { near(camera_origin[axis], 0); }
+
+    for (const vector3f_t target : {vector3f_t({1, 0, 0}), vector3f_t({-1, 0, 0}), vector3f_t({0, 0, 1}), vector3f_t({0, 0, -1}), vector3f_t({1, 2, -3})}) {
+        camera.look_at({0, 0, 0}, target, {0, 1, 0});
+        const auto result = camera.world_to_view() * vector4f_t({target[0], target[1], target[2], 1});
+        near(result[0], 0); near(result[1], 0);
+        near(result[2], -std::hypot(target[0], target[1], target[2]));
+    }
+    camera.look_at({1, 2, 3}, {1, 2, 2}, {0, 1, 0});
+    const auto previous = camera.world_to_view();
+    test::expect_throws<std::invalid_argument>([&] { camera.look_at({0, 0, 0}, {0, 0, 0}, {0, 1, 0}); });
+    test::expect_throws<std::invalid_argument>([&] { camera.look_at({0, 0, 0}, {0, 0, -1}, {0, 0, 0}); });
+    test::expect_throws<std::invalid_argument>([&] { camera.look_at({0, 0, 0}, {0, 0, -1}, {0, 0, 1}); });
+    // Normalizing this diagonal before the cross product can hide exact parallelism.
+    test::expect_throws<std::invalid_argument>([&] { camera.look_at({0, 0, 0}, {-1, -3, -7}, {1, 3, 7}); });
+    test::expect_throws<std::invalid_argument>([&] { camera.look_at({0, 0, 0}, {-1, -3, -7}, {-1, -3, -7}); });
+    test::expect_throws<std::invalid_argument>([&] { camera.rotation(vector3f_t({0, 0, std::numeric_limits<float>::infinity()})); });
+    require(camera.world_to_view() == previous);
+    test::expect_throws<std::invalid_argument>([&] { (void)camera.to_view({1, 2, 3}); });
+    test::expect_throws<std::invalid_argument>([] { (void)api::perspective_t(0, 1, 10); });
+    test::expect_throws<std::invalid_argument>([] { (void)api::perspective_t(std::numbers::pi_v<float>, 1, 10); });
+    test::expect_throws<std::invalid_argument>([] { (void)api::perspective_t(1, 0, 10); });
+    test::expect_throws<std::invalid_argument>([] { (void)api::perspective_t(1, 2, 1); });
+    test::expect_throws<std::invalid_argument>([] { (void)api::perspective_t(1, 1, std::numeric_limits<float>::infinity()); });
+    test::expect_throws<std::invalid_argument>([] { (void)api::orthographic_t({{0, 0}, {0, 1}}, 0, 1); });
+    test::expect_throws<std::invalid_argument>([] { (void)api::orthographic_t({{0, 1}, {0, 1}}, -1, 1); });
+    test::expect_throws<std::invalid_argument>([] { (void)api::orthographic_t({{0, 1}, {0, 1}}, 1, 1); });
+
+    camera.position() = {0, 0, 0};
+    camera.rotation(api::quaternion_t());
+    camera.projection() = api::orthographic_t({{-2, 6}, {-3, 1}}, 0, 10);
+    screen = camera.to_view({-2, 1, 0});
+    near(screen[0], 100); near(screen[1], 50); near(screen[2], 0);
+    screen = camera.to_view({6, -3, -10});
+    near(screen[0], 900); near(screen[1], 450); near(screen[2], 1);
+    require(!std::format("{}", camera).empty());
+    static_assert(std::is_same_v<decltype(camera.rotation()), const api::quaternion_t&>);
+}
+
+void test_camera_regions_and_clears() {
+    constexpr int width = 16, height = 12;
+    std::vector<api::rgba8_t> pixels(width * height, clear_color);
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, width, height));
+    api::camera_t camera({{3, 11}, {2, 9}}, api::perspective_t(1, 0.1F, 10));
+    const auto quad = make_typed_geometry(std::vector<clip_position_fixture_t>{{-1, 1, 0, 1}, {-1, -1, 0, 1}, {1, 1, 0, 1}, {1, -1, 0, 1}}, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 4), {0, 1, 2, 3}, api::vertex_primitive_topology_t::triangle_strip);
+    auto item = make_render_item(quad, std::make_shared<api::material_t>(make_clip_program()));
+    for (const api::view_rect_t rect : {api::view_rect_t({{3, 11}, {2, 9}}), api::view_rect_t({{-4, 7}, {-3, 6}}), api::view_rect_t({{10, 25}, {7, 30}})}) {
+        camera.view_rect() = rect;
+        renderer.clear(clear_color);
+        renderer.draw(camera, item);
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                expect_color(pixels[pixel_index(x, y, width)], rect.contains({x, y}) ? blue : clear_color);
+            }
+        }
+        camera.position()[0] = std::numeric_limits<float>::quiet_NaN();
+        renderer.clear(camera, green); // Clearing depends only on the rectangle.
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                expect_color(pixels[pixel_index(x, y, width)], rect.contains({x, y}) ? green : clear_color);
+            }
+        }
+        camera.position()[0] = 0;
+    }
+    // A valid program with a non-finite vertex result proves empty regions skip execution.
+    auto invalid = make_render_item(make_typed_geometry(std::vector<clip_position_fixture_t>{{std::numeric_limits<float>::infinity(), 0, 0, 1}}, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 4), {0}, api::vertex_primitive_topology_t::point), item.material());
+    for (const api::view_rect_t rect : {api::view_rect_t({{2, 2}, {0, 5}}), api::view_rect_t({{0, 5}, {1, 1}}), api::view_rect_t({{-8, -1}, {0, 5}}), api::view_rect_t({{20, 30}, {0, 5}}), api::view_rect_t({{0, 5}, {20, 30}})}) {
+        camera.view_rect() = rect;
+        renderer.clear(clear_color);
+        test::expect_no_throw([&] { renderer.draw(camera, invalid); });
+        test::expect_no_throw([&] { renderer.draw(camera, api::render_item_t()); });
+        renderer.clear(camera, green);
+        require(colored_pixel_count(pixels) == 0);
+    }
+    camera.view_rect() = {{0, width}, {0, height}};
+    test::expect_throws<std::runtime_error>([&] { renderer.draw(camera, invalid); });
+    renderer.clear(red);
+    for (const auto pixel : pixels) { expect_color(pixel, red); }
+
+    // Absolute fragment coordinates include the viewport offset.
+    shader::vertex_shader_ast_builder_t vertex_shader;
+    vertex_shader.position(vertex_shader.input<vector4f_t>(0));
+    shader::fragment_shader_ast_builder_t fragment;
+    fragment.color(fragment.fragment_coordinate() / vector4f_t({16, 16, 1, 1}));
+    item.material() = std::make_shared<api::material_t>(std::make_shared<const software_shader::program_t>(std::move(vertex_shader).finalize(), std::move(fragment).finalize()));
+    camera.view_rect() = {{3, 11}, {2, 9}};
+    renderer.clear(clear_color);
+    renderer.draw(camera, item);
+    expect_color(pixels[pixel_index(3, 2, width)], {56, 40, 128, 255});
+}
+
+void test_region_topologies_and_original_aspect() {
+    constexpr int width = 8, height = 8;
+    std::vector<api::rgba8_t> pixels(width * height, clear_color);
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, width, height));
+    const auto material = std::make_shared<api::material_t>(make_clip_program());
+    const int minimum = std::numeric_limits<int>::min(), maximum = std::numeric_limits<int>::max();
+    for (const api::view_rect_t rect : {api::view_rect_t({{2, 6}, {1, 7}}), api::view_rect_t({{-2, 6}, {-1, 7}}), api::view_rect_t({{minimum, maximum}, {0, height}})}) {
+        api::camera_t camera(rect, api::perspective_t(1, 0.1F, 10));
+        for (const auto topology : {api::vertex_primitive_topology_t::point, api::vertex_primitive_topology_t::line, api::vertex_primitive_topology_t::line_strip, api::vertex_primitive_topology_t::line_loop, api::vertex_primitive_topology_t::triangle, api::vertex_primitive_topology_t::triangle_strip, api::vertex_primitive_topology_t::triangle_fan}) {
+            std::vector<clip_position_fixture_t> positions;
+            api::index_buffer_t::indices_t indices;
+            switch (topology) {
+                case api::vertex_primitive_topology_t::point: {
+                    positions = {{0, 0, 0, 1}}; indices = {0};
+                } break;
+                case api::vertex_primitive_topology_t::line:
+                case api::vertex_primitive_topology_t::line_strip:
+                case api::vertex_primitive_topology_t::line_loop: {
+                    positions = {{-1, 0, 0, 1}, {1, 0, 0, 1}}; indices = {0, 1};
+                } break;
+                case api::vertex_primitive_topology_t::triangle: {
+                    positions = {{-1, 1, 0, 1}, {-1, -1, 0, 1}, {1, 1, 0, 1}, {1, -1, 0, 1}}; indices = {0, 1, 2, 1, 3, 2};
+                } break;
+                case api::vertex_primitive_topology_t::triangle_strip: {
+                    positions = {{-1, 1, 0, 1}, {-1, -1, 0, 1}, {1, 1, 0, 1}, {1, -1, 0, 1}}; indices = {0, 1, 2, 3};
+                } break;
+                default: {
+                    positions = {{-1, 1, 0, 1}, {-1, -1, 0, 1}, {1, -1, 0, 1}, {1, 1, 0, 1}}; indices = {0, 1, 2, 3};
+                } break;
+            }
+            const auto item = make_render_item(make_typed_geometry(positions, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 4), indices, topology), material);
+            renderer.clear(clear_color);
+            renderer.draw(camera, item);
+            require(0 < colored_pixel_count(pixels));
+            for (int y = 0; y < height; ++y) {
+                for (int x = 0; x < width; ++x) {
+                    if (!rect.contains({x, y})) { expect_color(pixels[pixel_index(x, y, width)], clear_color); }
+                }
+            }
+        }
+    }
+    shader::vertex_shader_ast_builder_t vertex_shader;
+    const auto position = vertex_shader.input<vector3f_t>(0);
+    vertex_shader.position(vertex_shader.world_to_clip() * vertex_shader.object_to_world() * vertex_shader.construct<vector4f_t>(position, 1.0F));
+    shader::fragment_shader_ast_builder_t fragment;
+    fragment.color(vector4f_t({0, 0, 1, 1}));
+    const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex_shader).finalize(), std::move(fragment).finalize());
+    const auto item = make_render_item(make_typed_geometry(std::vector<std::array<float, 3>>{{1.25F, 0, -2}}, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 3), {0}, api::vertex_primitive_topology_t::point), std::make_shared<api::material_t>(program));
+    const api::camera_t camera({{-8, 8}, {0, 8}}, api::perspective_t(std::numbers::pi_v<float> / 2, 1, 9));
+    renderer.clear(clear_color);
+    renderer.draw(camera, item);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const bool expected = (x - 2) * (x - 2) + (y - 4) * (y - 4) <= 9;
+            expect_color(pixels[pixel_index(x, y, width)], expected ? blue : clear_color);
+        }
+    }
+}
+
+void test_textured_3d_near_plane() {
+    shader::vertex_shader_ast_builder_t vertex_shader;
+    const auto position = vertex_shader.input<vector3f_t>(0);
+    vertex_shader.position(vertex_shader.world_to_clip() * vertex_shader.object_to_world() * vertex_shader.construct<vector4f_t>(position, 1.0F));
+    vertex_shader.output(0, shader::swizzle<0, 1>(position) * 0.5F + vector2f_t({0.5F, 0.5F}));
+    shader::fragment_shader_ast_builder_t fragment;
+    const auto coordinates = fragment.input<vector2f_t>(0);
+    fragment.color(shader::sample(fragment.resource<shader::shader_texture_2d_t>(0), fragment.resource<shader::shader_sampler_t>(0), coordinates));
+    const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex_shader).finalize(), std::move(fragment).finalize());
+    const std::array texels {red, green, blue, white};
+    auto item = make_render_item(make_typed_geometry(std::vector<std::array<float, 3>>{{-1, -1, 0}, {1, -1, 0}, {-1, 1, 0}, {1, 1, 0}}, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 3), {0, 1, 2, 3}, api::vertex_primitive_topology_t::triangle_strip), make_material(make_unorm_texture(2, 2, texels), make_sampler(), program));
+    item.rotation(vector3f_t({0, std::atan2(0.6F, 0.8F), 0}));
+    item.translation() = {0, 0, -1};
+    item.scale() = {1, 1, 0}; // A collapsed Z scale still leaves a visible XY surface.
+    std::vector<api::rgba8_t> pixels(32 * 32, clear_color);
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 32, 32));
+    for (bool perspective : {false, true}) {
+        api::camera_t camera({{0, 32}, {0, 32}}, api::orthographic_t({{-1, 1}, {-1, 1}}, 0.75F, 10));
+        if (perspective) { camera.projection() = api::perspective_t(std::numbers::pi_v<float> / 2, 0.75F, 10); }
+        renderer.clear(clear_color);
+        renderer.draw(camera, item);
+        int checked = 0, visible = 0, clipped = 0;
+        for (int y = 0; y < 32; ++y) {
+            for (int x = 0; x < 32; ++x) {
+                const double nx = (double(x) + 0.5) / 16 - 1, ny = 1 - (double(y) + 0.5) / 16;
+                // Independently intersect a camera ray with z = -0.75*x - 1.
+                const double distance = perspective ? 1 / (1 - 0.75 * nx) : 1 + 0.75 * nx;
+                const double local_x = (perspective ? distance * nx : nx) / 0.8;
+                const double local_y = perspective ? distance * ny : ny;
+                if (std::abs(std::abs(local_x) - 1) < 0.03 || std::abs(std::abs(local_y) - 1) < 0.03 || std::abs(distance - 0.75) < 0.03 || std::abs(local_x) < 0.03 || std::abs(local_y) < 0.03) { continue; }
+                const bool inside = std::abs(local_x) < 1 && std::abs(local_y) < 1;
+                const bool expected = inside && 0.75 <= distance;
+                const auto color = expected ? texels[(local_y < 0 ? 0 : 2) + (local_x < 0 ? 0 : 1)] : clear_color;
+                expect_color(pixels[pixel_index(x, y, 32)], color);
+                ++checked;
+                visible += expected;
+                clipped += inside && distance < 0.75;
+            }
+        }
+        require(500 < checked && 100 < visible && 10 < clipped);
+        // Translating both camera and item preserves the resulting image.
+        const auto baseline = pixels;
+        camera.position() = {2, 3, 4};
+        item.translation() = {2, 3, 3};
+        renderer.clear(clear_color);
+        renderer.draw(camera, item);
+        require(std::equal(pixels.begin(), pixels.end(), baseline.begin(), same_color));
+        item.translation() = {0, 0, -1};
+    }
 }
 
 void run_resource_tests() {
+    test_rotation_and_item_transform();
     test_resource_model();
     test_vertex_layout_rejection();
     test_material_resource_mapping();
@@ -1496,6 +1838,10 @@ void run_framebuffer_tests() {
 }
 
 void run_pipeline_tests() {
+    test_camera_pose_and_projection();
+    test_camera_regions_and_clears();
+    test_region_topologies_and_original_aspect();
+    test_textured_3d_near_plane();
     test_topologies_and_clipping();
     test_shared_edge_coverage();
     test_texture_coordinate_interpolation();
