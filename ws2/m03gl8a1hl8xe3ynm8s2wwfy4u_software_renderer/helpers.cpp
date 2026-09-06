@@ -68,7 +68,8 @@ void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t 
         std::swap(first, second);
         std::swap(da, db);
     }
-    // Ordering supplies direction independence; widening avoids float overflow.
+    // Ordering keeps shared-edge intersections identical in either direction;
+    // widening avoids float overflow. A zero factor preserves an on-plane endpoint.
     const double factor = da / (da + db);
     vector4f_t position;
     for (std::size_t i = 0; i < 4; ++i) {
@@ -444,6 +445,8 @@ int sample_bound(fraction_t crossing, int extent) {
 }
 
 void prepare_polygon(raster_workspace_t& workspace) {
+    // Collapse coincident positions only in the geometry ring. Interpolation keeps
+    // each occurrence's payload, so distinct coincident values can cause discontinuities.
     workspace.m_empty = true;
     workspace.m_use_triangles = false;
     workspace.m_front_facing = false;
@@ -895,6 +898,8 @@ void rasterize_line(
     const float line_y = second_screen->m_y - first_screen->m_y;
     const float line_length_squared = line_x * line_x + line_y * line_y;
     while (true) {
+        // Interpolate by the clamped projection of the pixel center onto the
+        // projected segment; a zero-length segment uses its first endpoint's values.
         float factor = 0.0F;
         if (line_length_squared != 0.0F) {
             factor = ((static_cast<float>(x) + 0.5F - first_screen->m_x) * line_x + (static_cast<float>(y) + 0.5F - first_screen->m_y) * line_y) / line_length_squared;

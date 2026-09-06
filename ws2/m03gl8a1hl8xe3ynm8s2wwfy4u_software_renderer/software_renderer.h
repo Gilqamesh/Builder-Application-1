@@ -12,6 +12,34 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 /**
  * @brief Renders camera-relative render items into a borrowed CPU framebuffer.
+ *
+ * Mesh streams must match consumed vertex input locations and types; selected
+ * indices must fit signed 32-bit vertex indices. Fragment inputs must be floating-point
+ * scalars or vectors, with perspective-correct interpolation of primitive-local values.
+ *
+ * Vertex invocations receive render_item_t's object-to-world transform and a
+ * world-to-clip matrix composing camera_t's world-to-view mapping with framebuffer-to-clip
+ * conversion. Both matrices preserve Z and W.
+ *
+ * Shader positions must be finite homogeneous clip coordinates; X, Y and Z are
+ * clipped to [-W,W]. Surviving zero-W vertices make their primitive empty; positive W
+ * requires a reciprocal representable as float. Non-finite positions and unsupported W
+ * are rejected.
+ *
+ * Triangle X/Y positions are projected and rounded once to a 1/256-pixel grid
+ * (ties toward the greater coordinate) for coverage and interpolation. Nonzero winding
+ * with top/left inclusion shades each covered pixel-center sample once per original
+ * triangle, including degenerate boundaries. Matching shared boundaries with interiors
+ * on opposite sides have complementary sample ownership; overlapping primitives shade
+ * independently. Facing is constant per original triangle; simple snapped polygons
+ * are front-facing for CCW NDC winding.
+ *
+ * Points cover integer offsets dx*dx+dy*dy <= 9 around the floored projected position.
+ * Lines include both floored projected endpoints. Points and lines are front-facing.
+ * Fragment coordinates use framebuffer X/Y = (x+0.5,y+0.5),
+ * Z = (interpolated Z/W+1)/2 clamped to [0,1], and W = interpolated reciprocal W.
+ * Written colors overwrite without depth testing, blending or culling; discard
+ * or an unwritten color leaves the destination pixel unchanged.
  */
 class software_renderer_t {
 public:
@@ -28,42 +56,11 @@ public:
     void clear(rgba8_t color);
 
     /**
-     * @brief Draws a render item into the current framebuffer.
+     * @brief Draws a render item using its material's program and the camera.
      *
-     * Requires valid geometry (mesh, selected indices and topology), complete
-     * compatible material bindings, and non-empty camera world bounds. Resources
-     * and shader interfaces are validated before vertex execution. Mesh streams
-     * must match consumed vertex input locations and types; fragment inputs must
-     * be floating-point scalars or vectors. Selected indices must fit signed 32-bit
-     * vertex indices. All selected vertices run before rasterization begins.
-     * Vertex invocation receives the matrices described by camera_t and render_item_t.
-     *
-     * Framebuffer dimensions must be in [1,2^23]. Shader positions must be finite
-     * homogeneous clip coordinates; X, Y and Z are clipped to [-W,W], preserving
-     * equal shared endpoints. A surviving zero-W vertex makes its primitive empty.
-     * Positive W must have a reciprocal representable by the float fragment-coordinate
-     * interface. Unsupported dimensions or W and non-finite positions are rejected.
-     *
-     * Triangle X/Y positions are projected and rounded once to a 1/256-pixel grid,
-     * with half-grid ties toward the greater coordinate. Pixel-center samples
-     * (x+0.5,y+0.5) use nonzero winding coverage with top/left inclusion. Each covered
-     * sample is shaded once per original triangle. Collapsed or cancelling boundaries
-     * emit no fragments; snapped crossings, touches and overlaps are supported.
-     * Matching shared boundaries with interiors on opposite sides have complementary
-     * sample ownership; separate primitives with overlapping interiors shade independently.
-     *
-     * Varyings use perspective-correct interpolation on the snapped triangle geometry,
-     * preserving primitive-local values through clipping and rasterization. Distinct
-     * coincident values can cause interpolation discontinuities. All pieces of an
-     * original triangle share one facing value; simple snapped polygons are front-facing
-     * for CCW NDC winding. Points and lines are front-facing. Fragment coordinates use
-     * framebuffer X/Y, Z = (interpolated Z/W+1)/2 clamped to [0,1], and W = reciprocal W.
-     *
-     * Points cover integer offsets dx*dx+dy*dy <= 9 around the floored projected
-     * position. Lines include both floored projected endpoints; their interpolation
-     * factor is the clamped projection of the pixel center onto the projected segment.
-     * Written fragment colors overwrite destination pixels without depth testing,
-     * blending or culling. Discard or an unwritten color leaves the pixel unchanged.
+     * Requires geometry and material, non-empty camera world bounds, and
+     * framebuffer dimensions in [1, 2^23]. Validates current geometry,
+     * material bindings, and shader-interface compatibility before vertex execution.
      */
     void draw(const camera_t<float, int, 2>& camera, const render_item_t& render_item);
 

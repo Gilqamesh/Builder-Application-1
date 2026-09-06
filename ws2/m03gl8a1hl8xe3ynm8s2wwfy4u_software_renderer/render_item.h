@@ -15,8 +15,7 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
  * @brief Selects geometry and material with a 2D float transform for one draw.
  *
  * Rotation is counter-clockwise in radians about the local origin. The transform
- * uses column vectors and applies scale, then rotation, then translation. Vertex
- * invocation receives this T*R*S object-to-world matrix, which preserves Z and W.
+ * uses column vectors and applies scale, then rotation, then translation.
  */
 class render_item_t {
 public:
