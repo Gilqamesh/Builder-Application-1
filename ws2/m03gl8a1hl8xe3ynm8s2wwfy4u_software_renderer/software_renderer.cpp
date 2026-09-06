@@ -26,11 +26,11 @@ const framebuffer_t& software_renderer_t::framebuffer() const noexcept {
     return m_framebuffer;
 }
 
-void software_renderer_t::clear(rgba8_t color) {
+void software_renderer_t::clear_color(rgba8_t color) {
     std::ranges::fill(m_framebuffer.pixels(), color);
 }
 
-void software_renderer_t::clear(const camera_t& camera, rgba8_t color) {
+void software_renderer_t::clear_color(const camera_t& camera, rgba8_t color) {
     const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
     if (bounds.empty()) {
         return;
@@ -90,9 +90,7 @@ void software_renderer_t::draw(
     if (!material) {
         throw std::invalid_argument("software_renderer_t::draw requires a material");
     }
-    const auto& state = material->draw_state();
-    validate_draw_state(state);
-    if (state.m_depth_test && m_framebuffer.depth().empty()) {
+    if (material->depth_test() && m_framebuffer.depth().empty()) {
         throw std::invalid_argument("software_renderer_t::draw requires a depth attachment when depth testing is enabled");
     }
     const auto& program = *material->program();
@@ -158,9 +156,7 @@ void software_renderer_t::draw(
         case vertex_primitive_topology_t::point: {
             for (std::size_t index = 0; index < indices.size(); ++index) {
                 rasterize_point(
-                    program,
-                    bindings,
-                    state,
+                    *material,
                     bounds,
                     framebuffer,
                     vertex(index),
@@ -172,9 +168,7 @@ void software_renderer_t::draw(
         case vertex_primitive_topology_t::line: {
             for (std::size_t index = 0; index + 1 < indices.size(); index += 2) {
                 rasterize_line(
-                    program,
-                    bindings,
-                    state,
+                    *material,
                     bounds,
                     framebuffer,
                     vertex(index),
@@ -188,9 +182,7 @@ void software_renderer_t::draw(
         case vertex_primitive_topology_t::line_strip: {
             for (std::size_t index = 0; index + 1 < indices.size(); ++index) {
                 rasterize_line(
-                    program,
-                    bindings,
-                    state,
+                    *material,
                     bounds,
                     framebuffer,
                     vertex(index),
@@ -204,9 +196,7 @@ void software_renderer_t::draw(
         case vertex_primitive_topology_t::line_loop: {
             for (std::size_t index = 0; index < indices.size(); ++index) {
                 rasterize_line(
-                    program,
-                    bindings,
-                    state,
+                    *material,
                     bounds,
                     framebuffer,
                     vertex(index),
@@ -220,9 +210,7 @@ void software_renderer_t::draw(
         case vertex_primitive_topology_t::triangle: {
             for (std::size_t index = 0; index + 2 < indices.size(); index += 3) {
                 rasterize_triangle(
-                    program,
-                    bindings,
-                    state,
+                    *material,
                     bounds,
                     framebuffer,
                     vertex(index),
@@ -238,9 +226,7 @@ void software_renderer_t::draw(
             for (std::size_t index = 0; index + 2 < indices.size(); ++index) {
                 if (index % 2 == 0) {
                     rasterize_triangle(
-                        program,
-                        bindings,
-                        state,
+                        *material,
                         bounds,
                         framebuffer,
                         vertex(index + 1),
@@ -252,9 +238,7 @@ void software_renderer_t::draw(
                     );
                 } else {
                     rasterize_triangle(
-                        program,
-                        bindings,
-                        state,
+                        *material,
                         bounds,
                         framebuffer,
                         vertex(index),
@@ -270,9 +254,7 @@ void software_renderer_t::draw(
         case vertex_primitive_topology_t::triangle_fan: {
             for (std::size_t index = 1; index + 1 < indices.size(); ++index) {
                 rasterize_triangle(
-                    program,
-                    bindings,
-                    state,
+                    *material,
                     bounds,
                     framebuffer,
                     vertex(0),

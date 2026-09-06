@@ -26,16 +26,19 @@ static_assert(sizeof(rgba8_t) == 4);
  * Construction rejects negative dimensions, a pixel count that overflows
  * std::size_t, or storage whose size differs from width * height. Zero dimensions
  * are valid. The caller keeps storage valid during renderer operations and
- * replaces the framebuffer after reallocating either attachment. Samples remain mutable.
+ * replaces the framebuffer after reallocating color storage or changing dimensions.
+ * After reallocating depth storage, rebind it through depth(). Samples remain mutable.
+ * Copies share sample storage but have independent attachment views.
  * Color is non-premultiplied. An empty depth span means no depth attachment;
  * a nonempty span must have width * height samples with the same layout as color.
  * Initialize depth before reading it through a draw. Renderer-written depths are
  * in [0,1]; comparisons against caller-written samples use ordinary float operators.
- * Construction validates shape without reading or initializing attachment contents.
+ * Construction validates color shape and leaves depth detached, without reading or
+ * initializing attachment contents.
  */
 class framebuffer_t {
 public:
-    framebuffer_t(std::span<rgba8_t> pixels, int width, int height, std::span<float> depth = {});
+    framebuffer_t(std::span<rgba8_t> pixels, int width, int height);
 
     /**
      * @brief Returns width * height, rejecting negative dimensions and std::size_t overflow.
@@ -45,6 +48,15 @@ public:
     int width() const noexcept;
     int height() const noexcept;
     std::span<rgba8_t> pixels() const noexcept;
+
+    /**
+     * @brief Replaces borrowed depth storage after validating its sample count.
+     *
+     * A nonempty span must contain width * height samples; an empty span detaches
+     * depth. Failure preserves the previous attachment. Samples are neither read
+     * nor initialized. Changing a copied view does not rebind other copies.
+     */
+    void depth(std::span<float> samples);
     std::span<float> depth() const noexcept;
 
 private:

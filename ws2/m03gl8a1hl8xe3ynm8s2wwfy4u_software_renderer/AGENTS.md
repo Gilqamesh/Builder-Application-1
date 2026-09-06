@@ -16,7 +16,7 @@ assembly within those classes.
 - Materials own draw state alongside their program and bindings. Items sharing
   a material share its settings. Applications select materials, organize passes,
   and order draws; the renderer executes the selected material through
-  `draw(camera, render_item)`. See [materials](material.h) and [draw state](draw_state.h).
+  `draw(camera, render_item)`. See [materials](material.h).
 - Framebuffers borrow application-owned color and optional depth storage.
   Clearing is explicit and independent of material draw state. See
   [attachments](framebuffer.h) and [drawing and clearing](software_renderer.h).

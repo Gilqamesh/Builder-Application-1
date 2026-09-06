@@ -1,5 +1,6 @@
 #include "material.h"
 
+#include <format>
 #include <stdexcept>
 #include <utility>
 
@@ -57,12 +58,76 @@ const software_shader::bindings_t& material_t::bindings() const {
     return m_bindings;
 }
 
-draw_state_t& material_t::draw_state() {
-    return m_draw_state;
+void material_t::depth_test(bool enabled) {
+    m_depth_test = enabled;
 }
 
-const draw_state_t& material_t::draw_state() const {
-    return m_draw_state;
+bool material_t::depth_test() const {
+    return m_depth_test;
+}
+
+void material_t::depth_write(bool enabled) {
+    m_depth_write = enabled;
+}
+
+bool material_t::depth_write() const {
+    return m_depth_write;
+}
+
+void material_t::depth_compare(comparison_t comparison) {
+    switch (comparison) {
+        case comparison_t::never:
+        case comparison_t::less:
+        case comparison_t::equal:
+        case comparison_t::less_equal:
+        case comparison_t::greater:
+        case comparison_t::not_equal:
+        case comparison_t::greater_equal:
+        case comparison_t::always: {
+            m_depth_compare = comparison;
+        } break;
+        default: {
+            throw std::invalid_argument(std::format("material_t::depth_compare rejects invalid comparison {}", comparison));
+        }
+    }
+}
+
+comparison_t material_t::depth_compare() const {
+    return m_depth_compare;
+}
+
+void material_t::front_face(winding_t winding) {
+    switch (winding) {
+        case winding_t::counter_clockwise:
+        case winding_t::clockwise: {
+            m_front_face = winding;
+        } break;
+        default: {
+            throw std::invalid_argument(std::format("material_t::front_face rejects invalid winding {}", winding));
+        }
+    }
+}
+
+winding_t material_t::front_face() const {
+    return m_front_face;
+}
+
+void material_t::cull(cull_mode_t mode) {
+    switch (mode) {
+        case cull_mode_t::none:
+        case cull_mode_t::front:
+        case cull_mode_t::back:
+        case cull_mode_t::both: {
+            m_cull = mode;
+        } break;
+        default: {
+            throw std::invalid_argument(std::format("material_t::cull rejects invalid mode {}", mode));
+        }
+    }
+}
+
+cull_mode_t material_t::cull() const {
+    return m_cull;
 }
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

@@ -49,6 +49,7 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
  */
 class software_renderer_t {
 public:
+    /** @brief Copies attachment views; later changes to the supplied view do not rebind this renderer. */
     explicit software_renderer_t(framebuffer_t framebuffer);
 
     software_renderer_t(const software_renderer_t&) = delete;
@@ -59,7 +60,7 @@ public:
     framebuffer_t& framebuffer() noexcept;
     const framebuffer_t& framebuffer() const noexcept;
 
-    void clear(rgba8_t color);
+    void clear_color(rgba8_t color);
 
     /**
      * @brief Fills the intersection of the camera rectangle and framebuffer.
@@ -67,7 +68,7 @@ public:
      * Camera pose, projection, materials, and shader state do not affect clearing.
      * Empty intersections do no work.
      */
-    void clear(const camera_t& camera, rgba8_t color);
+    void clear_color(const camera_t& camera, rgba8_t color);
 
     /**
      * @brief Fills the depth attachment independently of draw state, preserving color.
@@ -76,7 +77,7 @@ public:
      * to [0,1], including infinities; NaN is rejected before writing any samples.
      * Empty framebuffers do no work, including validation.
      */
-    void clear_depth(float depth = 1.0F);
+    void clear_depth(float depth);
 
     /**
      * @brief Clears depth within the intersection of the camera rectangle and framebuffer.
@@ -84,7 +85,7 @@ public:
      * Uses clear_depth's value and attachment rules. Camera pose and projection
      * do not affect clearing; empty intersections do no work, including validation.
      */
-    void clear_depth(const camera_t& camera, float depth = 1.0F);
+    void clear_depth(const camera_t& camera, float depth);
 
     /**
      * @brief Draws a render item using its material's program and the camera.
@@ -92,8 +93,7 @@ public:
      * Empty framebuffers, empty camera rectangles, and empty intersections return
      * before validating draw resources or deriving matrices. Otherwise requires
      * geometry, material, finite transforms, and framebuffer dimensions in [1, 2^23].
-     * Enabled depth testing requires an attached depth buffer. Invalid draw-state
-     * enum values are rejected even when their corresponding control is disabled.
+     * Enabled depth testing requires an attached depth buffer.
      * Validates current geometry, material bindings, and shader interfaces before
      * vertex execution. Camera rectangles support the full signed-int endpoint range.
      */

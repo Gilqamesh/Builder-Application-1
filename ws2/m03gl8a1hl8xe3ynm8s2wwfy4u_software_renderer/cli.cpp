@@ -131,8 +131,8 @@ int main() {
             texture::address_mode_t::clamp_to_edge
         ));
         material->uniform(0, vector4f_t({1.0F, 0.6F, 0.6F, 1.0F}));
-        material->draw_state().m_depth_test = true;
-        material->draw_state().m_cull = software_renderer_api::cull_mode_t::back;
+        material->depth_test(true);
+        material->cull(software_renderer_api::cull_mode_t::back);
         auto second_material = std::make_shared<software_renderer_api::material_t>(*material);
         second_material->uniform(0, vector4f_t({0.6F, 0.7F, 1.0F, 1.0F}));
         software_renderer_api::render_item_t render_item;
@@ -158,15 +158,17 @@ int main() {
             if (framebuffer.width() != size[0] || framebuffer.height() != size[1]) {
                 pixels.resize(software_renderer_api::framebuffer_t::pixel_count(size[0], size[1]));
                 depth.resize(pixels.size());
-                renderer.framebuffer() = software_renderer_api::framebuffer_t(pixels, size[0], size[1], depth);
+                software_renderer_api::framebuffer_t replacement(pixels, size[0], size[1]);
+                replacement.depth(depth);
+                renderer.framebuffer() = replacement;
                 framebuffer = renderer.framebuffer();
             }
 
             if (framebuffer.width() == 0 || framebuffer.height() == 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             } else {
-                renderer.clear({0, 0, 0, 255});
-                renderer.clear_depth();
+                renderer.clear_color({0, 0, 0, 255});
+                renderer.clear_depth(1.0F);
                 render_item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0.25F, seconds * 0.35F, 0.0F}));
                 render_item.translation() = {-0.15F, 0.0F, -1.1F + 0.25F * std::sin(seconds * 0.4F)};
                 const software_renderer_api::camera_t camera(

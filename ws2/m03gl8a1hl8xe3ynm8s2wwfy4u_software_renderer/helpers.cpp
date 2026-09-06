@@ -796,41 +796,6 @@ float depth_clear_value(float depth) {
     return std::clamp(depth, 0.0F, 1.0F);
 }
 
-void validate_draw_state(const draw_state_t& state) {
-    switch (state.m_depth_compare) {
-        case comparison_t::never:
-        case comparison_t::less:
-        case comparison_t::equal:
-        case comparison_t::less_equal:
-        case comparison_t::greater:
-        case comparison_t::not_equal:
-        case comparison_t::greater_equal:
-        case comparison_t::always: {
-        } break;
-        default: {
-            throw std::invalid_argument(std::format("software_renderer_t::draw has invalid depth comparison {}", state.m_depth_compare));
-        }
-    }
-    switch (state.m_front_face) {
-        case winding_t::counter_clockwise:
-        case winding_t::clockwise: {
-        } break;
-        default: {
-            throw std::invalid_argument(std::format("software_renderer_t::draw has invalid front-face winding {}", state.m_front_face));
-        }
-    }
-    switch (state.m_cull) {
-        case cull_mode_t::none:
-        case cull_mode_t::front:
-        case cull_mode_t::back:
-        case cull_mode_t::both: {
-        } break;
-        default: {
-            throw std::invalid_argument(std::format("software_renderer_t::draw has invalid cull mode {}", state.m_cull));
-        }
-    }
-}
-
 bool depth_passes(comparison_t comparison, float incoming, float stored) {
     switch (comparison) {
         case comparison_t::never: return false;
@@ -846,9 +811,7 @@ bool depth_passes(comparison_t comparison, float incoming, float stored) {
 }
 
 void shade_sample(
-    const software_shader::program_t& program,
-    const software_shader::bindings_t& bindings,
-    const draw_state_t& state,
+    const material_t& material,
     const raster_bounds_t& bounds,
     const framebuffer_t& framebuffer,
     std::int64_t x,
@@ -874,17 +837,18 @@ void shade_sample(
         front_facing
     );
     set_fragment_inputs(io, inputs);
-    program.run(bindings, io);
+    material.program()->run(material.bindings(), io);
     if (io.discarded()) {
         return;
     }
     const auto index = static_cast<std::size_t>(y) * static_cast<std::size_t>(bounds.m_width) + static_cast<std::size_t>(x);
-    if (state.m_depth_test) {
-        const bool passes = state.m_depth_compare == comparison_t::always || (state.m_depth_compare != comparison_t::never && depth_passes(state.m_depth_compare, depth, framebuffer.depth()[index]));
+    if (material.depth_test()) {
+        const auto comparison = material.depth_compare();
+        const bool passes = comparison == comparison_t::always || (comparison != comparison_t::never && depth_passes(comparison, depth, framebuffer.depth()[index]));
         if (!passes) {
             return;
         }
-        if (state.m_depth_write) {
+        if (material.depth_write()) {
             framebuffer.depth()[index] = depth;
         }
     }
@@ -894,9 +858,7 @@ void shade_sample(
 }
 
 void rasterize_point(
-    const software_shader::program_t& program,
-    const software_shader::bindings_t& bindings,
-    const draw_state_t& state,
+    const material_t& material,
     const raster_bounds_t& bounds,
     const framebuffer_t& framebuffer,
     const pipeline_vertex_view_t& vertex,
@@ -923,9 +885,7 @@ void rasterize_point(
             if (dx * dx + dy * dy <= radius_squared) {
                 fragment_inputs.assign(screen->m_outputs.begin(), screen->m_outputs.end());
                 shade_sample(
-                    program,
-                    bindings,
-                    state,
+                    material,
                     bounds,
                     framebuffer,
                     x,
@@ -942,9 +902,7 @@ void rasterize_point(
 }
 
 void rasterize_line(
-    const software_shader::program_t& program,
-    const software_shader::bindings_t& bindings,
-    const draw_state_t& state,
+    const material_t& material,
     const raster_bounds_t& bounds,
     const framebuffer_t& framebuffer,
     const pipeline_vertex_view_t& first,
@@ -999,14 +957,12 @@ void rasterize_line(
         }
         const sample_t sample {x, y, {0, 1, 0, 0}, {1.0 - factor, factor, 0.0, 0.0}, 2};
         const auto depth_w = interpolate_sample(endpoints, sample, fragment_inputs);
-        shade_sample(program, bindings, state, bounds, framebuffer, x, y, float(depth_w[0]), float(depth_w[1]), true, fragment_inputs, fragment_io);
+        shade_sample(material, bounds, framebuffer, x, y, float(depth_w[0]), float(depth_w[1]), true, fragment_inputs, fragment_io);
     }
 }
 
 void rasterize_triangle(
-    const software_shader::program_t& program,
-    const software_shader::bindings_t& bindings,
-    const draw_state_t& state,
+    const material_t& material,
     const raster_bounds_t& bounds,
     const framebuffer_t& framebuffer,
     const pipeline_vertex_view_t& first,
@@ -1022,16 +978,15 @@ void rasterize_triangle(
     }
     // Geometric winding also drives triangulation. Derive the material's effective
     // facing separately so a front-face selection cannot change sample coverage.
-    const bool front_facing = workspace.m_front_facing == (state.m_front_face == winding_t::counter_clockwise);
-    if (state.m_cull == cull_mode_t::both || (state.m_cull == cull_mode_t::front && front_facing) || (state.m_cull == cull_mode_t::back && !front_facing)) {
+    const bool front_facing = workspace.m_front_facing == (material.front_face() == winding_t::counter_clockwise);
+    const auto cull = material.cull();
+    if (cull == cull_mode_t::both || (cull == cull_mode_t::front && front_facing) || (cull == cull_mode_t::back && !front_facing)) {
         return;
     }
     visit_samples(workspace, bounds.m_end_x, bounds.m_end_y, [&](const sample_t& sample) {
         const auto depth_w = interpolate_sample(workspace.m_vertices, sample, fragment_inputs);
         shade_sample(
-            program,
-            bindings,
-            state,
+            material,
             bounds,
             framebuffer,
             sample.m_x,

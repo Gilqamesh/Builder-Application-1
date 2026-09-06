@@ -2,8 +2,8 @@
 # define M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_HELPERS_H
 
 # include "camera.h"
-# include "draw_state.h"
 # include "framebuffer.h"
+# include "material.h"
 # include "render_item.h"
 # include "vertex_attribute.h"
 
@@ -263,14 +263,10 @@ rgba8_t to_rgba8(const vector4f_t& color);
 
 float depth_clear_value(float depth);
 
-void validate_draw_state(const draw_state_t& state);
-
 bool depth_passes(comparison_t comparison, float incoming, float stored);
 
 void shade_sample(
-    const software_shader::program_t& program,
-    const software_shader::bindings_t& bindings,
-    const draw_state_t& state,
+    const material_t& material,
     const raster_bounds_t& bounds,
     const framebuffer_t& framebuffer,
     std::int64_t x,
@@ -283,9 +279,7 @@ void shade_sample(
 );
 
 void rasterize_point(
-    const software_shader::program_t& program,
-    const software_shader::bindings_t& bindings,
-    const draw_state_t& state,
+    const material_t& material,
     const raster_bounds_t& bounds,
     const framebuffer_t& framebuffer,
     const pipeline_vertex_view_t& vertex,
@@ -294,9 +288,7 @@ void rasterize_point(
 );
 
 void rasterize_line(
-    const software_shader::program_t& program,
-    const software_shader::bindings_t& bindings,
-    const draw_state_t& state,
+    const material_t& material,
     const raster_bounds_t& bounds,
     const framebuffer_t& framebuffer,
     const pipeline_vertex_view_t& first,
@@ -307,9 +299,7 @@ void rasterize_line(
 );
 
 void rasterize_triangle(
-    const software_shader::program_t& program,
-    const software_shader::bindings_t& bindings,
-    const draw_state_t& state,
+    const material_t& material,
     const raster_bounds_t& bounds,
     const framebuffer_t& framebuffer,
     const pipeline_vertex_view_t& first,

@@ -329,7 +329,7 @@ void game_t::render() {
         return;
     }
 
-    m_software_renderer.clear(ray_white());
+    m_software_renderer.clear_color(ray_white());
     for (const auto& render_item : m_render_items) {
         m_software_renderer.draw(m_camera, render_item);
     }

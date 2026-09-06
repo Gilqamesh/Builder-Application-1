@@ -57,7 +57,7 @@ item.scale() = {1, 1, 1};
 item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> {0.25F, 0.5F, 0});
 // Quaternion input uses the same setter:
 item.rotation(m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>(1, 0, 0, 0));
-software_renderer.clear(camera, {0, 0, 0, 255});
+software_renderer.clear_color(camera, {0, 0, 0, 255});
 software_renderer.draw(camera, item);
 ```
 
@@ -67,7 +67,7 @@ Status: implemented; automated and visible integration validation passed.
 
 - Outcome: opaque visibility is independent of submission order for distinct
   stored float depths. Equal-depth ties follow the selected comparison.
-- Ownership: [materials](../material.h) own [draw state](../draw_state.h).
+- Ownership: [materials](../material.h) own the depth and culling properties.
   Applications select materials and draw order; `draw(camera, render_item)`
   consumes the selected material. Items sharing a material share its settings.
 - Attachments and clearing: [framebuffers](../framebuffer.h) borrow optional
@@ -92,11 +92,13 @@ Representative caller (with geometry and material already assigned):
 
 ```cpp
 std::vector<float> depth_pixels(renderer::framebuffer_t::pixel_count(width, height));
-software_renderer.framebuffer() = renderer::framebuffer_t(pixels, width, height, depth_pixels);
-item.material()->draw_state().m_depth_test = true;
-item.material()->draw_state().m_cull = renderer::cull_mode_t::back;
-software_renderer.clear(camera, {0, 0, 0, 255});
-software_renderer.clear_depth(camera); // Defaults to 1; less rejects samples exactly at 1.
+renderer::framebuffer_t framebuffer(pixels, width, height);
+framebuffer.depth(depth_pixels);
+software_renderer.framebuffer() = framebuffer;
+item.material()->depth_test(true);
+item.material()->cull(renderer::cull_mode_t::back);
+software_renderer.clear_color(camera, {0, 0, 0, 255});
+software_renderer.clear_depth(camera, 1.0F); // less rejects samples exactly at 1.
 software_renderer.draw(camera, item);
 ```
 
@@ -301,7 +303,7 @@ Reviewed base: `Builder-Modules` revision
 `42a5572cdf3db385725919f8a2fb24d431900c1d`. Implementation is in the working
 tree; no commit was created by this task.
 
-The settled contracts are in [draw_state.h](../draw_state.h),
+The milestone 2 contracts were recorded in [draw_state.h](https://github.com/Gilqamesh/Builder-Modules/blob/47ecefce6aaf3e7f67137ab7f3c4523cd040b550/ws2/m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/draw_state.h),
 [material.h](../material.h), [framebuffer.h](../framebuffer.h), and
 [software_renderer.h](../software_renderer.h). The renderer reads the material's
 state for each draw. Its existing coverage and interpolation paths supply the
@@ -349,6 +351,54 @@ colorless framebuffers, and later milestones remain unimplemented. Inactive
 consumer rendering paths were compiled; only the active software-renderer path
 was visually checked. These checks establish correctness and integration;
 no performance baseline or optimization comparison was produced.
+
+### Material and attachment API migration — 2026-09-06
+
+Reviewed base: `Builder-Modules` revision
+`47ecefce6aaf3e7f67137ab7f3c4523cd040b550`. The changes are in the working tree.
+
+[Material properties](../material.h) replace the public `draw_state_t` and own
+immediate enum validation. The [framebuffer depth setter](../framebuffer.h)
+validates attachment replacement. [Clearing](../software_renderer.h) now uses
+`clear_color` and requires an explicit depth value. The draw signature, defaults,
+depth and culling behavior, and clear-value rules are preserved.
+
+Changes cover `material.h/.cpp`, `framebuffer.h/.cpp`,
+`software_renderer.h/.cpp`, `helpers.h/.cpp`, `cli.cpp`, `test/public_api.cpp`,
+`AGENTS.md`, and this roadmap; `draw_state.h` was removed. The tower-defense
+consumer's `game.cpp` uses `clear_color`. Current examples use the new API;
+earlier milestone records retain their historical evidence.
+
+Checks passed (exit 0), from the Builder-Layout directory:
+
+```sh
+python3 /tmp/renderer-api-migration/build.py public_api > /tmp/renderer-api-migration/public_api.log 2>&1
+/tmp/renderer-m1-implementation/install_binary m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer > /tmp/renderer-api-migration/native-renderer.log 2>&1
+/tmp/renderer-m1-implementation/install_binary m03gilsfsv3k34ej14ytz8a29k_tower_defense_game > /tmp/renderer-api-migration/native-tower-defense.log 2>&1
+artifacts/m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/latest/library/build/validation/public_api/runner
+python3 /tmp/renderer-api-migration/smoke.py m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer 'Software Renderer' renderer
+python3 /tmp/renderer-api-migration/smoke.py m03gilsfsv3k34ej14ytz8a29k_tower_defense_game 'Tower Defense Game' tower-defense-retry
+git -C /home/gilqamesh/Projects/Builder-Modules diff --check
+```
+
+The staged GNU C++23 suite used `-Wall -Wextra -ftrapv`. Native Clang builds
+passed for both applications and ran the renderer suite. Added cases verify
+immediate invalid-enum rejection with previous-value preservation, material
+copying and sharing, attachment replacement and detachment, failed replacement,
+and independent framebuffer views. Existing depth, culling, clipping,
+interpolation, and clear regressions pass through the new API. The installed
+interface no longer contains `draw_state.h`.
+
+Both final X11 smoke checks presented frames and closed normally. Inspected
+captures show the renderer's intersecting textured surfaces at 960x540 and the
+consumer's existing 400x200 camera region within its 1600x1200 framebuffer.
+The first consumer capture (the same command with label `tower-defense`) lost
+its window and timed out; the repeated check above passed. Logs, helpers, and
+captures are in `/tmp/renderer-api-migration`, including `renderer-smoke-0.png`
+and `tower-defense-retry-smoke-0.png`.
+
+No API-migration decision remains open. Only the active consumer rendering path
+was visually checked; performance was not benchmarked.
 
 ## Deferred scope
 
