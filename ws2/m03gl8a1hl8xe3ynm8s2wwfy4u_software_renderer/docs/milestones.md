@@ -66,7 +66,7 @@ software_renderer.draw(camera, item);
 Status: unstarted.
 
 - Outcome: correct opaque visibility independent of submission order for unequal depths, plus configurable winding/cull state.
-- Open decisions: depth attachment lifetime/format, clear value, comparison function, equal-depth tie behavior, independent depth writes, and the point at which fragment discard prevents writes. Decide draw-state ownership here before adding more state.
+- Open decisions: depth attachment lifetime/format, clear value, comparison function, equal-depth tie behavior, independent depth writes, and the point at which fragment discard prevents writes. Settle ownership and public interfaces for this milestone's state and operations.
 - Acceptance criteria: overlapping and intersecting surfaces render correctly in either order for unequal depths, with equal-depth samples following the chosen tie policy; depth-test and depth-write controls behave independently; discarded fragments do not occlude later geometry; culling follows the chosen convention.
 
 ## 3. Blending and color writes
@@ -74,7 +74,7 @@ Status: unstarted.
 Status: unstarted.
 
 - Outcome: transparent overlays compose correctly with opaque geometry.
-- Open decisions: blend factors/equations, color masks, straight versus premultiplied alpha, linear versus sRGB attachments, and encoding boundaries. Reuse the draw-state model from milestone 2.
+- Open decisions: blend factors/equations, color masks, straight versus premultiplied alpha, linear versus sRGB attachments, and encoding boundaries. Build on the ownership decisions settled in milestone 2.
 - Acceptance criteria: known source/destination colors produce expected RGB and alpha, masks preserve disabled channels, sRGB conversion occurs at the agreed boundary, and shared edges have no blending seams. The application supplies transparent draw order.
 
 ## 4. Stencil and render-to-texture
