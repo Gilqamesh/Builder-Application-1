@@ -16,7 +16,9 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
  *
  * The renderer's established 2D mapping sends increasing world Y toward increasing
  * framebuffer Y. Mathematical counter-clockwise object rotation consequently appears
- * clockwise in the top-left-origin framebuffer.
+ * clockwise in the top-left-origin framebuffer. For a 2D draw, vertex invocation
+ * receives a world-to-clip matrix that composes this mapping with framebuffer-to-clip
+ * conversion and preserves Z and W.
  */
 template <typename WorldT, typename ViewT, std::size_t N>
 class camera_t {

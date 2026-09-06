@@ -409,6 +409,8 @@ void visit_samples(raster_workspace_t& workspace, int width, int height, Emit&& 
         return;
     }
     const auto& vertices = workspace.m_vertices;
+    // Top/left inclusion classifies a center infinitesimally to the right, then
+    // infinitesimally below. Ears and winding spans apply the same convention.
     if (workspace.m_use_triangles) {
         for (const auto& indices : workspace.m_triangles) {
             const auto a = vertices[indices[0]].m_point;
@@ -462,6 +464,8 @@ void visit_samples(raster_workspace_t& workspace, int width, int height, Emit&& 
             } while (end < events.size() && compare_fraction(events[begin].m_x, events[end].m_x) == 0);
             const int after = winding + delta;
             if ((winding == 0) != (after == 0)) {
+                // Equal crossings are ordered by edge_record_less. Select the
+                // least endpoint-record key with the net crossing direction.
                 std::size_t selected = begin;
                 while ((events[selected].m_delta < 0) != (delta < 0)) {
                     ++selected;

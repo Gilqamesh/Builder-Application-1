@@ -145,6 +145,10 @@ bool simple_boundary(const raster_workspace_t& workspace) {
 }
 
 bool triangulate(raster_workspace_t& workspace) {
+    // Normalize screen winding, start at the least (X,Y), and remove the first
+    // unblocked convex ear to make interpolation deterministic. Keep collinear
+    // and coincident occurrences with their own payloads; a zero-area occurrence
+    // may contribute no samples.
     auto& ring = workspace.m_ring;
     ring.resize(workspace.m_vertices.size());
     std::iota(ring.begin(), ring.end(), std::size_t(0));
@@ -199,6 +203,10 @@ bool triangulate(raster_workspace_t& workspace) {
 }
 
 bool crossed_facing(std::span<const projected_vertex_t> vertices) {
+    // A non-simple boundary has no single winding orientation. Use its least
+    // cyclic grid sequence over both directions, then the largest absolute fan
+    // determinant (first on ties), restoring the submitted direction. This gives
+    // every generated piece the same original-primitive facing value.
     const auto count = vertices.size();
     const auto at = [&](std::size_t start, bool reversed, std::size_t offset) {
         return vertices[(start + (reversed ? count - offset : offset)) % count].m_point;
@@ -281,6 +289,8 @@ int compare_record(const projected_vertex_t& a, const projected_vertex_t& b) {
 }
 
 bool edge_record_less(const scan_event_t& a, const scan_event_t& b, std::span<const projected_vertex_t> vertices) {
+    // Break equal crossing positions by endpoint geometry, then projection and
+    // source records, ending with payload bits. Keep coincident payloads distinct.
     for (const auto& [first, second] : {std::pair(a.m_lower, b.m_lower), std::pair(a.m_upper, b.m_upper)}) {
         if (vertices[first].m_point != vertices[second].m_point) {
             return vertices[first].m_point < vertices[second].m_point;
@@ -516,6 +526,8 @@ void scanline_events(std::span<const projected_vertex_t> vertices, std::int64_t 
 }
 
 sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::span<const projected_vertex_t> vertices, int x, int y) {
+    // Non-simple polygons use winding scanline spans. These weights interpolate
+    // reciprocal W, Z/W and varying/W along each boundary edge and across the span.
     const auto px = std::int64_t(x) * subpixels + center_offset;
     const auto py = std::int64_t(y) * subpixels + center_offset;
     // Exact residuals survive even when two rational crossings round to the
@@ -536,6 +548,8 @@ sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::s
 }
 
 std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, varying_values_t& outputs) {
+    // Ear and span samples both recover perspective-correct varying values by
+    // dividing interpolated varying/W by interpolated reciprocal W.
     double reciprocal = 0.0, ndc_z = 0.0;
     double minimum_q = std::numeric_limits<double>::infinity(), maximum_q = 0.0;
     double minimum_z = 1.0, maximum_z = -1.0;
@@ -862,6 +876,7 @@ void rasterize_line(
         return;
     }
 
+    // Inclusive Bresenham coverage between the floored projected endpoints.
     int x = static_cast<int>(std::floor(first_screen->m_x));
     int y = static_cast<int>(std::floor(first_screen->m_y));
     const int target_x = static_cast<int>(std::floor(second_screen->m_x));

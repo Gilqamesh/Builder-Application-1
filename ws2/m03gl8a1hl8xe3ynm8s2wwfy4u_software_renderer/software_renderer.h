@@ -28,61 +28,42 @@ public:
     void clear(rgba8_t color);
 
     /**
-     * @brief Draws a render item into the current non-empty framebuffer.
+     * @brief Draws a render item into the current framebuffer.
      *
-     * Requires geometry with a valid mesh, selected indices and topology, a material
-     * with complete compatible bindings, and non-empty camera world bounds. Each
-     * call validates framebuffer dimensions, current geometry, material bindings,
-     * camera bounds, and shader interfaces in that order before vertex execution.
-     * Mesh streams must match consumed vertex input locations and types; fragment
-     * inputs must be floating-point scalars or vectors. Selected vertex indices
-     * must fit the shader's signed 32-bit vertex index. All selected vertices run
-     * before rasterization begins.
+     * Requires valid geometry (mesh, selected indices and topology), complete
+     * compatible material bindings, and non-empty camera world bounds. Resources
+     * and shader interfaces are validated before vertex execution. Mesh streams
+     * must match consumed vertex input locations and types; fragment inputs must
+     * be floating-point scalars or vectors. Selected indices must fit signed 32-bit
+     * vertex indices. All selected vertices run before rasterization begins.
+     * Vertex invocation receives the matrices described by camera_t and render_item_t.
      *
-     * Each dimension must be at most 2^23. Vertex positions are finite homogeneous
-     * clip coordinates, clipped in X, Y, Z to [-W,W]. A surviving zero-W vertex
-     * makes its primitive empty; positive W must have a reciprocal representable
-     * by the float fragment-coordinate interface. Unsupported dimensions and W,
-     * and non-finite shader positions, are rejected.
-     * Clipping preserves equal shared endpoints and each primitive's varying values.
+     * Framebuffer dimensions must be in [1,2^23]. Shader positions must be finite
+     * homogeneous clip coordinates; X, Y and Z are clipped to [-W,W], preserving
+     * equal shared endpoints. A surviving zero-W vertex makes its primitive empty.
+     * Positive W must have a reciprocal representable by the float fragment-coordinate
+     * interface. Unsupported dimensions or W and non-finite positions are rejected.
      *
-     * Triangle X/Y positions are projected and rounded once to a 1/256-pixel grid;
-     * half-grid ties go toward the greater coordinate. Samples are pixel centers
-     * (x+0.5,y+0.5). Coverage is the nonzero winding fill of the snapped boundary,
-     * with top/left inclusion: equivalently, classify the sample infinitesimally
-     * to the right, then infinitesimally below. Each covered sample is shaded once
-     * per original triangle. Collapsed or cancelling boundaries emit no fragments;
-     * snapped crossings, touches and overlaps are handled without geometry errors.
-     * Matching shared boundaries with filled interiors on opposite sides have
-     * complementary sample ownership; overlapping interiors of separate primitives
-     * retain their independent coverage.
+     * Triangle X/Y positions are projected and rounded once to a 1/256-pixel grid,
+     * with half-grid ties toward the greater coordinate. Pixel-center samples
+     * (x+0.5,y+0.5) use nonzero winding coverage with top/left inclusion. Each covered
+     * sample is shaded once per original triangle. Collapsed or cancelling boundaries
+     * emit no fragments; snapped crossings, touches and overlaps are supported.
+     * Matching shared boundaries with interiors on opposite sides have complementary
+     * sample ownership; separate primitives with overlapping interiors shade independently.
      *
-     * Simple polygons use deterministic ears: normalize screen winding, start at
-     * the least (X,Y), and remove the first unblocked convex ear. Collinear and
-     * coincident occurrences retain their own payloads; a zero-area occurrence
-     * may contribute no samples. Non-simple polygons use winding scanline spans,
-     * interpolating reciprocal W, Z/W and varying/W along their boundary edges and
-     * across each span. Equal crossing positions choose the least endpoint-record
-     * key with the net crossing direction (geometry, projection, then payload bits).
-     * Both paths divide interpolated varying/W by interpolated reciprocal W.
-     * Interpolation describes the snapped geometry and preserves primitive-local
-     * payloads; distinct coincident values can cause interpolation discontinuities.
+     * Varyings use perspective-correct interpolation on the snapped triangle geometry,
+     * preserving primitive-local values through clipping and rasterization. Distinct
+     * coincident values can cause interpolation discontinuities. All pieces of an
+     * original triangle share one facing value; simple snapped polygons are front-facing
+     * for CCW NDC winding. Points and lines are front-facing. Fragment coordinates use
+     * framebuffer X/Y, Z = (interpolated Z/W+1)/2 clamped to [0,1], and W = reciprocal W.
      *
-     * Every generated piece has one original-primitive facing value. For a simple
-     * snapped polygon, CCW NDC (negative screen winding) is front-facing. A non-simple
-     * boundary uses the largest absolute fan determinant of its least cyclic grid
-     * sequence over both directions, first on ties, with submitted direction restored.
-     * Fragment Z is (interpolated Z/W+1)/2 clamped to [0,1]; fragment W is reciprocal W.
      * Points cover integer offsets dx*dx+dy*dy <= 9 around the floored projected
-     * position. Lines use inclusive Bresenham coverage between floored projected
-     * endpoints; their interpolation factor is the clamped projection of the pixel
-     * center onto the projected segment. Points and lines are front-facing.
-     * There is no depth test, blending or culling. Discard or an unwritten fragment
-     * color leaves the destination pixel unchanged.
-     *
-     * Vertex invocation receives the render item's T*R*S object-to-world matrix and
-     * the camera-derived world-to-clip matrix; both preserve Z and W. Camera axes
-     * follow camera_t's mapping and object transforms follow render_item_t.
+     * position. Lines include both floored projected endpoints; their interpolation
+     * factor is the clamped projection of the pixel center onto the projected segment.
+     * Written fragment colors overwrite destination pixels without depth testing,
+     * blending or culling. Discard or an unwritten color leaves the pixel unchanged.
      */
     void draw(const camera_t<float, int, 2>& camera, const render_item_t& render_item);
 

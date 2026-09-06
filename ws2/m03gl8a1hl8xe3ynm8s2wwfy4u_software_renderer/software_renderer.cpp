@@ -34,6 +34,9 @@ void software_renderer_t::draw(
     const camera_t<float, int, 2>& camera,
     const render_item_t& render_item
 ) {
+    // Validate framebuffer dimensions, current geometry, material bindings, camera
+    // bounds, then shader interfaces before vertex execution. Check each selected
+    // index and shader result while collecting all vertices before rasterization.
     if (m_framebuffer.width() == 0 || m_framebuffer.height() == 0) {
         throw std::invalid_argument("software_renderer_t::draw requires a non-empty framebuffer");
     }
