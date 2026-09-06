@@ -1822,6 +1822,485 @@ void test_textured_3d_near_plane() {
     }
 }
 
+program_ptr_t make_visibility_program(bool write_color = true, bool discard_left = false) {
+    shader::vertex_shader_ast_builder_t vertex;
+    vertex.position(vertex.input<vector4f_t>(0));
+    shader::fragment_shader_ast_builder_t fragment;
+    if (write_color) {
+        fragment.color(fragment.uniform<vector4f_t>(0));
+    }
+    if (discard_left) {
+        fragment.branch(shader::swizzle<0>(fragment.fragment_coordinate()) < 8.0F, [&] { fragment.discard(); });
+    }
+    return std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+}
+
+api::render_item_t make_visibility_item(
+    std::vector<clip_position_fixture_t> positions,
+    api::index_buffer_t::indices_t indices,
+    api::vertex_primitive_topology_t topology,
+    vector4f_t color = {1, 0, 0, 1},
+    program_ptr_t program = nullptr
+) {
+    auto material = std::make_shared<api::material_t>(program ? program : make_visibility_program());
+    material->uniform(0, color);
+    material->draw_state().m_depth_test = true;
+    return make_render_item(make_typed_geometry(std::move(positions), api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 4), std::move(indices), topology), material);
+}
+
+std::vector<clip_position_fixture_t> visibility_quad(float ndc_z) {
+    return {{-1, 1, ndc_z, 1}, {-1, -1, ndc_z, 1}, {1, 1, ndc_z, 1}, {1, -1, ndc_z, 1}};
+}
+
+void test_depth_attachment_and_state() {
+    std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
+    std::vector<float> depths(pixels.size(), 0.75F);
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16, depths));
+    const auto camera = make_camera(16, 16);
+    const auto& framebuffer = std::as_const(renderer).framebuffer();
+    static_assert(std::is_same_v<decltype(framebuffer.depth()), std::span<float>>);
+    require(framebuffer.depth().data() == depths.data());
+    test::expect_throws<std::invalid_argument>([&] { (void)api::framebuffer_t(pixels, 16, 16, std::span(depths).first(255)); });
+    test::expect_throws<std::invalid_argument>([&] { (void)api::framebuffer_t({}, 0, 16, depths); });
+    test::expect_throws<std::invalid_argument>([&] { renderer.framebuffer() = api::framebuffer_t(pixels, 16, 16, std::span(depths).first(255)); });
+    require(framebuffer.depth().data() == depths.data());
+
+    auto item = make_visibility_item({{0, 0, 0, 1}}, {0}, api::vertex_primitive_topology_t::point);
+    const auto program = item.material()->program();
+    auto default_material = std::make_shared<api::material_t>(program);
+    default_material->uniform(0, vector4f_t({0, 0, 1, 1}));
+    const auto& defaults = std::as_const(*default_material).draw_state();
+    require(!defaults.m_depth_test && defaults.m_depth_write);
+    require(defaults.m_depth_compare == api::comparison_t::less);
+    require(defaults.m_front_face == api::winding_t::counter_clockwise && defaults.m_cull == api::cull_mode_t::none);
+    auto shared_item = item;
+    item.material()->draw_state().m_depth_write = false;
+    require(!shared_item.material()->draw_state().m_depth_write);
+    shared_item.material() = default_material;
+    require(shared_item.material()->program() == item.material()->program());
+    require(shared_item.material()->draw_state().m_depth_write);
+    item.material()->draw_state().m_depth_write = true;
+    renderer.draw(camera, item);
+    renderer.draw(camera, shared_item); // A different material supplies its complete policy.
+    expect_color(pixels[pixel_index(8, 8, 16)], blue);
+    near(depths[pixel_index(8, 8, 16)], 0.5);
+
+    renderer.framebuffer() = api::framebuffer_t(pixels, 16, 16);
+    renderer.clear(clear_color);
+    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, item); });
+    require(colored_pixel_count(pixels) == 0);
+    item.material()->draw_state().m_depth_compare = api::comparison_t::always;
+    item.material()->draw_state().m_depth_write = false;
+    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, item); });
+    renderer.draw(camera, shared_item);
+    expect_color(pixels[pixel_index(8, 8, 16)], blue);
+
+    item.material()->draw_state().m_depth_test = false;
+    for (int field = 0; field < 3; ++field) {
+        auto& state = item.material()->draw_state();
+        state = {};
+        if (field == 0) { state.m_depth_compare = static_cast<api::comparison_t>(99); }
+        if (field == 1) { state.m_front_face = static_cast<api::winding_t>(99); }
+        if (field == 2) { state.m_cull = static_cast<api::cull_mode_t>(99); }
+        renderer.clear(clear_color);
+        test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, item); });
+        require(colored_pixel_count(pixels) == 0);
+    }
+    renderer.framebuffer() = api::framebuffer_t({}, 0, 0);
+    test::expect_no_throw([&] { renderer.draw(camera, item); });
+    renderer.framebuffer() = api::framebuffer_t(pixels, 16, 16);
+    api::camera_t outside({{20, 30}, {20, 30}}, api::orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
+    test::expect_no_throw([&] { renderer.draw(outside, item); });
+}
+
+void test_depth_comparisons_and_controls() {
+    const std::array comparisons {
+        api::comparison_t::never, api::comparison_t::less, api::comparison_t::equal, api::comparison_t::less_equal,
+        api::comparison_t::greater, api::comparison_t::not_equal, api::comparison_t::greater_equal, api::comparison_t::always
+    };
+    // Independent expected acceptance for incoming depths {0.25, 0.5, 0.75} against 0.5.
+    const std::array<std::array<bool, 3>, 8> expected {{
+        {false, false, false}, {true, false, false}, {false, true, false}, {true, true, false},
+        {false, false, true}, {true, false, true}, {false, true, true}, {true, true, true}
+    }};
+    std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
+    std::vector<float> depths(pixels.size());
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16, depths));
+    const auto camera = make_camera(16, 16);
+    const auto center = pixel_index(8, 8, 16);
+    for (std::size_t comparison = 0; comparison < comparisons.size(); ++comparison) {
+        for (std::size_t sample = 0; sample < 3; ++sample) {
+            const float incoming = float(sample + 1) * 0.25F;
+            auto item = make_visibility_item({{0, 0, incoming * 2 - 1, 1}}, {0}, api::vertex_primitive_topology_t::point);
+            item.material()->draw_state().m_depth_compare = comparisons[comparison];
+            for (bool write : {false, true}) {
+                renderer.clear(clear_color);
+                std::ranges::fill(depths, 0.5F);
+                item.material()->draw_state().m_depth_write = write;
+                renderer.draw(camera, item);
+                expect_color(pixels[center], expected[comparison][sample] ? red : clear_color);
+                require(depths[center] == (write && expected[comparison][sample] ? incoming : 0.5F));
+            }
+        }
+    }
+    auto item = make_visibility_item({{0, 0, 0, 1}}, {0}, api::vertex_primitive_topology_t::point);
+    for (bool test_depth : {false, true}) {
+        for (bool write_depth : {false, true}) {
+            for (float stored : {0.25F, 0.75F}) {
+                renderer.clear(clear_color);
+                std::ranges::fill(depths, stored);
+                item.material()->draw_state().m_depth_test = test_depth;
+                item.material()->draw_state().m_depth_write = write_depth;
+                renderer.draw(camera, item);
+                const bool passes = !test_depth || stored == 0.75F;
+                expect_color(pixels[center], passes ? red : clear_color);
+                require(depths[center] == (passes && test_depth && write_depth ? 0.5F : stored));
+            }
+        }
+    }
+    for (float ndc_z : {-1.0F, 1.0F}) {
+        item = make_visibility_item({{0, 0, ndc_z, 1}}, {0}, api::vertex_primitive_topology_t::point);
+        for (auto comparison : {api::comparison_t::less, api::comparison_t::less_equal}) {
+            renderer.clear(clear_color);
+            std::ranges::fill(depths, 1.0F);
+            item.material()->draw_state().m_depth_compare = comparison;
+            renderer.draw(camera, item);
+            const bool passes = ndc_z == -1 || comparison == api::comparison_t::less_equal;
+            expect_color(pixels[center], passes ? red : clear_color);
+            require(depths[center] == (ndc_z == -1 ? 0.0F : 1.0F));
+        }
+    }
+}
+
+void test_depth_visibility_and_fragment_results() {
+    std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
+    std::vector<float> depths(pixels.size());
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16, depths));
+    const auto camera = make_camera(16, 16);
+    const api::index_buffer_t::indices_t indices {0, 1, 2, 2, 1, 3};
+    auto near_item = make_visibility_item(visibility_quad(-0.5F), indices, api::vertex_primitive_topology_t::triangle);
+    auto far_item = make_visibility_item(visibility_quad(0.5F), indices, api::vertex_primitive_topology_t::triangle, {0, 0, 1, 1});
+    for (bool reverse : {false, true}) {
+        renderer.clear(clear_color);
+        std::ranges::fill(depths, 1.0F);
+        renderer.draw(camera, reverse ? near_item : far_item);
+        renderer.draw(camera, reverse ? far_item : near_item);
+        for (std::size_t i = 0; i < pixels.size(); ++i) {
+            expect_color(pixels[i], red);
+            require(depths[i] == 0.25F);
+        }
+    }
+    // A normally completed fragment may write depth without supplying color.
+    // Conditional discard occurs after color assignment and must cancel both writes.
+    for (bool write_color : {false, true}) {
+        near_item.material() = std::make_shared<api::material_t>(make_visibility_program(write_color, true));
+        near_item.material()->uniform(0, vector4f_t({1, 0, 0, 1}));
+        near_item.material()->draw_state().m_depth_test = true;
+        renderer.clear(clear_color);
+        std::ranges::fill(depths, 1.0F);
+        renderer.draw(camera, near_item);
+        renderer.draw(camera, far_item);
+        for (int y = 0; y < 16; ++y) {
+            for (int x = 0; x < 16; ++x) {
+                const auto i = pixel_index(x, y, 16);
+                expect_color(pixels[i], x < 8 ? blue : (write_color ? red : clear_color));
+                require(depths[i] == (x < 8 ? 0.75F : 0.25F));
+            }
+        }
+    }
+    // Equal depths follow the exact comparison, including across material changes.
+    auto equal_item = make_visibility_item(visibility_quad(0.5F), indices, api::vertex_primitive_topology_t::triangle);
+    for (auto comparison : {api::comparison_t::less, api::comparison_t::less_equal}) {
+        equal_item.material()->draw_state().m_depth_compare = comparison;
+        renderer.clear(clear_color);
+        std::ranges::fill(depths, 1.0F);
+        renderer.draw(camera, far_item);
+        renderer.draw(camera, equal_item);
+        for (const auto pixel : pixels) { expect_color(pixel, comparison == api::comparison_t::less ? blue : red); }
+    }
+    // Two intersecting planes with unequal W: their analytical depth is linear in NDC X.
+    for (bool unequal_w : {false, true}) {
+        auto rising = visibility_quad(0), falling = rising;
+        for (std::size_t i = 0; i < rising.size(); ++i) {
+            const float w = unequal_w ? float(std::size_t(1) << i) : 1.0F;
+            rising[i][2] = 0.5F * rising[i][0];
+            falling[i][2] = -0.5F * falling[i][0];
+            for (std::size_t axis = 0; axis < 4; ++axis) { rising[i][axis] *= w; falling[i][axis] *= w; }
+        }
+        near_item = make_visibility_item(rising, indices, api::vertex_primitive_topology_t::triangle);
+        far_item = make_visibility_item(falling, indices, api::vertex_primitive_topology_t::triangle, {0, 0, 1, 1});
+        for (bool reverse : {false, true}) {
+            renderer.clear(clear_color);
+            std::ranges::fill(depths, 1.0F);
+            renderer.draw(camera, reverse ? near_item : far_item);
+            renderer.draw(camera, reverse ? far_item : near_item);
+            for (int y = 0; y < 16; ++y) {
+                for (int x = 0; x < 16; ++x) {
+                    const float ndc_x = (float(x) + 0.5F) / 8 - 1;
+                    const auto i = pixel_index(x, y, 16);
+                    expect_color(pixels[i], x < 8 ? red : blue);
+                    require(depths[i] == 0.5F - 0.25F * std::abs(ndc_x));
+                }
+            }
+        }
+    }
+}
+
+void test_culling_and_topology_depth() {
+    const std::array topologies {
+        api::vertex_primitive_topology_t::point, api::vertex_primitive_topology_t::line,
+        api::vertex_primitive_topology_t::line_strip, api::vertex_primitive_topology_t::line_loop,
+        api::vertex_primitive_topology_t::triangle, api::vertex_primitive_topology_t::triangle_strip,
+        api::vertex_primitive_topology_t::triangle_fan
+    };
+    std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
+    std::vector<float> depths(pixels.size());
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16, depths));
+    const auto camera = make_camera(16, 16);
+    for (const auto topology : topologies) {
+        const bool triangle = topology == api::vertex_primitive_topology_t::triangle || topology == api::vertex_primitive_topology_t::triangle_strip || topology == api::vertex_primitive_topology_t::triangle_fan;
+        // These three assembly sequences produce CCW NDC faces under the existing topology contract.
+        api::index_buffer_t::indices_t indices {0, 1, 2, 3};
+        if (topology == api::vertex_primitive_topology_t::triangle) { indices = {0, 1, 2, 2, 1, 3}; }
+        if (topology == api::vertex_primitive_topology_t::triangle_strip) { indices = {1, 0, 3, 2}; }
+        if (topology == api::vertex_primitive_topology_t::triangle_fan) { indices = {0, 1, 3, 2}; }
+        auto positions = visibility_quad(-0.5F);
+        for (auto& position : positions) { position[0] *= 0.75F; position[1] *= 0.75F; }
+        auto item = make_visibility_item(positions, indices, topology, {1, 0, 0, 1}, make_clip_program(true));
+        renderer.clear(clear_color);
+        std::ranges::fill(depths, 1.0F);
+        renderer.draw(camera, item);
+        const auto baseline = pixels;
+        require(0 < colored_pixel_count(baseline));
+        for (bool reverse : {false, true}) {
+            if (reverse && !triangle) { continue; }
+            auto selected_positions = positions;
+            if (reverse) { for (auto& position : selected_positions) { position[0] = -position[0]; } }
+            item.geometry() = make_typed_geometry(selected_positions, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 4), indices, topology);
+            for (auto winding : {api::winding_t::counter_clockwise, api::winding_t::clockwise}) {
+                for (auto cull : {api::cull_mode_t::none, api::cull_mode_t::front, api::cull_mode_t::back, api::cull_mode_t::both}) {
+                    auto& state = item.material()->draw_state();
+                    state.m_front_face = winding;
+                    state.m_cull = cull;
+                    renderer.clear(clear_color);
+                    std::ranges::fill(depths, 1.0F);
+                    renderer.draw(camera, item);
+                    const bool front = !triangle || (reverse == (winding == api::winding_t::clockwise));
+                    const bool culled = triangle && (cull == api::cull_mode_t::both || (front ? cull == api::cull_mode_t::front : cull == api::cull_mode_t::back));
+                    for (std::size_t i = 0; i < pixels.size(); ++i) {
+                        const bool covered = !same_color(baseline[i], clear_color) && !culled;
+                        expect_color(pixels[i], covered ? (front ? red : blue) : clear_color);
+                        require(depths[i] == (covered ? 0.25F : 1.0F));
+                    }
+                }
+            }
+        }
+        item.material()->draw_state() = {.m_depth_test = true};
+        std::ranges::fill(depths, 0.0F);
+        renderer.clear(clear_color);
+        renderer.draw(camera, item);
+        require(colored_pixel_count(pixels) == 0);
+        require(std::ranges::all_of(depths, [](float depth) { return depth == 0.0F; }));
+    }
+    // Preserve the existing per-original-triangle facing through pathological clipping/snapping.
+    std::vector<api::rgba8_t> clipped_pixels(32 * 32);
+    std::vector<float> clipped_depth(clipped_pixels.size());
+    renderer.framebuffer() = api::framebuffer_t(clipped_pixels, 32, 32, clipped_depth);
+    for (const auto& fixture : {crossing, concave}) {
+        for (bool reverse : {false, true}) {
+            auto item = make_visibility_item({fixture.begin(), fixture.end()}, reverse ? api::index_buffer_t::indices_t {2, 1, 0} : api::index_buffer_t::indices_t {0, 1, 2}, api::vertex_primitive_topology_t::triangle);
+            for (auto cull : {api::cull_mode_t::front, api::cull_mode_t::back}) {
+                item.material()->draw_state().m_cull = cull;
+                item.material()->draw_state().m_depth_compare = api::comparison_t::always;
+                renderer.clear(clear_color);
+                std::ranges::fill(clipped_depth, 1.0F);
+                renderer.draw(make_camera(32, 32), item);
+                const bool visible = reverse ? cull == api::cull_mode_t::back : cull == api::cull_mode_t::front;
+                require(colored_pixel_count(clipped_pixels) == (visible ? 1U : 0U));
+                expect_color(clipped_pixels[0], visible ? red : clear_color);
+            }
+        }
+    }
+}
+
+void test_projected_depth_visibility() {
+    shader::vertex_shader_ast_builder_t vertex;
+    const auto position = vertex.input<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>(0);
+    vertex.position(vertex.world_to_clip() * vertex.object_to_world() * vertex.construct<vector4f_t>(position, 1.0F));
+    shader::fragment_shader_ast_builder_t fragment;
+    fragment.color(fragment.uniform<vector4f_t>(0));
+    const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+    const auto geometry = make_typed_geometry(std::vector<std::array<float, 3>>{{-1, -1, 0}, {1, -1, 0}, {-1, 1, 0}, {1, 1, 0}}, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 3), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
+    auto red_material = std::make_shared<api::material_t>(program);
+    auto blue_material = std::make_shared<api::material_t>(program);
+    red_material->uniform(0, vector4f_t({1, 0, 0, 1}));
+    blue_material->uniform(0, vector4f_t({0, 0, 1, 1}));
+    red_material->draw_state() = {.m_depth_test = true, .m_cull = api::cull_mode_t::back};
+    blue_material->draw_state() = red_material->draw_state();
+    auto red_item = make_render_item(geometry, red_material);
+    auto blue_item = make_render_item(geometry, blue_material);
+    const float angle = std::atan2(0.6F, 0.8F);
+    red_item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, angle, 0}));
+    blue_item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, -angle, 0}));
+    red_item.translation() = blue_item.translation() = {0, 0, -1};
+    std::vector<api::rgba8_t> pixels(32 * 32);
+    std::vector<float> depths(pixels.size());
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 32, 32, depths));
+    for (bool perspective : {false, true}) {
+        api::camera_t camera({{0, 32}, {0, 32}}, api::orthographic_t({{-1, 1}, {-1, 1}}, 0.75F, 10));
+        if (perspective) { camera.projection() = api::perspective_t(std::numbers::pi_v<float> / 2, 0.75F, 10); }
+        std::vector<api::rgba8_t> baseline;
+        std::vector<float> baseline_depth;
+        for (bool reverse : {false, true}) {
+            renderer.clear(clear_color);
+            std::ranges::fill(depths, 1.0F);
+            renderer.draw(camera, reverse ? blue_item : red_item);
+            renderer.draw(camera, reverse ? red_item : blue_item);
+            if (!reverse) { baseline = pixels; baseline_depth = depths; }
+            else {
+                require(std::equal(pixels.begin(), pixels.end(), baseline.begin(), same_color));
+                require(depths == baseline_depth);
+            }
+            int checked = 0, overlapping = 0, clipped = 0;
+            for (int y = 0; y < 32; ++y) {
+                for (int x = 0; x < 32; ++x) {
+                    const double nx = (double(x) + 0.5) / 16 - 1, ny = 1 - (double(y) + 0.5) / 16;
+                    std::array<double, 2> distances;
+                    std::array<bool, 2> visible;
+                    bool boundary = false;
+                    for (std::size_t plane = 0; plane < 2; ++plane) {
+                        const double slope = plane == 0 ? 0.75 : -0.75;
+                        const double distance = perspective ? 1 / (1 - slope * nx) : 1 + slope * nx;
+                        const double local_x = (perspective ? distance * nx : nx) / 0.8;
+                        const double local_y = perspective ? distance * ny : ny;
+                        boundary |= std::abs(std::abs(local_x) - 1) < 0.03 || std::abs(std::abs(local_y) - 1) < 0.03 || std::abs(distance - 0.75) < 0.03;
+                        const bool inside = std::abs(local_x) < 1 && std::abs(local_y) < 1;
+                        visible[plane] = inside && 0.75 <= distance;
+                        distances[plane] = distance;
+                        clipped += inside && distance < 0.75;
+                    }
+                    if (boundary) { continue; }
+                    const bool red_visible = visible[0] && (!visible[1] || distances[0] < distances[1]);
+                    const bool any_visible = visible[0] || visible[1];
+                    const double distance = distances[red_visible ? 0 : 1];
+                    // Analytical projection of the winning ray/plane intersection.
+                    const double expected_depth = !any_visible ? 1 : (perspective ? 10.0 / 9.25 - 7.5 / (9.25 * distance) : (distance - 0.75) / 9.25);
+                    const auto i = pixel_index(x, y, 32);
+                    expect_color(pixels[i], any_visible ? (red_visible ? red : blue) : clear_color);
+                    require(std::abs(depths[i] - expected_depth) < 0.0002); // Includes the established 1/256-pixel snapping.
+                    ++checked;
+                    overlapping += visible[0] && visible[1];
+                }
+            }
+            require(500 < checked && 50 < overlapping && 10 < clipped);
+        }
+        // Negative object scale reverses winding; culling follows the transformed face.
+        red_item.scale()[0] = -1;
+        renderer.clear(clear_color);
+        std::ranges::fill(depths, 1.0F);
+        renderer.draw(camera, red_item);
+        require(colored_pixel_count(pixels) == 0);
+        require(std::ranges::all_of(depths, [](float depth) { return depth == 1.0F; }));
+        red_material->draw_state().m_front_face = api::winding_t::clockwise;
+        renderer.draw(camera, red_item);
+        require(100 < colored_pixel_count(pixels));
+        red_material->draw_state().m_front_face = api::winding_t::counter_clockwise;
+        red_item.scale()[0] = 1;
+    }
+}
+
+void test_bounded_depth_writes() {
+    std::vector<api::rgba8_t> pixels(16 * 16);
+    std::vector<float> depths(pixels.size());
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16, depths));
+    auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
+    using rect_t = m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<int, 2>;
+    const std::array rectangles {
+        rect_t {{3, 12}, {5, 14}}, rect_t {{-6, 10}, {-4, 12}},
+        rect_t {{10, 24}, {6, 30}}, rect_t {{-10, -1}, {0, 16}}, rect_t {{4, 4}, {2, 12}},
+        rect_t {{std::numeric_limits<int>::min(), std::numeric_limits<int>::max()}, {0, 16}}
+    };
+    for (const auto& rectangle : rectangles) {
+        const api::camera_t camera(rectangle, api::orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
+        renderer.clear(clear_color);
+        std::ranges::fill(depths, 1.0F);
+        renderer.draw(camera, item);
+        for (int y = 0; y < 16; ++y) {
+            for (int x = 0; x < 16; ++x) {
+                const auto i = pixel_index(x, y, 16);
+                const bool covered = rectangle.contains({x, y});
+                expect_color(pixels[i], covered ? red : clear_color);
+                require(depths[i] == (covered ? 0.5F : 1.0F));
+            }
+        }
+    }
+    // Rebinding replaces both borrowed attachments; subsequent draws must not use old storage.
+    std::vector<api::rgba8_t> replacement_pixels(4 * 4, clear_color);
+    std::vector<float> replacement_depth(4 * 4, 1.0F);
+    const auto old_pixels = pixels;
+    const auto old_depth = depths;
+    renderer.framebuffer() = api::framebuffer_t(replacement_pixels, 4, 4, replacement_depth);
+    renderer.draw(make_camera(4, 4), item);
+    require(std::equal(pixels.begin(), pixels.end(), old_pixels.begin(), same_color));
+    require(depths == old_depth);
+    for (std::size_t i = 0; i < replacement_pixels.size(); ++i) {
+        expect_color(replacement_pixels[i], red);
+        require(replacement_depth[i] == 0.5F);
+    }
+}
+
+void test_depth_clears() {
+    std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
+    std::vector<float> depths(pixels.size(), 0.75F);
+    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16, depths));
+    using rect_t = m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<int, 2>;
+    const std::array rectangles {
+        rect_t {{3, 12}, {5, 14}}, rect_t {{-6, 10}, {-4, 12}},
+        rect_t {{10, 24}, {6, 30}}, rect_t {{-10, -1}, {0, 16}}, rect_t {{4, 4}, {2, 12}},
+        rect_t {{std::numeric_limits<int>::min(), std::numeric_limits<int>::max()}, {0, 16}}
+    };
+    auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
+    item.material()->draw_state().m_depth_write = false;
+    for (const auto& rectangle : rectangles) {
+        api::camera_t camera(rectangle, api::orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
+        renderer.clear(clear_color);
+        renderer.clear_depth();
+        renderer.draw(camera, item); // A previous draw with writes disabled cannot mask clearing.
+        const auto previous_colors = pixels;
+        camera.position() = {std::numeric_limits<float>::quiet_NaN(), 0, 0};
+        renderer.clear_depth(camera, 0.25F);
+        require(std::equal(pixels.begin(), pixels.end(), previous_colors.begin(), same_color));
+        for (int y = 0; y < 16; ++y) {
+            for (int x = 0; x < 16; ++x) {
+                require(depths[pixel_index(x, y, 16)] == (rectangle.contains({x, y}) ? 0.25F : 1.0F));
+            }
+        }
+        const auto previous_depths = depths;
+        renderer.clear(camera, green);
+        require(depths == previous_depths);
+    }
+    // Clamping includes infinities; NaN is rejected before either clear can write.
+    for (float supplied : {-std::numeric_limits<float>::infinity(), -0.5F, 0.0F, 0.5F, 1.0F, 2.0F, std::numeric_limits<float>::infinity()}) {
+        renderer.clear_depth(supplied);
+        require(std::ranges::all_of(depths, [&](float depth) { return depth == std::clamp(supplied, 0.0F, 1.0F); }));
+        renderer.clear_depth(make_camera(16, 16), supplied);
+        require(std::ranges::all_of(depths, [&](float depth) { return depth == std::clamp(supplied, 0.0F, 1.0F); }));
+    }
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    renderer.clear_depth(0.75F);
+    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(nan); });
+    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(make_camera(16, 16), nan); });
+    require(std::ranges::all_of(depths, [](float depth) { return depth == 0.75F; }));
+    renderer.framebuffer() = api::framebuffer_t(pixels, 16, 16);
+    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(); });
+    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(make_camera(16, 16)); });
+    api::camera_t outside({{20, 30}, {20, 30}}, api::orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
+    test::expect_no_throw([&] { renderer.clear_depth(outside, nan); });
+    renderer.framebuffer() = api::framebuffer_t({}, 0, 16);
+    test::expect_no_throw([&] { renderer.clear_depth(nan); });
+    test::expect_no_throw([&] { renderer.clear_depth(make_camera(16, 16), nan); });
+}
+
 void run_resource_tests() {
     test_rotation_and_item_transform();
     test_resource_model();
@@ -1837,6 +2316,13 @@ void run_framebuffer_tests() {
 }
 
 void run_pipeline_tests() {
+    test_depth_attachment_and_state();
+    test_depth_comparisons_and_controls();
+    test_depth_visibility_and_fragment_results();
+    test_culling_and_topology_depth();
+    test_projected_depth_visibility();
+    test_bounded_depth_writes();
+    test_depth_clears();
     test_camera_pose_and_projection();
     test_camera_regions_and_clears();
     test_region_topologies_and_original_aspect();

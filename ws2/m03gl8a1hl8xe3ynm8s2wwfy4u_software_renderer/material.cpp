@@ -57,4 +57,12 @@ const software_shader::bindings_t& material_t::bindings() const {
     return m_bindings;
 }
 
+draw_state_t& material_t::draw_state() {
+    return m_draw_state;
+}
+
+const draw_state_t& material_t::draw_state() const {
+    return m_draw_state;
+}
+
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

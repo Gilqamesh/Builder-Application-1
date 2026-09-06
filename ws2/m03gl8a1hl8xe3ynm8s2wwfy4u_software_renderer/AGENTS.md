@@ -13,6 +13,13 @@ assembly within those classes.
 
 ## Invariants
 
+- Materials own draw state alongside their program and bindings. Items sharing
+  a material share its settings. Applications select materials, organize passes,
+  and order draws; the renderer executes the selected material through
+  `draw(camera, render_item)`. See [materials](material.h) and [draw state](draw_state.h).
+- Framebuffers borrow application-owned color and optional depth storage.
+  Clearing is explicit and independent of material draw state. See
+  [attachments](framebuffer.h) and [drawing and clearing](software_renderer.h).
 - Render items own object placement; cameras own pose, projection, and the
   destination rectangle. The renderer consumes these through their public
   interfaces. See [render items](render_item.h), [cameras](camera.h), and
@@ -30,8 +37,8 @@ Deterministic CPU pipeline behavior is validated headlessly within this module. 
 
 ## Intended direction
 
-Extend the existing 3D CPU rasterizer and planar rendering with depth/stencil
-testing, face culling, blending, and mipmapped texture sampling.
+Extend the existing 3D CPU rasterizer and planar rendering with stencil
+testing, blending, and mipmapped texture sampling.
 
 Shader construction, shader execution, texture storage/sampling, and
 application-owned scene organization and presentation retain their
@@ -43,8 +50,7 @@ See the [feature milestones](docs/milestones.md) for scope and completion eviden
 
 ## Open decisions
 
-- Ownership of draw state and color/depth/stencil attachments.
-- Color-space and alpha conventions; fragment discard and attachment-write
-  ordering.
+- Stencil attachment representation and its ordering relative to depth and color.
+- Color-space and alpha conventions; blending and color-write controls.
 - Completion scope: interpolation modes, instancing, multiple color
   targets, multisampling, and advanced texture sampling.

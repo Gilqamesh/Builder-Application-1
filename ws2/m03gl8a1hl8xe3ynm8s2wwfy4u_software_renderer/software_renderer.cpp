@@ -42,6 +42,32 @@ void software_renderer_t::clear(const camera_t& camera, rgba8_t color) {
     }
 }
 
+void software_renderer_t::clear_depth(float depth) {
+    if (m_framebuffer.pixels().empty()) {
+        return;
+    }
+    if (m_framebuffer.depth().empty()) {
+        throw std::invalid_argument("software_renderer_t::clear_depth requires a depth attachment");
+    }
+    std::ranges::fill(m_framebuffer.depth(), depth_clear_value(depth));
+}
+
+void software_renderer_t::clear_depth(const camera_t& camera, float depth) {
+    const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
+    if (bounds.empty()) {
+        return;
+    }
+    const auto samples = m_framebuffer.depth();
+    if (samples.empty()) {
+        throw std::invalid_argument("software_renderer_t::clear_depth requires a depth attachment");
+    }
+    depth = depth_clear_value(depth);
+    for (auto y = bounds.m_first_y; y < bounds.m_end_y; ++y) {
+        const auto offset = std::size_t(y + bounds.m_y) * std::size_t(bounds.m_width) + std::size_t(bounds.m_first_x + bounds.m_x);
+        std::ranges::fill(samples.subspan(offset, std::size_t(bounds.m_end_x - bounds.m_first_x)), depth);
+    }
+}
+
 void software_renderer_t::draw(
     const camera_t& camera,
     const render_item_t& render_item
@@ -64,13 +90,18 @@ void software_renderer_t::draw(
     if (!material) {
         throw std::invalid_argument("software_renderer_t::draw requires a material");
     }
+    const auto& state = material->draw_state();
+    validate_draw_state(state);
+    if (state.m_depth_test && m_framebuffer.depth().empty()) {
+        throw std::invalid_argument("software_renderer_t::draw requires a depth attachment when depth testing is enabled");
+    }
     const auto& program = *material->program();
     const auto& bindings = material->bindings();
     program.validate_bindings(bindings);
 
     const auto object_to_world = render_item.object_to_world();
     const auto world_to_clip = camera.world_to_clip();
-    const auto framebuffer = m_framebuffer.pixels();
+    const auto& framebuffer = m_framebuffer;
     const auto mesh = geometry->mesh();
     const auto& streams = mesh->vertex_streams();
     const auto attributes = mesh->vertex_attributes();
@@ -129,6 +160,7 @@ void software_renderer_t::draw(
                 rasterize_point(
                     program,
                     bindings,
+                    state,
                     bounds,
                     framebuffer,
                     vertex(index),
@@ -142,6 +174,7 @@ void software_renderer_t::draw(
                 rasterize_line(
                     program,
                     bindings,
+                    state,
                     bounds,
                     framebuffer,
                     vertex(index),
@@ -157,6 +190,7 @@ void software_renderer_t::draw(
                 rasterize_line(
                     program,
                     bindings,
+                    state,
                     bounds,
                     framebuffer,
                     vertex(index),
@@ -172,6 +206,7 @@ void software_renderer_t::draw(
                 rasterize_line(
                     program,
                     bindings,
+                    state,
                     bounds,
                     framebuffer,
                     vertex(index),
@@ -187,6 +222,7 @@ void software_renderer_t::draw(
                 rasterize_triangle(
                     program,
                     bindings,
+                    state,
                     bounds,
                     framebuffer,
                     vertex(index),
@@ -204,6 +240,7 @@ void software_renderer_t::draw(
                     rasterize_triangle(
                         program,
                         bindings,
+                        state,
                         bounds,
                         framebuffer,
                         vertex(index + 1),
@@ -217,6 +254,7 @@ void software_renderer_t::draw(
                     rasterize_triangle(
                         program,
                         bindings,
+                        state,
                         bounds,
                         framebuffer,
                         vertex(index),
@@ -234,6 +272,7 @@ void software_renderer_t::draw(
                 rasterize_triangle(
                     program,
                     bindings,
+                    state,
                     bounds,
                     framebuffer,
                     vertex(0),

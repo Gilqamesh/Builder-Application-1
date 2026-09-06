@@ -2,6 +2,7 @@
 # define M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_HELPERS_H
 
 # include "camera.h"
+# include "draw_state.h"
 # include "framebuffer.h"
 # include "render_item.h"
 # include "vertex_attribute.h"
@@ -260,11 +261,18 @@ std::uint8_t to_unorm8(float component);
 
 rgba8_t to_rgba8(const vector4f_t& color);
 
+float depth_clear_value(float depth);
+
+void validate_draw_state(const draw_state_t& state);
+
+bool depth_passes(comparison_t comparison, float incoming, float stored);
+
 void shade_sample(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
+    const draw_state_t& state,
     const raster_bounds_t& bounds,
-    std::span<rgba8_t> framebuffer,
+    const framebuffer_t& framebuffer,
     std::int64_t x,
     std::int64_t y,
     float depth,
@@ -277,8 +285,9 @@ void shade_sample(
 void rasterize_point(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
+    const draw_state_t& state,
     const raster_bounds_t& bounds,
-    std::span<rgba8_t> framebuffer,
+    const framebuffer_t& framebuffer,
     const pipeline_vertex_view_t& vertex,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io
@@ -287,8 +296,9 @@ void rasterize_point(
 void rasterize_line(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
+    const draw_state_t& state,
     const raster_bounds_t& bounds,
-    std::span<rgba8_t> framebuffer,
+    const framebuffer_t& framebuffer,
     const pipeline_vertex_view_t& first,
     const pipeline_vertex_view_t& second,
     clipping_workspace_t& clipping,
@@ -299,8 +309,9 @@ void rasterize_line(
 void rasterize_triangle(
     const software_shader::program_t& program,
     const software_shader::bindings_t& bindings,
+    const draw_state_t& state,
     const raster_bounds_t& bounds,
-    std::span<rgba8_t> framebuffer,
+    const framebuffer_t& framebuffer,
     const pipeline_vertex_view_t& first,
     const pipeline_vertex_view_t& second,
     const pipeline_vertex_view_t& third,

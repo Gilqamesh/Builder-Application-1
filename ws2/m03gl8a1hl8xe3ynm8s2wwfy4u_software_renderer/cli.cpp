@@ -53,7 +53,7 @@ std::shared_ptr<const software_shader::program_t> make_program() {
     const auto coordinates = fragment.input<vector2f_t>(0);
     const auto image = fragment.resource<shader::shader_texture_2d_t>(0);
     const auto sampler = fragment.resource<shader::shader_sampler_t>(0);
-    fragment.color(shader::sample(image, sampler, coordinates));
+    fragment.color(shader::sample(image, sampler, coordinates) * fragment.uniform<vector4f_t>(0));
 
     return std::make_shared<const software_shader::program_t>(
         std::move(vertex).finalize(),
@@ -120,6 +120,7 @@ int main() {
         window->swap_interval(1);
 
         std::vector<rgba8_t> pixels;
+        std::vector<float> depth;
         software_renderer_api::software_renderer_t renderer(software_renderer_api::framebuffer_t(pixels, 0, 0));
         opengl_renderer_api::opengl_renderer_t opengl_renderer(window);
         auto material = std::make_shared<software_renderer_api::material_t>(make_program());
@@ -129,10 +130,19 @@ int main() {
             texture::address_mode_t::clamp_to_edge,
             texture::address_mode_t::clamp_to_edge
         ));
+        material->uniform(0, vector4f_t({1.0F, 0.6F, 0.6F, 1.0F}));
+        material->draw_state().m_depth_test = true;
+        material->draw_state().m_cull = software_renderer_api::cull_mode_t::back;
+        auto second_material = std::make_shared<software_renderer_api::material_t>(*material);
+        second_material->uniform(0, vector4f_t({0.6F, 0.7F, 1.0F, 1.0F}));
         software_renderer_api::render_item_t render_item;
         render_item.geometry() = make_geometry();
         render_item.material() = std::move(material);
         render_item.scale() = {0.72F, 0.72F, 1.0F};
+        auto second_item = render_item;
+        second_item.material() = std::move(second_material);
+        second_item.rotation(vector3f_t({-0.2F, -0.65F, 0.0F}));
+        second_item.translation() = {0.15F, 0.0F, -1.35F};
 
         const auto started_at = steady_clock_t::now();
         auto previous_frame_started_at = started_at;
@@ -147,7 +157,8 @@ int main() {
             auto framebuffer = renderer.framebuffer();
             if (framebuffer.width() != size[0] || framebuffer.height() != size[1]) {
                 pixels.resize(software_renderer_api::framebuffer_t::pixel_count(size[0], size[1]));
-                renderer.framebuffer() = software_renderer_api::framebuffer_t(pixels, size[0], size[1]);
+                depth.resize(pixels.size());
+                renderer.framebuffer() = software_renderer_api::framebuffer_t(pixels, size[0], size[1], depth);
                 framebuffer = renderer.framebuffer();
             }
 
@@ -155,13 +166,21 @@ int main() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             } else {
                 renderer.clear({0, 0, 0, 255});
+                renderer.clear_depth();
                 render_item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0.25F, seconds * 0.35F, 0.0F}));
-                render_item.translation() = {0.0F, 0.0F, -1.1F + 0.7F * std::sin(seconds * 0.4F)};
+                render_item.translation() = {-0.15F, 0.0F, -1.1F + 0.25F * std::sin(seconds * 0.4F)};
                 const software_renderer_api::camera_t camera(
                     {{0, framebuffer.width()}, {0, framebuffer.height()}},
                     software_renderer_api::perspective_t(std::numbers::pi_v<float> / 3, 0.5F, 20.0F)
                 );
-                renderer.draw(camera, render_item);
+                // Alternate submission order while the surfaces intersect and cross the near plane.
+                if (static_cast<int>(seconds) % 2 == 0) {
+                    renderer.draw(camera, render_item);
+                    renderer.draw(camera, second_item);
+                } else {
+                    renderer.draw(camera, second_item);
+                    renderer.draw(camera, render_item);
+                }
                 opengl_renderer.present_rgba8(
                     std::as_bytes(std::span<const rgba8_t>(pixels)),
                     framebuffer.width(),

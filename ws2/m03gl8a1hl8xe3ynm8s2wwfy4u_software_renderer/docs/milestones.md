@@ -1,6 +1,6 @@
 # Software renderer milestones
 
-Status: milestones 0 and 1 are implemented and validated. Later milestones remain proposed and unstarted. Public behavior is owned by the module headers.
+Status: milestones 0, 1, and 2 are implemented and validated. Later milestones remain proposed and unstarted. Public behavior is owned by the module headers.
 
 Baseline: [Builder-Modules at 540bbede71740d24292cc3b7cd9c8ed126eca0c3](https://github.com/Gilqamesh/Builder-Modules/tree/540bbede71740d24292cc3b7cd9c8ed126eca0c3).
 
@@ -63,11 +63,42 @@ software_renderer.draw(camera, item);
 
 ## 2. Depth testing and face culling
 
-Status: unstarted.
+Status: implemented; automated and visible integration validation passed.
 
-- Outcome: correct opaque visibility independent of submission order for unequal depths, plus configurable winding/cull state.
-- Open decisions: depth attachment lifetime/format, clear value, comparison function, equal-depth tie behavior, independent depth writes, and the point at which fragment discard prevents writes. Settle ownership and public interfaces for this milestone's state and operations.
-- Acceptance criteria: overlapping and intersecting surfaces render correctly in either order for unequal depths, with equal-depth samples following the chosen tie policy; depth-test and depth-write controls behave independently; discarded fragments do not occlude later geometry; culling follows the chosen convention.
+- Outcome: opaque visibility is independent of submission order for distinct
+  stored float depths. Equal-depth ties follow the selected comparison.
+- Ownership: [materials](../material.h) own [draw state](../draw_state.h).
+  Applications select materials and draw order; `draw(camera, render_item)`
+  consumes the selected material. Items sharing a material share its settings.
+- Attachments and clearing: [framebuffers](../framebuffer.h) borrow optional
+  float depth storage alongside color. [Depth clears](../software_renderer.h)
+  explicitly fill the framebuffer or camera intersection, independently of draw
+  state. Clear values, including infinities, are clamped to [0,1]; NaN is rejected.
+- Processing: disabling depth testing bypasses comparison and depth writes.
+  Enabled testing requires depth storage; the write flag controls passing samples.
+  The initial state disables testing, enables writes, selects less, and disables
+  culling. Late testing preserves depth and color on discard or comparison failure;
+  an unwritten fragment color preserves color while permitting depth writes.
+- Facing: configurable CW/CCW NDC front faces and none/front/back/both culling
+  preserve existing coverage and per-original-triangle facing. Points and lines
+  remain front-facing and are unaffected by culling.
+- Acceptance evidence: tests cover all comparisons and controls, exact ties,
+  overlapping and intersecting surfaces in either order, analytical depth through
+  near-plane clipping in both projections, discard, absent color, all seven
+  topologies, negative scale, pathological clipped boundaries, attachment rebinding,
+  bounded depth writes and clears, and invalid resources and state.
+
+Representative caller (with geometry and material already assigned):
+
+```cpp
+std::vector<float> depth_pixels(renderer::framebuffer_t::pixel_count(width, height));
+software_renderer.framebuffer() = renderer::framebuffer_t(pixels, width, height, depth_pixels);
+item.material()->draw_state().m_depth_test = true;
+item.material()->draw_state().m_cull = renderer::cull_mode_t::back;
+software_renderer.clear(camera, {0, 0, 0, 255});
+software_renderer.clear_depth(camera); // Defaults to 1; less rejects samples exactly at 1.
+software_renderer.draw(camera, item);
+```
 
 ## 3. Blending and color writes
 
@@ -82,7 +113,7 @@ Status: unstarted.
 Status: unstarted.
 
 - Outcome: stencil masking and a clear path from rendering a pass to sampling its result. Basic offscreen color rendering already exists.
-- Open decisions: color/depth/stencil attachment views and lifetimes, stencil comparisons/operations/masks, depth-only or unwritten-color behavior, clear semantics, and render-target/texture interoperability. Define or reject simultaneous sampling and writing of the same storage.
+- Open decisions: stencil attachment views and lifetimes, stencil comparisons/operations/masks, colorless framebuffer support, stencil clear semantics, and render-target/texture interoperability. Define or reject simultaneous sampling and writing of the same storage.
 - Acceptance criteria: a stencil mask limits a draw correctly and one rendered pass is sampled by a later pass with matching orientation and color semantics.
 
 ## 5. Interpolation modes and mipmapped sampling
@@ -263,6 +294,61 @@ type identity with the shared module, normalization at both pose setters, copyin
 of mutable inputs, invalid-update state preservation, and Euler input semantics.
 `git diff --check` passed. Logs, helper scripts, and window captures are in
 `/tmp/renderer-quaternion-reuse`. Existing milestone limitations remain unchanged.
+
+### Milestone 2 implementation record — 2026-09-06
+
+Reviewed base: `Builder-Modules` revision
+`42a5572cdf3db385725919f8a2fb24d431900c1d`. Implementation is in the working
+tree; no commit was created by this task.
+
+The settled contracts are in [draw_state.h](../draw_state.h),
+[material.h](../material.h), [framebuffer.h](../framebuffer.h), and
+[software_renderer.h](../software_renderer.h). The renderer reads the material's
+state for each draw. Its existing coverage and interpolation paths supply the
+same clamped float window depth to the shader, depth comparison, and depth write.
+Effective front-face selection is derived separately from geometric winding so
+that culling cannot change triangulation or sample ownership. Depth comparisons
+and attachment writes follow shader completion; discard suppresses both writes.
+
+The demo now renders intersecting textured surfaces with depth testing and back-face
+culling, alternates their submission order, and retains near-plane clipping.
+The application resizes color and depth storage together and explicitly clears
+both each frame. No consumer or dependency source changed.
+
+Checks passed (exit 0):
+
+```sh
+python3 /tmp/renderer-m2-implementation/build.py public_api
+/tmp/renderer-m1-implementation/install_binary m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
+/tmp/renderer-m1-implementation/install_binary m03gilsfsv3k34ej14ytz8a29k_tower_defense_game
+artifacts/m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/latest/library/build/validation/public_api/runner
+python3 /tmp/renderer-m2-implementation/smoke.py m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer 'Software Renderer' renderer
+python3 /tmp/renderer-m2-implementation/smoke.py m03gilsfsv3k34ej14ytz8a29k_tower_defense_game 'Tower Defense Game' tower-defense
+git -C /home/gilqamesh/Projects/Builder-Modules diff --check
+```
+
+The staging build used GNU C++23 with `-Wall -Wextra -ftrapv`. Native Builder
+used Clang C++23 and automatically ran the renderer public suite. Additional
+GNU C++23 syntax checks covered the demo and the consumer's `game.cpp`,
+`renderer.cpp`, and `renderer3.cpp`; existing consumer warnings remain.
+
+Both final desktop smoke checks used X11, each module's asset working directory,
+and exited normally. Captures were inspected: the renderer shows intersecting
+textured surfaces at 960x540; tower-defense retains its existing 400x200 camera
+region within the 1600x1200 framebuffer. The initial sandboxed renderer launch
+could not open the display. An initial desktop capture preceded the first rendered
+frame; the smoke helper now waits for visible content. An initial consumer capture
+lost its window and timed out; its repeated check completed successfully.
+
+Logs, staging helpers, and captures are in `/tmp/renderer-m2-implementation`,
+including `public_api.log`, `native-renderer.log`, `native-tower-defense.log`,
+`renderer-smoke-0.png`, and `tower-defense-smoke-0.png`.
+
+No milestone 2 semantic decision remains open. Stencil, blending, color masks,
+colorless framebuffers, and later milestones remain unimplemented. Inactive
+consumer rendering paths were compiled; only the active software-renderer path
+was visually checked. These checks establish correctness and integration;
+no performance baseline or optimization comparison was produced.
 
 ## Deferred scope
 

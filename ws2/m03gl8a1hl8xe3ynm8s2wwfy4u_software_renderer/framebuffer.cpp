@@ -8,8 +8,9 @@
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
-framebuffer_t::framebuffer_t(std::span<rgba8_t> pixels, int width, int height):
+framebuffer_t::framebuffer_t(std::span<rgba8_t> pixels, int width, int height, std::span<float> depth):
     m_pixels(pixels),
+    m_depth(depth),
     m_width(width),
     m_height(height)
 {
@@ -21,6 +22,12 @@ framebuffer_t::framebuffer_t(std::span<rgba8_t> pixels, int width, int height):
             expected_size,
             width,
             height
+        ));
+    }
+    if (!depth.empty() && depth.size() != expected_size) {
+        throw std::invalid_argument(std::format(
+            "framebuffer_t has {} depth samples, expected {} for dimensions {}x{}",
+            depth.size(), expected_size, width, height
         ));
     }
 }
@@ -48,6 +55,10 @@ int framebuffer_t::height() const noexcept {
 
 std::span<rgba8_t> framebuffer_t::pixels() const noexcept {
     return m_pixels;
+}
+
+std::span<float> framebuffer_t::depth() const noexcept {
+    return m_depth;
 }
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

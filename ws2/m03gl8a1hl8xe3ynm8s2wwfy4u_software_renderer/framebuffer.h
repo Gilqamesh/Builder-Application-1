@@ -21,16 +21,21 @@ struct rgba8_t {
 static_assert(sizeof(rgba8_t) == 4);
 
 /**
- * @brief Borrows row-major, top-left-origin, non-premultiplied RGBA8 storage.
+ * @brief Borrows row-major, top-left-origin RGBA8 color and optional float depth storage.
  *
  * Construction rejects negative dimensions, a pixel count that overflows
  * std::size_t, or storage whose size differs from width * height. Zero dimensions
  * are valid. The caller keeps storage valid during renderer operations and
- * replaces the framebuffer after reallocating it. Pixels remain mutable.
+ * replaces the framebuffer after reallocating either attachment. Samples remain mutable.
+ * Color is non-premultiplied. An empty depth span means no depth attachment;
+ * a nonempty span must have width * height samples with the same layout as color.
+ * Initialize depth before reading it through a draw. Renderer-written depths are
+ * in [0,1]; comparisons against caller-written samples use ordinary float operators.
+ * Construction validates shape without reading or initializing attachment contents.
  */
 class framebuffer_t {
 public:
-    framebuffer_t(std::span<rgba8_t> pixels, int width, int height);
+    framebuffer_t(std::span<rgba8_t> pixels, int width, int height, std::span<float> depth = {});
 
     /**
      * @brief Returns width * height, rejecting negative dimensions and std::size_t overflow.
@@ -40,9 +45,11 @@ public:
     int width() const noexcept;
     int height() const noexcept;
     std::span<rgba8_t> pixels() const noexcept;
+    std::span<float> depth() const noexcept;
 
 private:
     std::span<rgba8_t> m_pixels;
+    std::span<float> m_depth;
     int m_width;
     int m_height;
 };
@@ -102,6 +109,7 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::framebuffer_t> {
         out = std::format_to(out, "width: {}", framebuffer.width());
         out = std::format_to(out, ", height: {}", framebuffer.height());
         out = std::format_to(out, ", pixels: {}", framebuffer.pixels().size());
+        out = std::format_to(out, ", depth: {}", framebuffer.depth().size());
         out = std::format_to(out, " }}");
 
         return out;

@@ -33,14 +33,19 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
  * triangle, including degenerate boundaries. Matching shared boundaries with interiors
  * on opposite sides have complementary sample ownership; overlapping primitives shade
  * independently. Facing is constant per original triangle; simple snapped polygons
- * are front-facing for CCW NDC winding.
+ * are front-facing for CCW NDC winding under the default front-face selection.
  *
  * Points cover integer offsets dx*dx+dy*dy <= 9 around the floored projected position.
  * Lines include both floored projected endpoints. Points and lines are front-facing.
  * Fragment coordinates use framebuffer X/Y = (x+0.5,y+0.5),
  * Z = (interpolated Z/W+1)/2 clamped to [0,1], and W = interpolated reciprocal W.
- * Written colors overwrite without depth testing, blending or culling; discard
- * or an unwritten color leaves the destination pixel unchanged.
+ * The material supplies depth and culling state. Effective facing follows its
+ * front-face selection without changing coverage; points and lines stay front-facing.
+ * Covered, unculled samples execute the fragment shader before depth testing.
+ * Discard prevents color and depth writes. A failed depth test also prevents both.
+ * Passing samples write depth when enabled and overwrite color when supplied;
+ * an unwritten color preserves color while still permitting depth writes.
+ * There is no blending.
  */
 class software_renderer_t {
 public:
@@ -65,11 +70,30 @@ public:
     void clear(const camera_t& camera, rgba8_t color);
 
     /**
+     * @brief Fills the depth attachment independently of draw state, preserving color.
+     *
+     * Requires a depth attachment for a nonempty framebuffer. Values are clamped
+     * to [0,1], including infinities; NaN is rejected before writing any samples.
+     * Empty framebuffers do no work, including validation.
+     */
+    void clear_depth(float depth = 1.0F);
+
+    /**
+     * @brief Clears depth within the intersection of the camera rectangle and framebuffer.
+     *
+     * Uses clear_depth's value and attachment rules. Camera pose and projection
+     * do not affect clearing; empty intersections do no work, including validation.
+     */
+    void clear_depth(const camera_t& camera, float depth = 1.0F);
+
+    /**
      * @brief Draws a render item using its material's program and the camera.
      *
      * Empty framebuffers, empty camera rectangles, and empty intersections return
      * before validating draw resources or deriving matrices. Otherwise requires
      * geometry, material, finite transforms, and framebuffer dimensions in [1, 2^23].
+     * Enabled depth testing requires an attached depth buffer. Invalid draw-state
+     * enum values are rejected even when their corresponding control is disabled.
      * Validates current geometry, material bindings, and shader interfaces before
      * vertex execution. Camera rectangles support the full signed-int endpoint range.
      */
