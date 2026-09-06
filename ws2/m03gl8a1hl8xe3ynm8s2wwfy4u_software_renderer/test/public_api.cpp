@@ -27,11 +27,34 @@
 #include <set>
 #include <span>
 #include <source_location>
+#include <sstream>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
+
+namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
+
+struct application_metrics_t {
+    std::size_t m_items = 0;
+};
+
+} // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
+
+namespace std {
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::application_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::application_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "items={}", metrics.m_items);
+        return out;
+    }
+};
+
+} // namespace std
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
@@ -246,7 +269,7 @@ std::vector<api::rgba8_t> draw_scene(
         api::framebuffer_t::pixel_count(width, height),
         clear_color
     );
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, width, height));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, width, height));
     const auto camera = make_camera(width, height);
     const auto render_item = make_render_item(
         make_geometry(std::move(positions), std::move(indices), topology),
@@ -317,15 +340,15 @@ void test_resource_model() {
 }
 
 void test_framebuffer() {
-    static_assert(!std::is_copy_constructible_v<api::software_renderer_t>);
-    static_assert(!std::is_copy_assignable_v<api::software_renderer_t>);
-    static_assert(!std::is_move_constructible_v<api::software_renderer_t>);
-    static_assert(!std::is_move_assignable_v<api::software_renderer_t>);
+    static_assert(!std::is_copy_constructible_v<api::software_renderer_t<>>);
+    static_assert(!std::is_copy_assignable_v<api::software_renderer_t<>>);
+    static_assert(!std::is_move_constructible_v<api::software_renderer_t<>>);
+    static_assert(!std::is_move_assignable_v<api::software_renderer_t<>>);
     static_assert(std::is_same_v<decltype(std::declval<api::framebuffer_t&>().width()), int>);
     static_assert(std::is_same_v<decltype(std::declval<api::framebuffer_t&>().height()), int>);
     static_assert(std::is_same_v<decltype(std::declval<const api::framebuffer_t&>().pixels()), std::span<api::rgba8_t>>);
-    static_assert(std::is_same_v<decltype(std::declval<api::software_renderer_t&>().framebuffer()), api::framebuffer_t&>);
-    static_assert(std::is_same_v<decltype(std::declval<const api::software_renderer_t&>().framebuffer()), const api::framebuffer_t&>);
+    static_assert(std::is_same_v<decltype(std::declval<api::software_renderer_t<>&>().framebuffer()), api::framebuffer_t&>);
+    static_assert(std::is_same_v<decltype(std::declval<const api::software_renderer_t<>&>().framebuffer()), const api::framebuffer_t&>);
 
     test::expect(std::equal_to<>(), api::framebuffer_t::pixel_count(3, 2), std::size_t(6));
     test::expect(std::equal_to<>(), api::framebuffer_t::pixel_count(0, 2), std::size_t(0));
@@ -363,7 +386,7 @@ void test_framebuffer() {
         [[maybe_unused]] const api::framebuffer_t invalid(pixels, 0, 2);
     });
 
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 3, 2));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 3, 2));
 
     renderer.clear_color(clear_color);
     test::expect(std::identity(), std::ranges::all_of(pixels, [](const auto& pixel) {
@@ -401,7 +424,7 @@ void test_framebuffer() {
 
 void test_empty_framebuffer() {
     std::vector<api::rgba8_t> pixels;
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 0, 4));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 0, 4));
     test::expect_no_throw([&] { renderer.clear_color(clear_color); });
 
     const auto camera = make_camera(8, 8);
@@ -516,7 +539,7 @@ void test_texture_coordinate_interpolation() {
     expect_color(framebuffer[pixel_index(6, 6, 8)], white);
 
     std::vector<api::rgba8_t> transformed_pixels(32 * 32, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(transformed_pixels, 32, 32));
+    api::software_renderer_t<> renderer(api::framebuffer_t(transformed_pixels, 32, 32));
     api::render_item_t transformed;
     transformed.geometry() = make_geometry(
         {{-1.0F, -1.0F}, {-1.0F, 1.0F}, {1.0F, -1.0F}, {1.0F, 1.0F}},
@@ -535,7 +558,7 @@ void test_texture_coordinate_interpolation() {
 
 void test_shared_material_transform_semantics() {
     std::vector<api::rgba8_t> pixels(64 * 64, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 64, 64));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 64, 64));
     const auto camera = make_camera(64, 64);
     const auto geometry = make_geometry(
         {{0.0F, 0.0F}},
@@ -594,7 +617,7 @@ void test_matrix_zw_and_sparse_consumed_outputs() {
         material
     );
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 16, 16));
     renderer.draw(make_camera(16, 16), item);
     expect_color(pixels[pixel_index(8, 8, 16)], {64, 255, 64, 255});
 
@@ -662,7 +685,7 @@ void test_selected_range_indices_and_pre_raster_validation() {
     geometry->finalize();
 
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 16, 16));
     const auto item = make_render_item(
         std::move(geometry),
         std::make_shared<api::material_t>(program)
@@ -721,7 +744,7 @@ void test_fragment_bindings_are_validated_before_clipped_geometry() {
         material
     );
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 16, 16));
     test::expect_throws<std::invalid_argument>([&] {
         renderer.draw(make_camera(16, 16), item);
     });
@@ -762,7 +785,7 @@ void test_explicit_color_and_rgba8_conversion() {
 
 void test_vertex_layout_rejection() {
     std::vector<api::rgba8_t> pixels(8 * 8, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 8, 8));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 8, 8));
     const auto camera = make_camera(8, 8);
     const auto material = make_material(make_unorm_texture(red));
 
@@ -801,7 +824,7 @@ void test_material_resource_mapping() {
     static_assert(!std::is_copy_assignable_v<api::material_t>);
 
     std::vector<api::rgba8_t> pixels(8 * 8, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 8, 8));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 8, 8));
     const auto camera = make_camera(8, 8);
     const auto geometry = make_geometry(
         {{0.0F, 0.0F}},
@@ -856,7 +879,7 @@ void test_material_resource_mapping() {
 
 void test_nonfinite_clip_position_rejection() {
     std::vector<api::rgba8_t> pixels(8 * 8, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 8, 8));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 8, 8));
     const auto camera = make_camera(8, 8);
     const auto material = make_material(make_unorm_texture(red));
 
@@ -894,7 +917,7 @@ program_ptr_t make_clip_program(bool facing = false) {
 
 std::vector<api::rgba8_t> draw_clip_scene(const std::vector<clip_position_fixture_t>& positions, api::index_buffer_t::indices_t indices, api::vertex_primitive_topology_t topology, program_ptr_t program) {
     std::vector<api::rgba8_t> pixels(32 * 32, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 32, 32));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 32, 32));
     const api::vertex_attribute_t attribute(api::vertex_attribute_type_t::R32, 4);
     const auto geometry = make_typed_geometry(positions, attribute, std::move(indices), topology);
     const auto material = std::make_shared<api::material_t>(program);
@@ -993,7 +1016,7 @@ void test_grid_fragment_state() {
     const auto zero_w = draw_clip_scene({{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}}, {0, 1, 2}, api::vertex_primitive_topology_t::triangle, make_clip_program());
     test::expect(std::equal_to<>(), colored_pixel_count(zero_w), std::size_t(0));
     std::vector<api::rgba8_t> wide_pixels(std::size_t(raster::maximum_extent) + 1);
-    api::software_renderer_t wide(api::framebuffer_t(wide_pixels, raster::maximum_extent + 1, 1));
+    api::software_renderer_t<> wide(api::framebuffer_t(wide_pixels, raster::maximum_extent + 1, 1));
     const auto item = make_render_item(make_geometry({{0, 0}}, {0}, api::vertex_primitive_topology_t::point), make_material(make_unorm_texture(red)));
     test::expect_throws<std::out_of_range>([&] { wide.draw(make_camera(32, 32), item); });
 }
@@ -1663,7 +1686,7 @@ void test_camera_pose_and_projection() {
 void test_camera_regions_and_clears() {
     constexpr int width = 16, height = 12;
     std::vector<api::rgba8_t> pixels(width * height, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, width, height));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, width, height));
     api::camera_t camera({{3, 11}, {2, 9}}, api::perspective_t(1, 0.1F, 10));
     const auto quad = make_typed_geometry(std::vector<clip_position_fixture_t>{{-1, 1, 0, 1}, {-1, -1, 0, 1}, {1, 1, 0, 1}, {1, -1, 0, 1}}, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 4), {0, 1, 2, 3}, api::vertex_primitive_topology_t::triangle_strip);
     auto item = make_render_item(quad, std::make_shared<api::material_t>(make_clip_program()));
@@ -1715,7 +1738,7 @@ void test_camera_regions_and_clears() {
 void test_region_topologies_and_original_aspect() {
     constexpr int width = 8, height = 8;
     std::vector<api::rgba8_t> pixels(width * height, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, width, height));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, width, height));
     const auto material = std::make_shared<api::material_t>(make_clip_program());
     const int minimum = std::numeric_limits<int>::min(), maximum = std::numeric_limits<int>::max();
     for (const api::view_rect_t rect : {api::view_rect_t({{2, 6}, {1, 7}}), api::view_rect_t({{-2, 6}, {-1, 7}}), api::view_rect_t({{minimum, maximum}, {0, height}})}) {
@@ -1786,7 +1809,7 @@ void test_textured_3d_near_plane() {
     item.translation() = {0, 0, -1};
     item.scale() = {1, 1, 0}; // A collapsed Z scale still leaves a visible XY surface.
     std::vector<api::rgba8_t> pixels(32 * 32, clear_color);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 32, 32));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 32, 32));
     for (bool perspective : {false, true}) {
         api::camera_t camera({{0, 32}, {0, 32}}, api::orthographic_t({{-1, 1}, {-1, 1}}, 0.75F, 10));
         if (perspective) { camera.projection() = api::perspective_t(std::numbers::pi_v<float> / 2, 0.75F, 10); }
@@ -1905,7 +1928,7 @@ void test_material_setting_invariants() {
     require(shared_item.material()->program() == item.material()->program());
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
     std::vector<float> depths(pixels.size(), 0.75F);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 16, 16));
     renderer.framebuffer().depth(depths);
     renderer.draw(make_camera(16, 16), item);
     renderer.draw(make_camera(16, 16), shared_item);
@@ -1934,7 +1957,7 @@ void test_depth_attachment_updates() {
     test::expect_throws<std::invalid_argument>([&] { empty.depth(depths); });
     require(empty.depth().empty());
 
-    api::software_renderer_t renderer(framebuffer);
+    api::software_renderer_t<> renderer(framebuffer);
     framebuffer.depth(replacement_depth); // Rebinding a copied view does not affect the renderer.
     require(renderer.framebuffer().depth().data() == depths.data());
     renderer.framebuffer().depth()[0] = 0.5F;
@@ -1991,7 +2014,7 @@ void test_depth_comparisons_and_controls() {
     }};
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
     std::vector<float> depths(pixels.size());
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 16, 16));
     renderer.framebuffer().depth(depths);
     const auto camera = make_camera(16, 16);
     const auto center = pixel_index(8, 8, 16);
@@ -2042,7 +2065,7 @@ void test_depth_comparisons_and_controls() {
 void test_depth_visibility_and_fragment_results() {
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
     std::vector<float> depths(pixels.size());
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 16, 16));
     renderer.framebuffer().depth(depths);
     const auto camera = make_camera(16, 16);
     const api::index_buffer_t::indices_t indices {0, 1, 2, 2, 1, 3};
@@ -2123,7 +2146,7 @@ void test_culling_and_topology_depth() {
     };
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
     std::vector<float> depths(pixels.size());
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 16, 16));
     renderer.framebuffer().depth(depths);
     const auto camera = make_camera(16, 16);
     for (const auto topology : topologies) {
@@ -2221,7 +2244,7 @@ void test_projected_depth_visibility() {
     red_item.translation() = blue_item.translation() = {0, 0, -1};
     std::vector<api::rgba8_t> pixels(32 * 32);
     std::vector<float> depths(pixels.size());
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 32, 32));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 32, 32));
     renderer.framebuffer().depth(depths);
     for (bool perspective : {false, true}) {
         api::camera_t camera({{0, 32}, {0, 32}}, api::orthographic_t({{-1, 1}, {-1, 1}}, 0.75F, 10));
@@ -2289,7 +2312,7 @@ void test_projected_depth_visibility() {
 void test_bounded_depth_writes() {
     std::vector<api::rgba8_t> pixels(16 * 16);
     std::vector<float> depths(pixels.size());
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 16, 16));
     renderer.framebuffer().depth(depths);
     auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
     using rect_t = m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<int, 2>;
@@ -2332,7 +2355,7 @@ void test_bounded_depth_writes() {
 void test_depth_clears() {
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
     std::vector<float> depths(pixels.size(), 0.75F);
-    api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
+    api::software_renderer_t<> renderer(api::framebuffer_t(pixels, 16, 16));
     renderer.framebuffer().depth(depths);
     using rect_t = m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<int, 2>;
     const std::array rectangles {
@@ -2382,6 +2405,121 @@ void test_depth_clears() {
     test::expect_no_throw([&] { renderer.clear_depth(make_camera(16, 16), nan); });
 }
 
+void test_profiling() {
+    using payload_t = std::variant<application_metrics_t, clear_metrics_t, vertex_metrics_t, raster_metrics_t>;
+    using profiler_t = profiling::profiler_t<payload_t>;
+    std::array<profiler_t::record_type_t, 32> storage;
+    profiler_t profiler(storage);
+    const regions_t regions(profiler);
+    const auto frame_region = profiler.register_region("application.frame");
+    std::vector<api::rgba8_t> measured_pixels(256), normal_pixels(256);
+    std::vector<float> measured_depth(256), normal_depth(256);
+    api::framebuffer_t measured_framebuffer(measured_pixels, 16, 16), normal_framebuffer(normal_pixels, 16, 16);
+    measured_framebuffer.depth(measured_depth);
+    normal_framebuffer.depth(normal_depth);
+    api::software_renderer_t<profiler_t> measured(measured_framebuffer, profiler, regions);
+    api::software_renderer_t<> normal(normal_framebuffer);
+    profiler.start();
+    const auto camera = make_camera(16, 16);
+    for (int mode = 0; mode < 6; ++mode) {
+        auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
+        if (mode == 2 || mode == 3) {
+            item.material() = std::make_shared<api::material_t>(make_visibility_program(mode != 3, true));
+            item.material()->uniform(0, vector4f_t({1, 0, 0, 1}));
+            item.material()->depth_test(true);
+        }
+        if (mode == 4) { item.material()->cull(api::cull_mode_t::both); }
+        const std::size_t draws = mode == 5 ? 2 : 1;
+        const auto render = [&](auto& renderer) {
+            renderer.clear_color(clear_color);
+            renderer.clear_depth(mode == 1 ? 0.0F : 1.0F);
+            for (std::size_t i = 0; i < draws; ++i) { renderer.draw(camera, item); }
+        };
+        profiler.reset();
+        {
+            auto frame = profiler.scope<application_metrics_t>(frame_region);
+            render(measured);
+            frame.metrics().m_items = draws;
+        }
+        render(normal);
+        require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
+        require(measured_depth == normal_depth);
+        require(profiler.records().size() == 3 + 4 * draws && profiler.omitted() == 0);
+        require(std::get<application_metrics_t>(*profiler.records()[0].m_metrics).m_items == draws);
+        require(std::get<clear_metrics_t>(*profiler.records()[1].m_metrics).m_color_writes == 256);
+        require(std::get<clear_metrics_t>(*profiler.records()[2].m_metrics).m_depth_writes == 256);
+        std::size_t vertices = 0;
+        raster_metrics_t raster;
+        for (const auto& record : profiler.records()) {
+            if (!record.m_metrics) { continue; }
+            if (const auto* metrics = std::get_if<vertex_metrics_t>(&*record.m_metrics)) { vertices += metrics->m_invocations; }
+            if (const auto* metrics = std::get_if<raster_metrics_t>(&*record.m_metrics)) {
+                raster.m_invocations += metrics->m_invocations;
+                raster.m_discards += metrics->m_discards;
+                raster.m_depth_rejections += metrics->m_depth_rejections;
+                raster.m_color_writes += metrics->m_color_writes;
+                raster.m_depth_writes += metrics->m_depth_writes;
+                require(record.m_parent && profiler.records()[*record.m_parent].m_region == regions.m_ids[std::size_t(region_t::draw)].m_index);
+            }
+        }
+        require(vertices == 6 * draws);
+        require(raster.m_invocations == (mode == 4 ? 0 : 256 * draws));
+        require(raster.m_discards == (mode == 2 || mode == 3 ? 128 : 0));
+        require(raster.m_depth_rejections == (mode == 1 || mode == 5 ? 256 : 0));
+        const std::size_t writes = mode == 1 || mode == 4 ? 0 : (mode == 2 || mode == 3 ? 128 : 256);
+        require(raster.m_depth_writes == writes);
+        require(raster.m_color_writes == (mode == 3 ? 0 : writes));
+    }
+    std::ostringstream report;
+    profiler.report(report);
+    require(report.str().find("application.frame") != std::string::npos && report.str().find("items=2") != std::string::npos);
+    require(report.str().find("vertex_invocations=6") != std::string::npos);
+
+    // Both policies reject the same invalid resources; completed scope records survive.
+    profiler.reset();
+    test::expect_throws([&] { measured.draw(camera, api::render_item_t{}); });
+    test::expect_throws([&] { normal.draw(camera, api::render_item_t{}); });
+    require(profiler.records().size() == 2 && profiler.records()[0].m_unwinding && profiler.records()[1].m_unwinding);
+
+    // Empty intersections retain their original validation bypass in both policies.
+    profiler.reset();
+    auto empty_camera = make_camera(0, 0);
+    test::expect_no_throw([&] { measured.draw(empty_camera, api::render_item_t{}); });
+    test::expect_no_throw([&] { normal.draw(empty_camera, api::render_item_t{}); });
+    require(profiler.records().size() == 2 && !profiler.records()[0].m_unwinding);
+
+    // Points, lines, all assembly forms, and clipping use the same instrumented path.
+    for (const auto topology : {api::vertex_primitive_topology_t::point, api::vertex_primitive_topology_t::line,
+             api::vertex_primitive_topology_t::line_strip, api::vertex_primitive_topology_t::line_loop,
+             api::vertex_primitive_topology_t::triangle, api::vertex_primitive_topology_t::triangle_strip,
+             api::vertex_primitive_topology_t::triangle_fan}) {
+        auto indices = topology == api::vertex_primitive_topology_t::triangle ? api::index_buffer_t::indices_t{0, 1, 2} : api::index_buffer_t::indices_t{0, 1, 2, 3};
+        auto positions = visibility_quad(0);
+        positions[0] = {-2, 2, -2, 1};
+        auto item = make_visibility_item(positions, indices, topology);
+        profiler.reset();
+        measured.clear_color(clear_color); normal.clear_color(clear_color);
+        measured.clear_depth(1); normal.clear_depth(1);
+        measured.draw(camera, item); normal.draw(camera, item);
+        require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
+        require(measured_depth == normal_depth);
+    }
+
+    // Record exhaustion never changes rendering or prevents future capture resets.
+    std::array<profiler_t::record_type_t, 1> tiny_storage;
+    profiler_t tiny(tiny_storage);
+    const regions_t tiny_regions(tiny);
+    api::software_renderer_t<profiler_t> overflowing(measured_framebuffer, tiny, tiny_regions);
+    test::expect_throws([&] { api::software_renderer_t<profiler_t> invalid(measured_framebuffer, tiny, regions); });
+    tiny.start();
+    auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
+    std::ranges::fill(measured_depth, 1); std::ranges::fill(normal_depth, 1);
+    overflowing.draw(camera, item); normal.draw(camera, item);
+    require(tiny.omitted() == 3 && !tiny.records()[0].self());
+    require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
+    require(measured_depth == normal_depth);
+}
+
 void run_resource_tests() {
     test_rotation_and_item_transform();
     test_resource_model();
@@ -2397,6 +2535,7 @@ void run_framebuffer_tests() {
 }
 
 void run_pipeline_tests() {
+    test_profiling();
     test_material_setting_invariants();
     test_depth_attachment_updates();
     test_depth_comparisons_and_controls();

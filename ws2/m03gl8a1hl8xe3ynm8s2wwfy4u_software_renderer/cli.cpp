@@ -121,7 +121,7 @@ int main() {
 
         std::vector<rgba8_t> pixels;
         std::vector<float> depth;
-        software_renderer_api::software_renderer_t renderer(software_renderer_api::framebuffer_t(pixels, 0, 0));
+        software_renderer_api::software_renderer_t<> renderer(software_renderer_api::framebuffer_t(pixels, 0, 0));
         opengl_renderer_api::opengl_renderer_t opengl_renderer(window);
         auto material = std::make_shared<software_renderer_api::material_t>(make_program());
         material->texture(0, make_texture());

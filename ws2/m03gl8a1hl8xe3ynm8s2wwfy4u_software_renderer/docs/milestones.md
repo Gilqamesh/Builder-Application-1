@@ -1,6 +1,6 @@
 # Software renderer milestones
 
-Status: milestones 0, 1, and 2 are implemented and validated. Later milestones remain proposed and unstarted. Public behavior is owned by the module headers.
+Status: milestones 0, 1, and 2 are implemented and validated. Milestone 6 has profiling and an initial optimized baseline; algorithmic optimization remains unstarted. Milestones 3–5 remain proposed and unstarted. Public behavior is owned by the module headers.
 
 Baseline: [Builder-Modules at 540bbede71740d24292cc3b7cd9c8ed126eca0c3](https://github.com/Gilqamesh/Builder-Modules/tree/540bbede71740d24292cc3b7cd9c8ed126eca0c3).
 
@@ -128,16 +128,18 @@ Status: unstarted.
 
 ## 6. Measurement and incremental optimization
 
-Status: unstarted.
+Status: profiling and an initial optimized baseline are implemented and validated;
+algorithmic optimization is unstarted. See [the measurement path](../performance/README.md)
+and [baseline evidence](../performance/baseline.md).
 
 - Outcome: each optimization delivery demonstrates its effect through repeatable measurements while preserving rendering correctness.
-- Measurement module: introduce a separate module responsible for collecting measurements, summarizing repeated runs, and comparing deliveries. Renderer-specific workloads and correctness expectations remain with the renderer.
-- Metrics: track median and high-percentile CPU render time, plus peak memory use, across a small, stable set of representative headless workloads. Keep the measured scope consistent across deliveries.
+- Measurement ownership: [`profiling`](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md) owns nested timing/counter collection and deferred report traversal. The renderer owns its metrics and template-policy integration. Its benchmark driver owns workloads, repeated-run summaries, and comparisons; applications own shared profiler instances and capture storage.
+- Metrics: track median and high-percentile elapsed render time and process peak RSS across stable headless workloads. The driver records precise timing and memory scopes. Keep these scopes consistent across deliveries and optimize all measured dependency implementations.
 - Comparisons: record workload, resolution, rendering settings, hardware, build configuration, and source revision. Report absolute results, percentage changes, and run-to-run variation against both the previous delivery and the established baseline. New feature workloads establish their own baselines.
 - Delivery process: use measured results to select each bounded optimization. Every delivery includes the same comparison report and correctness evidence, making improvements, regressions, and tradeoffs visible. Specific optimization techniques remain undecided until measurements justify them.
 - Acceptance criteria: repeated runs establish measurement variability, and each optimization delivery has comparable before/after results with passing correctness validation.
 
-Establish the measurement baseline before the first delivery to be compared. Comparisons covering milestones 2–5 require the measurement foundation before those deliveries; the dedicated optimization phase remains at the end.
+The initial baseline follows milestone 2 and precedes future feature and optimization comparisons. It does not provide historical before/after measurements for completed milestones. Preserve this baseline when comparing subsequent deliveries.
 
 ## Completion records
 
@@ -399,6 +401,23 @@ and `tower-defense-retry-smoke-0.png`.
 
 No API-migration decision remains open. Only the active consumer rendering path
 was visually checked; performance was not benchmarked.
+
+### Profiling and initial optimized baseline — 2026-09-06
+
+The `profiling` module and `software_renderer_t<Profiler>` integration implement
+the settled capture, registration, lifetime, overflow, deferred formatting, and
+disabled-policy contracts. Application and renderer scopes share one application
+profiler, with explicit region registration before capture. The tower-defense
+consumer and renderer demo select the default disabled template policy.
+
+The dedicated headless benchmark compiles the renderer and performance-relevant
+dependencies, including `software_shader` and texture sampling, with `-O2`.
+Native Clang and optimized GNU public validation passed, as did the mixed-payload,
+disabled assembly, missing-formatter, and consumer presentation checks.
+[The baseline report](../performance/baseline.md) records exact commands, source
+identity, empirical results, and limitations; [raw samples](../performance/baseline.json)
+are preserved. Changes remain in the working tree; no implementation commit was
+created. No algorithmic optimization delivery is claimed.
 
 ## Deferred scope
 

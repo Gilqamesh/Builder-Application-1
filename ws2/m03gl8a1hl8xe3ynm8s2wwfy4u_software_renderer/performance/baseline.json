@@ -1,0 +1,2620 @@
+{
+  "metadata": {
+    "workload_version": 1,
+    "source_digest": "b8f1be0fb8503893e4ea1f937bd07e53395df5aab6bb5fb3042b73bb62d39812",
+    "compiler": "g++ (GCC) 13.3.1 20240913 (Red Hat 13.3.1-3)",
+    "compiler_path": "/usr/bin/g++",
+    "flags": [
+      "-std=c++23",
+      "-O2",
+      "-g",
+      "-DNDEBUG",
+      "-Wall",
+      "-Wextra"
+    ],
+    "cpu": "AMD Ryzen 9 7945HX with Radeon Graphics",
+    "platform": "Linux-6.8.10-700.rog.fc39.x86_64-x86_64-with-glibc2.38",
+    "size": 128,
+    "warmup_per_run": 3,
+    "samples_per_run": 20,
+    "runs": 5,
+    "scope": "frame scope, full color/depth clears, fixed draw sequence; reset, setup, comparison, reporting excluded",
+    "peak_rss_scope": "Linux VmHWM for benchmark address space, both policies, setup, warmup and reporting included",
+    "modules": {
+      "m03gagbht2l61mj6qitacwbmea_byte_stream": {
+        "revision": "3ac66aca3f00e68bc32a7a54363ce826d3d0092e",
+        "modified": false
+      },
+      "m03gin6lte1az5kj36aj9suk6t_interval": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": false
+      },
+      "m03gintxczohr63y44o77b4pyj_hyperrectangle": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": false
+      },
+      "m03ginuqujr8cbfieco8r61u54_saturating_arithmetic": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": false
+      },
+      "m03ginwy24ng8o487c4beoms6l_vector": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": false
+      },
+      "m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": false
+      },
+      "m03gjfvd6i5jzbmngb2ldoooza_type_erased_array": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": false
+      },
+      "m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": true
+      },
+      "m03glv28yaiwc5hbnvz43r14zr_matrix": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": false
+      },
+      "m03gn97n4iusbtl7uthb01wu9m_test_framework": {
+        "revision": "3ac66aca3f00e68bc32a7a54363ce826d3d0092e",
+        "modified": false
+      },
+      "m03gsy25j4v7nccgmsdov9ioft_shader": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": false
+      },
+      "m03gt0l0q3l4b1k27eab5k7py1_texture": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": false
+      },
+      "m03gt1djvvy5atia5evkbg6rqy_software_shader": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": false
+      },
+      "m03gtgtrh2smvh28qlwgm7gdl4_quaternion": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": false
+      },
+      "m03gtjqkhqacstl3luv2ojsz3q_profiling": {
+        "revision": "5c7ca542d64efa8fb2112670f058e4349864c539",
+        "modified": true
+      }
+    }
+  },
+  "workloads": {
+    "textured_fill": {
+      "samples": [
+        {
+          "run": 0,
+          "sample": 0,
+          "normal_ns": 3759502,
+          "profiled_ns": 3770793
+        },
+        {
+          "run": 0,
+          "sample": 1,
+          "normal_ns": 3739063,
+          "profiled_ns": 3745215
+        },
+        {
+          "run": 0,
+          "sample": 2,
+          "normal_ns": 3750234,
+          "profiled_ns": 3753711
+        },
+        {
+          "run": 0,
+          "sample": 3,
+          "normal_ns": 3753219,
+          "profiled_ns": 3741518
+        },
+        {
+          "run": 0,
+          "sample": 4,
+          "normal_ns": 3736608,
+          "profiled_ns": 3755955
+        },
+        {
+          "run": 0,
+          "sample": 5,
+          "normal_ns": 3745465,
+          "profiled_ns": 3745084
+        },
+        {
+          "run": 0,
+          "sample": 6,
+          "normal_ns": 3750675,
+          "profiled_ns": 3759331
+        },
+        {
+          "run": 0,
+          "sample": 7,
+          "normal_ns": 3755394,
+          "profiled_ns": 3774981
+        },
+        {
+          "run": 0,
+          "sample": 8,
+          "normal_ns": 3754542,
+          "profiled_ns": 3751116
+        },
+        {
+          "run": 0,
+          "sample": 9,
+          "normal_ns": 3739544,
+          "profiled_ns": 3760624
+        },
+        {
+          "run": 0,
+          "sample": 10,
+          "normal_ns": 3739424,
+          "profiled_ns": 3743812
+        },
+        {
+          "run": 0,
+          "sample": 11,
+          "normal_ns": 3761515,
+          "profiled_ns": 3743642
+        },
+        {
+          "run": 0,
+          "sample": 12,
+          "normal_ns": 3759802,
+          "profiled_ns": 3786712
+        },
+        {
+          "run": 0,
+          "sample": 13,
+          "normal_ns": 3775352,
+          "profiled_ns": 3753971
+        },
+        {
+          "run": 0,
+          "sample": 14,
+          "normal_ns": 3749252,
+          "profiled_ns": 3780832
+        },
+        {
+          "run": 0,
+          "sample": 15,
+          "normal_ns": 3751296,
+          "profiled_ns": 3797213
+        },
+        {
+          "run": 0,
+          "sample": 16,
+          "normal_ns": 3750264,
+          "profiled_ns": 3809004
+        },
+        {
+          "run": 0,
+          "sample": 17,
+          "normal_ns": 3755333,
+          "profiled_ns": 3765152
+        },
+        {
+          "run": 0,
+          "sample": 18,
+          "normal_ns": 3766545,
+          "profiled_ns": 3766093
+        },
+        {
+          "run": 0,
+          "sample": 19,
+          "normal_ns": 3786593,
+          "profiled_ns": 3778747
+        },
+        {
+          "run": 1,
+          "sample": 0,
+          "normal_ns": 3761936,
+          "profiled_ns": 3812140
+        },
+        {
+          "run": 1,
+          "sample": 1,
+          "normal_ns": 3757868,
+          "profiled_ns": 3773788
+        },
+        {
+          "run": 1,
+          "sample": 2,
+          "normal_ns": 3768579,
+          "profiled_ns": 3770872
+        },
+        {
+          "run": 1,
+          "sample": 3,
+          "normal_ns": 3772947,
+          "profiled_ns": 3763569
+        },
+        {
+          "run": 1,
+          "sample": 4,
+          "normal_ns": 3765473,
+          "profiled_ns": 3765382
+        },
+        {
+          "run": 1,
+          "sample": 5,
+          "normal_ns": 3754913,
+          "profiled_ns": 3761876
+        },
+        {
+          "run": 1,
+          "sample": 6,
+          "normal_ns": 3767596,
+          "profiled_ns": 3787264
+        },
+        {
+          "run": 1,
+          "sample": 7,
+          "normal_ns": 3772886,
+          "profiled_ns": 3781493
+        },
+        {
+          "run": 1,
+          "sample": 8,
+          "normal_ns": 3758560,
+          "profiled_ns": 3756335
+        },
+        {
+          "run": 1,
+          "sample": 9,
+          "normal_ns": 3771825,
+          "profiled_ns": 3750254
+        },
+        {
+          "run": 1,
+          "sample": 10,
+          "normal_ns": 3770933,
+          "profiled_ns": 3774870
+        },
+        {
+          "run": 1,
+          "sample": 11,
+          "normal_ns": 3765483,
+          "profiled_ns": 3756045
+        },
+        {
+          "run": 1,
+          "sample": 12,
+          "normal_ns": 3768478,
+          "profiled_ns": 3777486
+        },
+        {
+          "run": 1,
+          "sample": 13,
+          "normal_ns": 3764361,
+          "profiled_ns": 3771203
+        },
+        {
+          "run": 1,
+          "sample": 14,
+          "normal_ns": 3752167,
+          "profiled_ns": 3765112
+        },
+        {
+          "run": 1,
+          "sample": 15,
+          "normal_ns": 3767246,
+          "profiled_ns": 3767176
+        },
+        {
+          "run": 1,
+          "sample": 16,
+          "normal_ns": 3755815,
+          "profiled_ns": 3775782
+        },
+        {
+          "run": 1,
+          "sample": 17,
+          "normal_ns": 3761646,
+          "profiled_ns": 3777815
+        },
+        {
+          "run": 1,
+          "sample": 18,
+          "normal_ns": 3766534,
+          "profiled_ns": 3788085
+        },
+        {
+          "run": 1,
+          "sample": 19,
+          "normal_ns": 3772395,
+          "profiled_ns": 3753069
+        },
+        {
+          "run": 2,
+          "sample": 0,
+          "normal_ns": 3764561,
+          "profiled_ns": 3774840
+        },
+        {
+          "run": 2,
+          "sample": 1,
+          "normal_ns": 3773377,
+          "profiled_ns": 3755013
+        },
+        {
+          "run": 2,
+          "sample": 2,
+          "normal_ns": 3749683,
+          "profiled_ns": 3743411
+        },
+        {
+          "run": 2,
+          "sample": 3,
+          "normal_ns": 3768699,
+          "profiled_ns": 3776463
+        },
+        {
+          "run": 2,
+          "sample": 4,
+          "normal_ns": 3751636,
+          "profiled_ns": 3754572
+        },
+        {
+          "run": 2,
+          "sample": 5,
+          "normal_ns": 3772586,
+          "profiled_ns": 3768829
+        },
+        {
+          "run": 2,
+          "sample": 6,
+          "normal_ns": 3765493,
+          "profiled_ns": 3803654
+        },
+        {
+          "run": 2,
+          "sample": 7,
+          "normal_ns": 3775100,
+          "profiled_ns": 3798565
+        },
+        {
+          "run": 2,
+          "sample": 8,
+          "normal_ns": 3764831,
+          "profiled_ns": 3752438
+        },
+        {
+          "run": 2,
+          "sample": 9,
+          "normal_ns": 3780320,
+          "profiled_ns": 3767176
+        },
+        {
+          "run": 2,
+          "sample": 10,
+          "normal_ns": 3758259,
+          "profiled_ns": 3752528
+        },
+        {
+          "run": 2,
+          "sample": 11,
+          "normal_ns": 3761535,
+          "profiled_ns": 3752729
+        },
+        {
+          "run": 2,
+          "sample": 12,
+          "normal_ns": 3759531,
+          "profiled_ns": 3774370
+        },
+        {
+          "run": 2,
+          "sample": 13,
+          "normal_ns": 3758871,
+          "profiled_ns": 3781693
+        },
+        {
+          "run": 2,
+          "sample": 14,
+          "normal_ns": 3767617,
+          "profiled_ns": 3799105
+        },
+        {
+          "run": 2,
+          "sample": 15,
+          "normal_ns": 3777635,
+          "profiled_ns": 3779348
+        },
+        {
+          "run": 2,
+          "sample": 16,
+          "normal_ns": 3750124,
+          "profiled_ns": 3774500
+        },
+        {
+          "run": 2,
+          "sample": 17,
+          "normal_ns": 3761255,
+          "profiled_ns": 3774520
+        },
+        {
+          "run": 2,
+          "sample": 18,
+          "normal_ns": 3780110,
+          "profiled_ns": 3791742
+        },
+        {
+          "run": 2,
+          "sample": 19,
+          "normal_ns": 3759000,
+          "profiled_ns": 3789067
+        },
+        {
+          "run": 3,
+          "sample": 0,
+          "normal_ns": 3768178,
+          "profiled_ns": 3783787
+        },
+        {
+          "run": 3,
+          "sample": 1,
+          "normal_ns": 3766865,
+          "profiled_ns": 3769510
+        },
+        {
+          "run": 3,
+          "sample": 2,
+          "normal_ns": 3774720,
+          "profiled_ns": 3777665
+        },
+        {
+          "run": 3,
+          "sample": 3,
+          "normal_ns": 3751426,
+          "profiled_ns": 3769600
+        },
+        {
+          "run": 3,
+          "sample": 4,
+          "normal_ns": 3774740,
+          "profiled_ns": 3754211
+        },
+        {
+          "run": 3,
+          "sample": 5,
+          "normal_ns": 3763018,
+          "profiled_ns": 3773277
+        },
+        {
+          "run": 3,
+          "sample": 6,
+          "normal_ns": 3770342,
+          "profiled_ns": 3776323
+        },
+        {
+          "run": 3,
+          "sample": 7,
+          "normal_ns": 3742019,
+          "profiled_ns": 3771374
+        },
+        {
+          "run": 3,
+          "sample": 8,
+          "normal_ns": 3759311,
+          "profiled_ns": 3761676
+        },
+        {
+          "run": 3,
+          "sample": 9,
+          "normal_ns": 3758690,
+          "profiled_ns": 3766194
+        },
+        {
+          "run": 3,
+          "sample": 10,
+          "normal_ns": 3761004,
+          "profiled_ns": 3757838
+        },
+        {
+          "run": 3,
+          "sample": 11,
+          "normal_ns": 3753891,
+          "profiled_ns": 3761526
+        },
+        {
+          "run": 3,
+          "sample": 12,
+          "normal_ns": 3758399,
+          "profiled_ns": 3785961
+        },
+        {
+          "run": 3,
+          "sample": 13,
+          "normal_ns": 3761415,
+          "profiled_ns": 3750745
+        },
+        {
+          "run": 3,
+          "sample": 14,
+          "normal_ns": 3746427,
+          "profiled_ns": 3771534
+        },
+        {
+          "run": 3,
+          "sample": 15,
+          "normal_ns": 3763119,
+          "profiled_ns": 3772035
+        },
+        {
+          "run": 3,
+          "sample": 16,
+          "normal_ns": 3768819,
+          "profiled_ns": 3774530
+        },
+        {
+          "run": 3,
+          "sample": 17,
+          "normal_ns": 3766064,
+          "profiled_ns": 3781563
+        },
+        {
+          "run": 3,
+          "sample": 18,
+          "normal_ns": 3762497,
+          "profiled_ns": 3756626
+        },
+        {
+          "run": 3,
+          "sample": 19,
+          "normal_ns": 3744954,
+          "profiled_ns": 3769410
+        },
+        {
+          "run": 4,
+          "sample": 0,
+          "normal_ns": 3762397,
+          "profiled_ns": 3760974
+        },
+        {
+          "run": 4,
+          "sample": 1,
+          "normal_ns": 3768859,
+          "profiled_ns": 3760273
+        },
+        {
+          "run": 4,
+          "sample": 2,
+          "normal_ns": 3769751,
+          "profiled_ns": 3773017
+        },
+        {
+          "run": 4,
+          "sample": 3,
+          "normal_ns": 3757978,
+          "profiled_ns": 3823332
+        },
+        {
+          "run": 4,
+          "sample": 4,
+          "normal_ns": 3765442,
+          "profiled_ns": 4193907
+        },
+        {
+          "run": 4,
+          "sample": 5,
+          "normal_ns": 3727662,
+          "profiled_ns": 3714216
+        },
+        {
+          "run": 4,
+          "sample": 6,
+          "normal_ns": 3725478,
+          "profiled_ns": 3711591
+        },
+        {
+          "run": 4,
+          "sample": 7,
+          "normal_ns": 3728272,
+          "profiled_ns": 3697445
+        },
+        {
+          "run": 4,
+          "sample": 8,
+          "normal_ns": 3721119,
+          "profiled_ns": 3708937
+        },
+        {
+          "run": 4,
+          "sample": 9,
+          "normal_ns": 3714026,
+          "profiled_ns": 3688899
+        },
+        {
+          "run": 4,
+          "sample": 10,
+          "normal_ns": 3740716,
+          "profiled_ns": 3720398
+        },
+        {
+          "run": 4,
+          "sample": 11,
+          "normal_ns": 3716881,
+          "profiled_ns": 3705220
+        },
+        {
+          "run": 4,
+          "sample": 12,
+          "normal_ns": 3729244,
+          "profiled_ns": 3693017
+        },
+        {
+          "run": 4,
+          "sample": 13,
+          "normal_ns": 3720749,
+          "profiled_ns": 3708315
+        },
+        {
+          "run": 4,
+          "sample": 14,
+          "normal_ns": 3700741,
+          "profiled_ns": 3690141
+        },
+        {
+          "run": 4,
+          "sample": 15,
+          "normal_ns": 3709468,
+          "profiled_ns": 3688608
+        },
+        {
+          "run": 4,
+          "sample": 16,
+          "normal_ns": 3718395,
+          "profiled_ns": 3693327
+        },
+        {
+          "run": 4,
+          "sample": 17,
+          "normal_ns": 3708686,
+          "profiled_ns": 3687997
+        },
+        {
+          "run": 4,
+          "sample": 18,
+          "normal_ns": 3707343,
+          "profiled_ns": 3715840
+        },
+        {
+          "run": 4,
+          "sample": 19,
+          "normal_ns": 3761294,
+          "profiled_ns": 3694520
+        }
+      ],
+      "summary": {
+        "normal": {
+          "median_ns": 3759666.5,
+          "p95_ns": 3775100,
+          "maximum_ns": 3786593,
+          "run_medians_ns": [
+            3752257.5,
+            3766008.5,
+            3764696.0,
+            3761956.0,
+            3726570.0
+          ]
+        },
+        "profiled": {
+          "median_ns": 3766143.5,
+          "p95_ns": 3799105,
+          "maximum_ns": 4193907,
+          "run_medians_ns": [
+            3759977.5,
+            3771037.5,
+            3774510.0,
+            3770487.0,
+            3708626.0
+          ]
+        }
+      },
+      "median_overhead_percent": 0.1722759186220335,
+      "peak_rss_bytes": 3932160,
+      "records": 7
+    },
+    "depth_overdraw": {
+      "samples": [
+        {
+          "run": 0,
+          "sample": 0,
+          "normal_ns": 15304465,
+          "profiled_ns": 15637451
+        },
+        {
+          "run": 0,
+          "sample": 1,
+          "normal_ns": 15500684,
+          "profiled_ns": 15614719
+        },
+        {
+          "run": 0,
+          "sample": 2,
+          "normal_ns": 15465839,
+          "profiled_ns": 15662749
+        },
+        {
+          "run": 0,
+          "sample": 3,
+          "normal_ns": 15556339,
+          "profiled_ns": 15655726
+        },
+        {
+          "run": 0,
+          "sample": 4,
+          "normal_ns": 15510734,
+          "profiled_ns": 15637742
+        },
+        {
+          "run": 0,
+          "sample": 5,
+          "normal_ns": 15583881,
+          "profiled_ns": 15667728
+        },
+        {
+          "run": 0,
+          "sample": 6,
+          "normal_ns": 15618696,
+          "profiled_ns": 15671686
+        },
+        {
+          "run": 0,
+          "sample": 7,
+          "normal_ns": 15518467,
+          "profiled_ns": 15669081
+        },
+        {
+          "run": 0,
+          "sample": 8,
+          "normal_ns": 15499012,
+          "profiled_ns": 15745895
+        },
+        {
+          "run": 0,
+          "sample": 9,
+          "normal_ns": 15529628,
+          "profiled_ns": 15725496
+        },
+        {
+          "run": 0,
+          "sample": 10,
+          "normal_ns": 15653472,
+          "profiled_ns": 15783666
+        },
+        {
+          "run": 0,
+          "sample": 11,
+          "normal_ns": 15566248,
+          "profiled_ns": 15690150
+        },
+        {
+          "run": 0,
+          "sample": 12,
+          "normal_ns": 15579262,
+          "profiled_ns": 15776122
+        },
+        {
+          "run": 0,
+          "sample": 13,
+          "normal_ns": 15583850,
+          "profiled_ns": 15711721
+        },
+        {
+          "run": 0,
+          "sample": 14,
+          "normal_ns": 15631471,
+          "profiled_ns": 15787202
+        },
+        {
+          "run": 0,
+          "sample": 15,
+          "normal_ns": 15635869,
+          "profiled_ns": 15735706
+        },
+        {
+          "run": 0,
+          "sample": 16,
+          "normal_ns": 15586776,
+          "profiled_ns": 15757517
+        },
+        {
+          "run": 0,
+          "sample": 17,
+          "normal_ns": 15503791,
+          "profiled_ns": 15776823
+        },
+        {
+          "run": 0,
+          "sample": 18,
+          "normal_ns": 15450190,
+          "profiled_ns": 15606233
+        },
+        {
+          "run": 0,
+          "sample": 19,
+          "normal_ns": 15358638,
+          "profiled_ns": 15567530
+        },
+        {
+          "run": 1,
+          "sample": 0,
+          "normal_ns": 15320106,
+          "profiled_ns": 15496847
+        },
+        {
+          "run": 1,
+          "sample": 1,
+          "normal_ns": 15330725,
+          "profiled_ns": 15620169
+        },
+        {
+          "run": 1,
+          "sample": 2,
+          "normal_ns": 15308394,
+          "profiled_ns": 15628675
+        },
+        {
+          "run": 1,
+          "sample": 3,
+          "normal_ns": 15277165,
+          "profiled_ns": 15470639
+        },
+        {
+          "run": 1,
+          "sample": 4,
+          "normal_ns": 15348498,
+          "profiled_ns": 15518098
+        },
+        {
+          "run": 1,
+          "sample": 5,
+          "normal_ns": 15333721,
+          "profiled_ns": 15579743
+        },
+        {
+          "run": 1,
+          "sample": 6,
+          "normal_ns": 15289337,
+          "profiled_ns": 15514120
+        },
+        {
+          "run": 1,
+          "sample": 7,
+          "normal_ns": 15294327,
+          "profiled_ns": 15507848
+        },
+        {
+          "run": 1,
+          "sample": 8,
+          "normal_ns": 15295459,
+          "profiled_ns": 15492850
+        },
+        {
+          "run": 1,
+          "sample": 9,
+          "normal_ns": 15333100,
+          "profiled_ns": 15461010
+        },
+        {
+          "run": 1,
+          "sample": 10,
+          "normal_ns": 15253681,
+          "profiled_ns": 15515662
+        },
+        {
+          "run": 1,
+          "sample": 11,
+          "normal_ns": 15278086,
+          "profiled_ns": 15462743
+        },
+        {
+          "run": 1,
+          "sample": 12,
+          "normal_ns": 15272155,
+          "profiled_ns": 15501125
+        },
+        {
+          "run": 1,
+          "sample": 13,
+          "normal_ns": 15309235,
+          "profiled_ns": 15508560
+        },
+        {
+          "run": 1,
+          "sample": 14,
+          "normal_ns": 15321638,
+          "profiled_ns": 15519170
+        },
+        {
+          "run": 1,
+          "sample": 15,
+          "normal_ns": 15374978,
+          "profiled_ns": 15506145
+        },
+        {
+          "run": 1,
+          "sample": 16,
+          "normal_ns": 15375960,
+          "profiled_ns": 15472141
+        },
+        {
+          "run": 1,
+          "sample": 17,
+          "normal_ns": 15380118,
+          "profiled_ns": 15531152
+        },
+        {
+          "run": 1,
+          "sample": 18,
+          "normal_ns": 15348509,
+          "profiled_ns": 15562821
+        },
+        {
+          "run": 1,
+          "sample": 19,
+          "normal_ns": 15364989,
+          "profiled_ns": 15579563
+        },
+        {
+          "run": 2,
+          "sample": 0,
+          "normal_ns": 15344811,
+          "profiled_ns": 15524951
+        },
+        {
+          "run": 2,
+          "sample": 1,
+          "normal_ns": 15333772,
+          "profiled_ns": 15555227
+        },
+        {
+          "run": 2,
+          "sample": 2,
+          "normal_ns": 15396730,
+          "profiled_ns": 15513588
+        },
+        {
+          "run": 2,
+          "sample": 3,
+          "normal_ns": 15389246,
+          "profiled_ns": 15605922
+        },
+        {
+          "run": 2,
+          "sample": 4,
+          "normal_ns": 15365651,
+          "profiled_ns": 15578802
+        },
+        {
+          "run": 2,
+          "sample": 5,
+          "normal_ns": 15287554,
+          "profiled_ns": 15531983
+        },
+        {
+          "run": 2,
+          "sample": 6,
+          "normal_ns": 15291261,
+          "profiled_ns": 15516164
+        },
+        {
+          "run": 2,
+          "sample": 7,
+          "normal_ns": 15361874,
+          "profiled_ns": 15496416
+        },
+        {
+          "run": 2,
+          "sample": 8,
+          "normal_ns": 15310617,
+          "profiled_ns": 15499802
+        },
+        {
+          "run": 2,
+          "sample": 9,
+          "normal_ns": 15344391,
+          "profiled_ns": 15488281
+        },
+        {
+          "run": 2,
+          "sample": 10,
+          "normal_ns": 15269951,
+          "profiled_ns": 15567880
+        },
+        {
+          "run": 2,
+          "sample": 11,
+          "normal_ns": 15481339,
+          "profiled_ns": 15462132
+        },
+        {
+          "run": 2,
+          "sample": 12,
+          "normal_ns": 15388614,
+          "profiled_ns": 15608247
+        },
+        {
+          "run": 2,
+          "sample": 13,
+          "normal_ns": 15357576,
+          "profiled_ns": 15583931
+        },
+        {
+          "run": 2,
+          "sample": 14,
+          "normal_ns": 15329714,
+          "profiled_ns": 15573201
+        },
+        {
+          "run": 2,
+          "sample": 15,
+          "normal_ns": 15336476,
+          "profiled_ns": 15512416
+        },
+        {
+          "run": 2,
+          "sample": 16,
+          "normal_ns": 15269350,
+          "profiled_ns": 15583229
+        },
+        {
+          "run": 2,
+          "sample": 17,
+          "normal_ns": 15323692,
+          "profiled_ns": 15495735
+        },
+        {
+          "run": 2,
+          "sample": 18,
+          "normal_ns": 15349781,
+          "profiled_ns": 15553554
+        },
+        {
+          "run": 2,
+          "sample": 19,
+          "normal_ns": 15357235,
+          "profiled_ns": 15516975
+        },
+        {
+          "run": 3,
+          "sample": 0,
+          "normal_ns": 15372714,
+          "profiled_ns": 15502428
+        },
+        {
+          "run": 3,
+          "sample": 1,
+          "normal_ns": 15339742,
+          "profiled_ns": 15555357
+        },
+        {
+          "run": 3,
+          "sample": 2,
+          "normal_ns": 15352126,
+          "profiled_ns": 15509351
+        },
+        {
+          "run": 3,
+          "sample": 3,
+          "normal_ns": 15348589,
+          "profiled_ns": 15505414
+        },
+        {
+          "run": 3,
+          "sample": 4,
+          "normal_ns": 15266986,
+          "profiled_ns": 15521363
+        },
+        {
+          "run": 3,
+          "sample": 5,
+          "normal_ns": 15328612,
+          "profiled_ns": 15600522
+        },
+        {
+          "run": 3,
+          "sample": 6,
+          "normal_ns": 15301861,
+          "profiled_ns": 15501416
+        },
+        {
+          "run": 3,
+          "sample": 7,
+          "normal_ns": 15359709,
+          "profiled_ns": 15571497
+        },
+        {
+          "run": 3,
+          "sample": 8,
+          "normal_ns": 15379767,
+          "profiled_ns": 15511364
+        },
+        {
+          "run": 3,
+          "sample": 9,
+          "normal_ns": 15311810,
+          "profiled_ns": 15579392
+        },
+        {
+          "run": 3,
+          "sample": 10,
+          "normal_ns": 15395277,
+          "profiled_ns": 15564835
+        },
+        {
+          "run": 3,
+          "sample": 11,
+          "normal_ns": 15363157,
+          "profiled_ns": 15514600
+        },
+        {
+          "run": 3,
+          "sample": 12,
+          "normal_ns": 15402550,
+          "profiled_ns": 15453997
+        },
+        {
+          "run": 3,
+          "sample": 13,
+          "normal_ns": 15304215,
+          "profiled_ns": 15501235
+        },
+        {
+          "run": 3,
+          "sample": 14,
+          "normal_ns": 15328992,
+          "profiled_ns": 15516755
+        },
+        {
+          "run": 3,
+          "sample": 15,
+          "normal_ns": 15360031,
+          "profiled_ns": 15486818
+        },
+        {
+          "run": 3,
+          "sample": 16,
+          "normal_ns": 15354680,
+          "profiled_ns": 15540189
+        },
+        {
+          "run": 3,
+          "sample": 17,
+          "normal_ns": 15318813,
+          "profiled_ns": 15505454
+        },
+        {
+          "run": 3,
+          "sample": 18,
+          "normal_ns": 15334793,
+          "profiled_ns": 15529319
+        },
+        {
+          "run": 3,
+          "sample": 19,
+          "normal_ns": 15334101,
+          "profiled_ns": 15473354
+        },
+        {
+          "run": 4,
+          "sample": 0,
+          "normal_ns": 15430322,
+          "profiled_ns": 15604850
+        },
+        {
+          "run": 4,
+          "sample": 1,
+          "normal_ns": 15370620,
+          "profiled_ns": 15650025
+        },
+        {
+          "run": 4,
+          "sample": 2,
+          "normal_ns": 15383354,
+          "profiled_ns": 15522295
+        },
+        {
+          "run": 4,
+          "sample": 3,
+          "normal_ns": 15380589,
+          "profiled_ns": 15574724
+        },
+        {
+          "run": 4,
+          "sample": 4,
+          "normal_ns": 15467813,
+          "profiled_ns": 15687265
+        },
+        {
+          "run": 4,
+          "sample": 5,
+          "normal_ns": 15402951,
+          "profiled_ns": 15648202
+        },
+        {
+          "run": 4,
+          "sample": 6,
+          "normal_ns": 15388675,
+          "profiled_ns": 15514961
+        },
+        {
+          "run": 4,
+          "sample": 7,
+          "normal_ns": 15365871,
+          "profiled_ns": 15564605
+        },
+        {
+          "run": 4,
+          "sample": 8,
+          "normal_ns": 15318572,
+          "profiled_ns": 15542533
+        },
+        {
+          "run": 4,
+          "sample": 9,
+          "normal_ns": 15394094,
+          "profiled_ns": 15543134
+        },
+        {
+          "run": 4,
+          "sample": 10,
+          "normal_ns": 15319134,
+          "profiled_ns": 15600572
+        },
+        {
+          "run": 4,
+          "sample": 11,
+          "normal_ns": 15361172,
+          "profiled_ns": 15554505
+        },
+        {
+          "run": 4,
+          "sample": 12,
+          "normal_ns": 15348769,
+          "profiled_ns": 15543305
+        },
+        {
+          "run": 4,
+          "sample": 13,
+          "normal_ns": 15392020,
+          "profiled_ns": 15571227
+        },
+        {
+          "run": 4,
+          "sample": 14,
+          "normal_ns": 15322339,
+          "profiled_ns": 15533386
+        },
+        {
+          "run": 4,
+          "sample": 15,
+          "normal_ns": 15315487,
+          "profiled_ns": 15565837
+        },
+        {
+          "run": 4,
+          "sample": 16,
+          "normal_ns": 15368917,
+          "profiled_ns": 15514731
+        },
+        {
+          "run": 4,
+          "sample": 17,
+          "normal_ns": 15343039,
+          "profiled_ns": 15653942
+        },
+        {
+          "run": 4,
+          "sample": 18,
+          "normal_ns": 15382703,
+          "profiled_ns": 15555688
+        },
+        {
+          "run": 4,
+          "sample": 19,
+          "normal_ns": 15414402,
+          "profiled_ns": 15599039
+        }
+      ],
+      "summary": {
+        "normal": {
+          "median_ns": 15358107.0,
+          "p95_ns": 15583881,
+          "maximum_ns": 15653472,
+          "run_medians_ns": [
+            15542983.5,
+            15320872.0,
+            15344601.0,
+            15344165.5,
+            15375604.5
+          ]
+        },
+        "profiled": {
+          "median_ns": 15554866.0,
+          "p95_ns": 15745895,
+          "maximum_ns": 15787202,
+          "run_medians_ns": [
+            15680918.0,
+            15511340.0,
+            15528467.0,
+            15512982.0,
+            15565221.0
+          ]
+        }
+      },
+      "median_overhead_percent": 1.281140963531513,
+      "peak_rss_bytes": 3932160,
+      "records": 19
+    },
+    "many_draws": {
+      "samples": [
+        {
+          "run": 0,
+          "sample": 0,
+          "normal_ns": 4220818,
+          "profiled_ns": 4228943
+        },
+        {
+          "run": 0,
+          "sample": 1,
+          "normal_ns": 4246737,
+          "profiled_ns": 4265732
+        },
+        {
+          "run": 0,
+          "sample": 2,
+          "normal_ns": 4265692,
+          "profiled_ns": 4313643
+        },
+        {
+          "run": 0,
+          "sample": 3,
+          "normal_ns": 4304916,
+          "profiled_ns": 4278186
+        },
+        {
+          "run": 0,
+          "sample": 4,
+          "normal_ns": 4306640,
+          "profiled_ns": 4307661
+        },
+        {
+          "run": 0,
+          "sample": 5,
+          "normal_ns": 4306790,
+          "profiled_ns": 4328790
+        },
+        {
+          "run": 0,
+          "sample": 6,
+          "normal_ns": 4300758,
+          "profiled_ns": 4336475
+        },
+        {
+          "run": 0,
+          "sample": 7,
+          "normal_ns": 4325254,
+          "profiled_ns": 4321807
+        },
+        {
+          "run": 0,
+          "sample": 8,
+          "normal_ns": 4308873,
+          "profiled_ns": 4346043
+        },
+        {
+          "run": 0,
+          "sample": 9,
+          "normal_ns": 4326827,
+          "profiled_ns": 4321067
+        },
+        {
+          "run": 0,
+          "sample": 10,
+          "normal_ns": 4334111,
+          "profiled_ns": 4359358
+        },
+        {
+          "run": 0,
+          "sample": 11,
+          "normal_ns": 4327238,
+          "profiled_ns": 4370128
+        },
+        {
+          "run": 0,
+          "sample": 12,
+          "normal_ns": 4357304,
+          "profiled_ns": 4330994
+        },
+        {
+          "run": 0,
+          "sample": 13,
+          "normal_ns": 4343699,
+          "profiled_ns": 4356713
+        },
+        {
+          "run": 0,
+          "sample": 14,
+          "normal_ns": 4346443,
+          "profiled_ns": 4337186
+        },
+        {
+          "run": 0,
+          "sample": 15,
+          "normal_ns": 4344911,
+          "profiled_ns": 4366682
+        },
+        {
+          "run": 0,
+          "sample": 16,
+          "normal_ns": 4327238,
+          "profiled_ns": 4349059
+        },
+        {
+          "run": 0,
+          "sample": 17,
+          "normal_ns": 4338639,
+          "profiled_ns": 4363876
+        },
+        {
+          "run": 0,
+          "sample": 18,
+          "normal_ns": 4340613,
+          "profiled_ns": 4369377
+        },
+        {
+          "run": 0,
+          "sample": 19,
+          "normal_ns": 4357885,
+          "profiled_ns": 4335934
+        },
+        {
+          "run": 1,
+          "sample": 0,
+          "normal_ns": 4348768,
+          "profiled_ns": 4356313
+        },
+        {
+          "run": 1,
+          "sample": 1,
+          "normal_ns": 4359478,
+          "profiled_ns": 4366061
+        },
+        {
+          "run": 1,
+          "sample": 2,
+          "normal_ns": 4361071,
+          "profiled_ns": 4356012
+        },
+        {
+          "run": 1,
+          "sample": 3,
+          "normal_ns": 4358276,
+          "profiled_ns": 4353547
+        },
+        {
+          "run": 1,
+          "sample": 4,
+          "normal_ns": 4330233,
+          "profiled_ns": 4356393
+        },
+        {
+          "run": 1,
+          "sample": 5,
+          "normal_ns": 4352866,
+          "profiled_ns": 4355701
+        },
+        {
+          "run": 1,
+          "sample": 6,
+          "normal_ns": 4345873,
+          "profiled_ns": 4343709
+        },
+        {
+          "run": 1,
+          "sample": 7,
+          "normal_ns": 4353497,
+          "profiled_ns": 4360180
+        },
+        {
+          "run": 1,
+          "sample": 8,
+          "normal_ns": 4339381,
+          "profiled_ns": 4367333
+        },
+        {
+          "run": 1,
+          "sample": 9,
+          "normal_ns": 4365179,
+          "profiled_ns": 4342787
+        },
+        {
+          "run": 1,
+          "sample": 10,
+          "normal_ns": 4437024,
+          "profiled_ns": 4380006
+        },
+        {
+          "run": 1,
+          "sample": 11,
+          "normal_ns": 4572499,
+          "profiled_ns": 4403631
+        },
+        {
+          "run": 1,
+          "sample": 12,
+          "normal_ns": 4384966,
+          "profiled_ns": 4394504
+        },
+        {
+          "run": 1,
+          "sample": 13,
+          "normal_ns": 4377062,
+          "profiled_ns": 4370759
+        },
+        {
+          "run": 1,
+          "sample": 14,
+          "normal_ns": 4353337,
+          "profiled_ns": 4397049
+        },
+        {
+          "run": 1,
+          "sample": 15,
+          "normal_ns": 4376230,
+          "profiled_ns": 4394714
+        },
+        {
+          "run": 1,
+          "sample": 16,
+          "normal_ns": 4364608,
+          "profiled_ns": 4376471
+        },
+        {
+          "run": 1,
+          "sample": 17,
+          "normal_ns": 4362795,
+          "profiled_ns": 4369347
+        },
+        {
+          "run": 1,
+          "sample": 18,
+          "normal_ns": 4370109,
+          "profiled_ns": 4370108
+        },
+        {
+          "run": 1,
+          "sample": 19,
+          "normal_ns": 4396618,
+          "profiled_ns": 4367293
+        },
+        {
+          "run": 2,
+          "sample": 0,
+          "normal_ns": 4379236,
+          "profiled_ns": 4371671
+        },
+        {
+          "run": 2,
+          "sample": 1,
+          "normal_ns": 4355701,
+          "profiled_ns": 4395837
+        },
+        {
+          "run": 2,
+          "sample": 2,
+          "normal_ns": 4388743,
+          "profiled_ns": 4380117
+        },
+        {
+          "run": 2,
+          "sample": 3,
+          "normal_ns": 4366492,
+          "profiled_ns": 4382582
+        },
+        {
+          "run": 2,
+          "sample": 4,
+          "normal_ns": 4366592,
+          "profiled_ns": 4382412
+        },
+        {
+          "run": 2,
+          "sample": 5,
+          "normal_ns": 4385126,
+          "profiled_ns": 4384856
+        },
+        {
+          "run": 2,
+          "sample": 6,
+          "normal_ns": 4372633,
+          "profiled_ns": 4374657
+        },
+        {
+          "run": 2,
+          "sample": 7,
+          "normal_ns": 4368014,
+          "profiled_ns": 4372844
+        },
+        {
+          "run": 2,
+          "sample": 8,
+          "normal_ns": 4378173,
+          "profiled_ns": 4394785
+        },
+        {
+          "run": 2,
+          "sample": 9,
+          "normal_ns": 4387070,
+          "profiled_ns": 4385647
+        },
+        {
+          "run": 2,
+          "sample": 10,
+          "normal_ns": 4367634,
+          "profiled_ns": 4455659
+        },
+        {
+          "run": 2,
+          "sample": 11,
+          "normal_ns": 4379857,
+          "profiled_ns": 4432265
+        },
+        {
+          "run": 2,
+          "sample": 12,
+          "normal_ns": 4375679,
+          "profiled_ns": 4374026
+        },
+        {
+          "run": 2,
+          "sample": 13,
+          "normal_ns": 4357144,
+          "profiled_ns": 4402890
+        },
+        {
+          "run": 2,
+          "sample": 14,
+          "normal_ns": 4372272,
+          "profiled_ns": 4479834
+        },
+        {
+          "run": 2,
+          "sample": 15,
+          "normal_ns": 4367323,
+          "profiled_ns": 4397109
+        },
+        {
+          "run": 2,
+          "sample": 16,
+          "normal_ns": 4352385,
+          "profiled_ns": 4381089
+        },
+        {
+          "run": 2,
+          "sample": 17,
+          "normal_ns": 4343980,
+          "profiled_ns": 4374967
+        },
+        {
+          "run": 2,
+          "sample": 18,
+          "normal_ns": 4364769,
+          "profiled_ns": 4368165
+        },
+        {
+          "run": 2,
+          "sample": 19,
+          "normal_ns": 4367293,
+          "profiled_ns": 4395045
+        },
+        {
+          "run": 3,
+          "sample": 0,
+          "normal_ns": 4349589,
+          "profiled_ns": 4380388
+        },
+        {
+          "run": 3,
+          "sample": 1,
+          "normal_ns": 4357946,
+          "profiled_ns": 4384515
+        },
+        {
+          "run": 3,
+          "sample": 2,
+          "normal_ns": 4387511,
+          "profiled_ns": 4391128
+        },
+        {
+          "run": 3,
+          "sample": 3,
+          "normal_ns": 4365309,
+          "profiled_ns": 4371501
+        },
+        {
+          "run": 3,
+          "sample": 4,
+          "normal_ns": 4388182,
+          "profiled_ns": 4373625
+        },
+        {
+          "run": 3,
+          "sample": 5,
+          "normal_ns": 4373785,
+          "profiled_ns": 4429039
+        },
+        {
+          "run": 3,
+          "sample": 6,
+          "normal_ns": 4350121,
+          "profiled_ns": 4355220
+        },
+        {
+          "run": 3,
+          "sample": 7,
+          "normal_ns": 4364268,
+          "profiled_ns": 4362704
+        },
+        {
+          "run": 3,
+          "sample": 8,
+          "normal_ns": 4356403,
+          "profiled_ns": 4368916
+        },
+        {
+          "run": 3,
+          "sample": 9,
+          "normal_ns": 4343979,
+          "profiled_ns": 4343037
+        },
+        {
+          "run": 3,
+          "sample": 10,
+          "normal_ns": 4353477,
+          "profiled_ns": 4366311
+        },
+        {
+          "run": 3,
+          "sample": 11,
+          "normal_ns": 4364297,
+          "profiled_ns": 4362274
+        },
+        {
+          "run": 3,
+          "sample": 12,
+          "normal_ns": 4361612,
+          "profiled_ns": 4359769
+        },
+        {
+          "run": 3,
+          "sample": 13,
+          "normal_ns": 4358366,
+          "profiled_ns": 4359468
+        },
+        {
+          "run": 3,
+          "sample": 14,
+          "normal_ns": 4359589,
+          "profiled_ns": 4355881
+        },
+        {
+          "run": 3,
+          "sample": 15,
+          "normal_ns": 4368496,
+          "profiled_ns": 4361071
+        },
+        {
+          "run": 3,
+          "sample": 16,
+          "normal_ns": 4367593,
+          "profiled_ns": 4369588
+        },
+        {
+          "run": 3,
+          "sample": 17,
+          "normal_ns": 4341224,
+          "profiled_ns": 4353567
+        },
+        {
+          "run": 3,
+          "sample": 18,
+          "normal_ns": 4346093,
+          "profiled_ns": 4367223
+        },
+        {
+          "run": 3,
+          "sample": 19,
+          "normal_ns": 4353377,
+          "profiled_ns": 4358387
+        },
+        {
+          "run": 4,
+          "sample": 0,
+          "normal_ns": 4345773,
+          "profiled_ns": 4365470
+        },
+        {
+          "run": 4,
+          "sample": 1,
+          "normal_ns": 4355380,
+          "profiled_ns": 4361803
+        },
+        {
+          "run": 4,
+          "sample": 2,
+          "normal_ns": 4351563,
+          "profiled_ns": 4354008
+        },
+        {
+          "run": 4,
+          "sample": 3,
+          "normal_ns": 4349279,
+          "profiled_ns": 4355761
+        },
+        {
+          "run": 4,
+          "sample": 4,
+          "normal_ns": 4340432,
+          "profiled_ns": 4374466
+        },
+        {
+          "run": 4,
+          "sample": 5,
+          "normal_ns": 4347556,
+          "profiled_ns": 4370960
+        },
+        {
+          "run": 4,
+          "sample": 6,
+          "normal_ns": 4371400,
+          "profiled_ns": 4370970
+        },
+        {
+          "run": 4,
+          "sample": 7,
+          "normal_ns": 4580494,
+          "profiled_ns": 4379355
+        },
+        {
+          "run": 4,
+          "sample": 8,
+          "normal_ns": 4457833,
+          "profiled_ns": 4381931
+        },
+        {
+          "run": 4,
+          "sample": 9,
+          "normal_ns": 4363916,
+          "profiled_ns": 4361352
+        },
+        {
+          "run": 4,
+          "sample": 10,
+          "normal_ns": 4369728,
+          "profiled_ns": 4398632
+        },
+        {
+          "run": 4,
+          "sample": 11,
+          "normal_ns": 4352074,
+          "profiled_ns": 4382591
+        },
+        {
+          "run": 4,
+          "sample": 12,
+          "normal_ns": 4358696,
+          "profiled_ns": 4379075
+        },
+        {
+          "run": 4,
+          "sample": 13,
+          "normal_ns": 4386649,
+          "profiled_ns": 4371541
+        },
+        {
+          "run": 4,
+          "sample": 14,
+          "normal_ns": 4363707,
+          "profiled_ns": 4388122
+        },
+        {
+          "run": 4,
+          "sample": 15,
+          "normal_ns": 4355822,
+          "profiled_ns": 4377943
+        },
+        {
+          "run": 4,
+          "sample": 16,
+          "normal_ns": 4348438,
+          "profiled_ns": 4365440
+        },
+        {
+          "run": 4,
+          "sample": 17,
+          "normal_ns": 4359819,
+          "profiled_ns": 4376941
+        },
+        {
+          "run": 4,
+          "sample": 18,
+          "normal_ns": 4365139,
+          "profiled_ns": 4372312
+        },
+        {
+          "run": 4,
+          "sample": 19,
+          "normal_ns": 4383103,
+          "profiled_ns": 4379255
+        }
+      ],
+      "summary": {
+        "normal": {
+          "median_ns": 4358321.0,
+          "p95_ns": 4388743,
+          "maximum_ns": 4580494,
+          "run_medians_ns": [
+            4327032.5,
+            4361933.0,
+            4367824.0,
+            4358977.5,
+            4359257.5
+          ]
+        },
+        "profiled": {
+          "median_ns": 4369362.0,
+          "p95_ns": 4402890,
+          "maximum_ns": 4479834,
+          "run_medians_ns": [
+            4336204.5,
+            4367313.0,
+            4383719.0,
+            4364507.5,
+            4373389.0
+          ]
+        }
+      },
+      "median_overhead_percent": 0.25333150082336164,
+      "peak_rss_bytes": 4194304,
+      "records": 259
+    },
+    "clipping": {
+      "samples": [
+        {
+          "run": 0,
+          "sample": 0,
+          "normal_ns": 1007503,
+          "profiled_ns": 1012642
+        },
+        {
+          "run": 0,
+          "sample": 1,
+          "normal_ns": 1021168,
+          "profiled_ns": 1018083
+        },
+        {
+          "run": 0,
+          "sample": 2,
+          "normal_ns": 1013824,
+          "profiled_ns": 1016289
+        },
+        {
+          "run": 0,
+          "sample": 3,
+          "normal_ns": 1036086,
+          "profiled_ns": 1004827
+        },
+        {
+          "run": 0,
+          "sample": 4,
+          "normal_ns": 1019395,
+          "profiled_ns": 1019966
+        },
+        {
+          "run": 0,
+          "sample": 5,
+          "normal_ns": 1039783,
+          "profiled_ns": 1046706
+        },
+        {
+          "run": 0,
+          "sample": 6,
+          "normal_ns": 1036337,
+          "profiled_ns": 1026578
+        },
+        {
+          "run": 0,
+          "sample": 7,
+          "normal_ns": 1035615,
+          "profiled_ns": 1038912
+        },
+        {
+          "run": 0,
+          "sample": 8,
+          "normal_ns": 1046385,
+          "profiled_ns": 1046786
+        },
+        {
+          "run": 0,
+          "sample": 9,
+          "normal_ns": 1048509,
+          "profiled_ns": 1039904
+        },
+        {
+          "run": 0,
+          "sample": 10,
+          "normal_ns": 1052096,
+          "profiled_ns": 1036347
+        },
+        {
+          "run": 0,
+          "sample": 11,
+          "normal_ns": 1058348,
+          "profiled_ns": 1037609
+        },
+        {
+          "run": 0,
+          "sample": 12,
+          "normal_ns": 1060993,
+          "profiled_ns": 1062936
+        },
+        {
+          "run": 0,
+          "sample": 13,
+          "normal_ns": 1061975,
+          "profiled_ns": 1059259
+        },
+        {
+          "run": 0,
+          "sample": 14,
+          "normal_ns": 1054651,
+          "profiled_ns": 1062416
+        },
+        {
+          "run": 0,
+          "sample": 15,
+          "normal_ns": 1057547,
+          "profiled_ns": 1057556
+        },
+        {
+          "run": 0,
+          "sample": 16,
+          "normal_ns": 1056845,
+          "profiled_ns": 1049201
+        },
+        {
+          "run": 0,
+          "sample": 17,
+          "normal_ns": 1060792,
+          "profiled_ns": 1049622
+        },
+        {
+          "run": 0,
+          "sample": 18,
+          "normal_ns": 1057477,
+          "profiled_ns": 1047317
+        },
+        {
+          "run": 0,
+          "sample": 19,
+          "normal_ns": 1066323,
+          "profiled_ns": 1052186
+        },
+        {
+          "run": 1,
+          "sample": 0,
+          "normal_ns": 1065762,
+          "profiled_ns": 1062165
+        },
+        {
+          "run": 1,
+          "sample": 1,
+          "normal_ns": 1071172,
+          "profiled_ns": 1056976
+        },
+        {
+          "run": 1,
+          "sample": 2,
+          "normal_ns": 1076813,
+          "profiled_ns": 1058458
+        },
+        {
+          "run": 1,
+          "sample": 3,
+          "normal_ns": 1074809,
+          "profiled_ns": 1062135
+        },
+        {
+          "run": 1,
+          "sample": 4,
+          "normal_ns": 1069138,
+          "profiled_ns": 1058328
+        },
+        {
+          "run": 1,
+          "sample": 5,
+          "normal_ns": 1078395,
+          "profiled_ns": 1075349
+        },
+        {
+          "run": 1,
+          "sample": 6,
+          "normal_ns": 1072515,
+          "profiled_ns": 1057095
+        },
+        {
+          "run": 1,
+          "sample": 7,
+          "normal_ns": 1067295,
+          "profiled_ns": 1063858
+        },
+        {
+          "run": 1,
+          "sample": 8,
+          "normal_ns": 1077454,
+          "profiled_ns": 1074268
+        },
+        {
+          "run": 1,
+          "sample": 9,
+          "normal_ns": 1084537,
+          "profiled_ns": 1070961
+        },
+        {
+          "run": 1,
+          "sample": 10,
+          "normal_ns": 1077163,
+          "profiled_ns": 1060792
+        },
+        {
+          "run": 1,
+          "sample": 11,
+          "normal_ns": 1082142,
+          "profiled_ns": 1066153
+        },
+        {
+          "run": 1,
+          "sample": 12,
+          "normal_ns": 1074659,
+          "profiled_ns": 1070110
+        },
+        {
+          "run": 1,
+          "sample": 13,
+          "normal_ns": 1077534,
+          "profiled_ns": 1068918
+        },
+        {
+          "run": 1,
+          "sample": 14,
+          "normal_ns": 1088404,
+          "profiled_ns": 1071583
+        },
+        {
+          "run": 1,
+          "sample": 15,
+          "normal_ns": 1079277,
+          "profiled_ns": 1064800
+        },
+        {
+          "run": 1,
+          "sample": 16,
+          "normal_ns": 1080710,
+          "profiled_ns": 1065541
+        },
+        {
+          "run": 1,
+          "sample": 17,
+          "normal_ns": 1075661,
+          "profiled_ns": 1068567
+        },
+        {
+          "run": 1,
+          "sample": 18,
+          "normal_ns": 1079197,
+          "profiled_ns": 1061665
+        },
+        {
+          "run": 1,
+          "sample": 19,
+          "normal_ns": 1079167,
+          "profiled_ns": 1064189
+        },
+        {
+          "run": 2,
+          "sample": 0,
+          "normal_ns": 1072765,
+          "profiled_ns": 1066072
+        },
+        {
+          "run": 2,
+          "sample": 1,
+          "normal_ns": 1083145,
+          "profiled_ns": 1080098
+        },
+        {
+          "run": 2,
+          "sample": 2,
+          "normal_ns": 1083005,
+          "profiled_ns": 1069879
+        },
+        {
+          "run": 2,
+          "sample": 3,
+          "normal_ns": 1080158,
+          "profiled_ns": 1073206
+        },
+        {
+          "run": 2,
+          "sample": 4,
+          "normal_ns": 1084617,
+          "profiled_ns": 1082503
+        },
+        {
+          "run": 2,
+          "sample": 5,
+          "normal_ns": 1087412,
+          "profiled_ns": 1080990
+        },
+        {
+          "run": 2,
+          "sample": 6,
+          "normal_ns": 1085219,
+          "profiled_ns": 1067555
+        },
+        {
+          "run": 2,
+          "sample": 7,
+          "normal_ns": 1085559,
+          "profiled_ns": 1069679
+        },
+        {
+          "run": 2,
+          "sample": 8,
+          "normal_ns": 1091901,
+          "profiled_ns": 1063728
+        },
+        {
+          "run": 2,
+          "sample": 9,
+          "normal_ns": 1081291,
+          "profiled_ns": 1073226
+        },
+        {
+          "run": 2,
+          "sample": 10,
+          "normal_ns": 1081091,
+          "profiled_ns": 1066954
+        },
+        {
+          "run": 2,
+          "sample": 11,
+          "normal_ns": 1088915,
+          "profiled_ns": 1077213
+        },
+        {
+          "run": 2,
+          "sample": 12,
+          "normal_ns": 1084848,
+          "profiled_ns": 1078255
+        },
+        {
+          "run": 2,
+          "sample": 13,
+          "normal_ns": 1094305,
+          "profiled_ns": 1076252
+        },
+        {
+          "run": 2,
+          "sample": 14,
+          "normal_ns": 1081101,
+          "profiled_ns": 1070811
+        },
+        {
+          "run": 2,
+          "sample": 15,
+          "normal_ns": 1087483,
+          "profiled_ns": 1082203
+        },
+        {
+          "run": 2,
+          "sample": 16,
+          "normal_ns": 1077785,
+          "profiled_ns": 1080489
+        },
+        {
+          "run": 2,
+          "sample": 17,
+          "normal_ns": 1099615,
+          "profiled_ns": 1071823
+        },
+        {
+          "run": 2,
+          "sample": 18,
+          "normal_ns": 1089266,
+          "profiled_ns": 1085349
+        },
+        {
+          "run": 2,
+          "sample": 19,
+          "normal_ns": 1075791,
+          "profiled_ns": 1072595
+        },
+        {
+          "run": 3,
+          "sample": 0,
+          "normal_ns": 1087292,
+          "profiled_ns": 1080560
+        },
+        {
+          "run": 3,
+          "sample": 1,
+          "normal_ns": 1083255,
+          "profiled_ns": 1070580
+        },
+        {
+          "run": 3,
+          "sample": 2,
+          "normal_ns": 1088835,
+          "profiled_ns": 1076642
+        },
+        {
+          "run": 3,
+          "sample": 3,
+          "normal_ns": 1086090,
+          "profiled_ns": 1085349
+        },
+        {
+          "run": 3,
+          "sample": 4,
+          "normal_ns": 1078225,
+          "profiled_ns": 1080881
+        },
+        {
+          "run": 3,
+          "sample": 5,
+          "normal_ns": 1085479,
+          "profiled_ns": 1065361
+        },
+        {
+          "run": 3,
+          "sample": 6,
+          "normal_ns": 1093083,
+          "profiled_ns": 1066553
+        },
+        {
+          "run": 3,
+          "sample": 7,
+          "normal_ns": 1102180,
+          "profiled_ns": 1081061
+        },
+        {
+          "run": 3,
+          "sample": 8,
+          "normal_ns": 1093484,
+          "profiled_ns": 1087012
+        },
+        {
+          "run": 3,
+          "sample": 9,
+          "normal_ns": 1083515,
+          "profiled_ns": 1072755
+        },
+        {
+          "run": 3,
+          "sample": 10,
+          "normal_ns": 1082794,
+          "profiled_ns": 1069058
+        },
+        {
+          "run": 3,
+          "sample": 11,
+          "normal_ns": 1087603,
+          "profiled_ns": 1083034
+        },
+        {
+          "run": 3,
+          "sample": 12,
+          "normal_ns": 1095227,
+          "profiled_ns": 1077313
+        },
+        {
+          "run": 3,
+          "sample": 13,
+          "normal_ns": 1082994,
+          "profiled_ns": 1080490
+        },
+        {
+          "run": 3,
+          "sample": 14,
+          "normal_ns": 1083034,
+          "profiled_ns": 1076923
+        },
+        {
+          "run": 3,
+          "sample": 15,
+          "normal_ns": 1089176,
+          "profiled_ns": 1079548
+        },
+        {
+          "run": 3,
+          "sample": 16,
+          "normal_ns": 1087252,
+          "profiled_ns": 1082323
+        },
+        {
+          "run": 3,
+          "sample": 17,
+          "normal_ns": 1085569,
+          "profiled_ns": 1068928
+        },
+        {
+          "run": 3,
+          "sample": 18,
+          "normal_ns": 1085018,
+          "profiled_ns": 1079879
+        },
+        {
+          "run": 3,
+          "sample": 19,
+          "normal_ns": 1093664,
+          "profiled_ns": 1082373
+        },
+        {
+          "run": 4,
+          "sample": 0,
+          "normal_ns": 1079898,
+          "profiled_ns": 1080630
+        },
+        {
+          "run": 4,
+          "sample": 1,
+          "normal_ns": 1108001,
+          "profiled_ns": 1076632
+        },
+        {
+          "run": 4,
+          "sample": 2,
+          "normal_ns": 1091810,
+          "profiled_ns": 1071131
+        },
+        {
+          "run": 4,
+          "sample": 3,
+          "normal_ns": 1085930,
+          "profiled_ns": 1077564
+        },
+        {
+          "run": 4,
+          "sample": 4,
+          "normal_ns": 1085830,
+          "profiled_ns": 1083215
+        },
+        {
+          "run": 4,
+          "sample": 5,
+          "normal_ns": 1080660,
+          "profiled_ns": 1092522
+        },
+        {
+          "run": 4,
+          "sample": 6,
+          "normal_ns": 1074468,
+          "profiled_ns": 1070090
+        },
+        {
+          "run": 4,
+          "sample": 7,
+          "normal_ns": 1073086,
+          "profiled_ns": 1068827
+        },
+        {
+          "run": 4,
+          "sample": 8,
+          "normal_ns": 1074337,
+          "profiled_ns": 1063527
+        },
+        {
+          "run": 4,
+          "sample": 9,
+          "normal_ns": 1076091,
+          "profiled_ns": 1067315
+        },
+        {
+          "run": 4,
+          "sample": 10,
+          "normal_ns": 1072654,
+          "profiled_ns": 1055733
+        },
+        {
+          "run": 4,
+          "sample": 11,
+          "normal_ns": 1082393,
+          "profiled_ns": 1068347
+        },
+        {
+          "run": 4,
+          "sample": 12,
+          "normal_ns": 1075981,
+          "profiled_ns": 1055672
+        },
+        {
+          "run": 4,
+          "sample": 13,
+          "normal_ns": 1078486,
+          "profiled_ns": 1057987
+        },
+        {
+          "run": 4,
+          "sample": 14,
+          "normal_ns": 1075690,
+          "profiled_ns": 1053279
+        },
+        {
+          "run": 4,
+          "sample": 15,
+          "normal_ns": 1073396,
+          "profiled_ns": 1058569
+        },
+        {
+          "run": 4,
+          "sample": 16,
+          "normal_ns": 1078716,
+          "profiled_ns": 1068867
+        },
+        {
+          "run": 4,
+          "sample": 17,
+          "normal_ns": 1063978,
+          "profiled_ns": 1065642
+        },
+        {
+          "run": 4,
+          "sample": 18,
+          "normal_ns": 1069799,
+          "profiled_ns": 1065722
+        },
+        {
+          "run": 4,
+          "sample": 19,
+          "normal_ns": 1074488,
+          "profiled_ns": 1065160
+        }
+      ],
+      "summary": {
+        "normal": {
+          "median_ns": 1078941.5,
+          "p95_ns": 1093664,
+          "maximum_ns": 1108001,
+          "run_medians_ns": [
+            1050302.5,
+            1077308.5,
+            1084732.5,
+            1086671.0,
+            1076036.0
+          ]
+        },
+        "profiled": {
+          "median_ns": 1068457.0,
+          "p95_ns": 1083034,
+          "maximum_ns": 1092522,
+          "run_medians_ns": [
+            1043305.0,
+            1064494.5,
+            1073216.0,
+            1079713.5,
+            1067831.0
+          ]
+        }
+      },
+      "median_overhead_percent": -0.971739431655938,
+      "peak_rss_bytes": 3932160,
+      "records": 7
+    }
+  }
+}
