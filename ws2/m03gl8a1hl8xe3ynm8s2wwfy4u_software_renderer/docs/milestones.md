@@ -93,6 +93,19 @@ Status: unstarted.
 - Open decisions: interpolation metadata and linking, provoking-vertex rules through clipping/topology assembly, mip storage/generation, and LOD filtering. Keep reflection changes in shader, execution in software_shader, interpolation in the renderer, and sampling in texture.
 - Acceptance criteria: flat values remain constant across clipped primitives, screen-linear and perspective interpolation visibly differ as intended, and explicit LOD selects/blends validated mip levels. Automatic derivative-based LOD is a separate later decision.
 
+## 6. Measurement and incremental optimization
+
+Status: unstarted.
+
+- Outcome: each optimization delivery demonstrates its effect through repeatable measurements while preserving rendering correctness.
+- Measurement module: introduce a separate module responsible for collecting measurements, summarizing repeated runs, and comparing deliveries. Renderer-specific workloads and correctness expectations remain with the renderer.
+- Metrics: track median and high-percentile CPU render time, plus peak memory use, across a small, stable set of representative headless workloads. Keep the measured scope consistent across deliveries.
+- Comparisons: record workload, resolution, rendering settings, hardware, build configuration, and source revision. Report absolute results, percentage changes, and run-to-run variation against both the previous delivery and the established baseline. New feature workloads establish their own baselines.
+- Delivery process: use measured results to select each bounded optimization. Every delivery includes the same comparison report and correctness evidence, making improvements, regressions, and tradeoffs visible. Specific optimization techniques remain undecided until measurements justify them.
+- Acceptance criteria: repeated runs establish measurement variability, and each optimization delivery has comparable before/after results with passing correctness validation.
+
+Establish the measurement baseline before the first delivery to be compared. Comparisons covering milestones 2–5 require the measurement foundation before those deliveries; the dedicated optimization phase remains at the end.
+
 ## Completion records
 
 For each milestone, append its settled decisions, implementation commit, checks actually run, and remaining limitations. Preserve the original baseline and add subsequent review and completion references; do not count planned features as implemented.
