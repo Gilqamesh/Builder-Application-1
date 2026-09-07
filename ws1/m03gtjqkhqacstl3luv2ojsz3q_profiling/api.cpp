@@ -1,18 +1,43 @@
 #include "api.h"
 
-#include <algorithm>
-#include <cassert>
-#include <stdexcept>
+#include <exception>
 
 namespace m03gtjqkhqacstl3luv2ojsz3q_profiling {
 
-profiler_t::profiler_t() noexcept:
-    m_enabled(true)
+metric_t::metric_t() noexcept = default;
+
+metric_t::metric_t(storage_t& storage, metric_base_t& metric) noexcept:
+    m_storage(&storage),
+    m_metric(&metric)
 {
 }
 
+metric_t::~metric_t() {
+    if (m_metric) {
+        if (m_storage->constructing || m_storage->active != m_metric) {
+            std::terminate();
+        }
+        stop();
+    }
+}
+
+metric_t::operator bool() const noexcept {
+    return m_metric != nullptr;
+}
+
+void metric_t::stop() {
+    if (m_metric) {
+        m_storage->stop(*m_metric);
+        m_metric = nullptr;
+    }
+}
+
+profiler_t::profiler_t() noexcept = default;
+
 profiler_t::~profiler_t() {
-    assert(std::none_of(m_metrics.begin(), m_metrics.end(), [](const auto& metric) { return metric->m_active; }));
+    if (m_storage.active || m_storage.constructing) {
+        std::terminate();
+    }
 }
 
 bool& profiler_t::enabled() noexcept {
@@ -24,49 +49,17 @@ const bool& profiler_t::enabled() const noexcept {
 }
 
 void profiler_t::report(std::ostream& out) const {
-    require_stopped();
-    out << std::format("Recording: {}\n", m_enabled ? "enabled" : "disabled");
-    if (m_metrics.empty()) {
-        out << "No completed metrics.\n";
+    m_storage.require_stopped();
+    if (m_storage.roots.empty()) {
+        out << (m_enabled ? "No measurements.\n" : "Profiling disabled.\n");
         return;
     }
-    const auto now = clock_now();
-    std::vector<const metric_base_t*> ordered;
-    ordered.reserve(m_metrics.size());
-    for (const auto& metric : m_metrics) {
-        ordered.push_back(metric.get());
-    }
-    std::stable_sort(ordered.begin(), ordered.end(), [](const auto* left, const auto* right) {
-        return right->m_total < left->m_total;
-    });
-    out << "Data: current; timing: since profiler construction; inclusive durations\n";
-    for (const auto* metric : ordered) {
-        metric->report(out);
-        metric->report_timing(out, now);
-    }
+    m_storage.report(out, clock_now());
 }
 
 std::size_t profiler_t::size() const {
-    require_stopped();
-    return m_metrics.size();
-}
-
-const metric_base_t* profiler_t::find(const std::type_info& type) const {
-    require_stopped();
-    for (const auto& metric : m_metrics) {
-        if (*metric->m_type == type) {
-            return metric.get();
-        }
-    }
-    return nullptr;
-}
-
-void profiler_t::require_stopped() const {
-    for (const auto& metric : m_metrics) {
-        if (metric->m_active) {
-            throw std::logic_error("profiler_t read or report requires all metrics stopped");
-        }
-    }
+    m_storage.require_stopped();
+    return m_storage.count;
 }
 
 } // namespace m03gtjqkhqacstl3luv2ojsz3q_profiling

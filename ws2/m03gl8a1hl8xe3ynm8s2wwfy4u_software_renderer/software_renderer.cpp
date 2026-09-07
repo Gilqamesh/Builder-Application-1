@@ -14,14 +14,6 @@ software_renderer_t::software_renderer_t(framebuffer_t framebuffer):
 {
 }
 
-profiling::profiler_t& software_renderer_t::profiler() noexcept {
-    return m_profiler;
-}
-
-const profiling::profiler_t& software_renderer_t::profiler() const noexcept {
-    return m_profiler;
-}
-
 framebuffer_t& software_renderer_t::framebuffer() noexcept {
     return m_framebuffer;
 }
@@ -30,16 +22,16 @@ const framebuffer_t& software_renderer_t::framebuffer() const noexcept {
     return m_framebuffer;
 }
 
-void software_renderer_t::clear_color(rgba8_t color) {
-    auto metric = m_profiler.metric<clear_color_metrics_t>();
+void software_renderer_t::clear_color(rgba8_t color, profiling::metric_t& parent_metric) {
+    auto metric = parent_metric.metric<clear_color_metrics_t>();
     std::ranges::fill(m_framebuffer.pixels(), color);
-    metric.update([this](clear_color_metrics_t& metric) {
+    metric.update<clear_color_metrics_t>([this](clear_color_metrics_t& metric) {
         metric.m_color_writes += m_framebuffer.pixels().size();
     });
 }
 
-void software_renderer_t::clear_color(const camera_t& camera, rgba8_t color) {
-    auto metric = m_profiler.metric<clear_color_metrics_t>();
+void software_renderer_t::clear_color(const camera_t& camera, rgba8_t color, profiling::metric_t& parent_metric) {
+    auto metric = parent_metric.metric<clear_color_metrics_t>();
     const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
     if (bounds.empty()) {
         return;
@@ -48,14 +40,14 @@ void software_renderer_t::clear_color(const camera_t& camera, rgba8_t color) {
     for (auto y = bounds.m_first_y; y < bounds.m_end_y; ++y) {
         const auto offset = std::size_t(y + bounds.m_y) * std::size_t(bounds.m_width) + std::size_t(bounds.m_first_x + bounds.m_x);
         std::ranges::fill(pixels.subspan(offset, std::size_t(bounds.m_end_x - bounds.m_first_x)), color);
-        metric.update([&bounds](clear_color_metrics_t& metric) noexcept {
+        metric.update<clear_color_metrics_t>([&bounds](clear_color_metrics_t& metric) noexcept {
             metric.m_color_writes += std::size_t(bounds.m_end_x - bounds.m_first_x);
         });
     }
 }
 
-void software_renderer_t::clear_depth(float depth) {
-    auto metric = m_profiler.metric<clear_depth_metrics_t>();
+void software_renderer_t::clear_depth(float depth, profiling::metric_t& parent_metric) {
+    auto metric = parent_metric.metric<clear_depth_metrics_t>();
     if (m_framebuffer.pixels().empty()) {
         return;
     }
@@ -63,13 +55,13 @@ void software_renderer_t::clear_depth(float depth) {
         throw std::invalid_argument("software_renderer_t::clear_depth requires a depth attachment");
     }
     std::ranges::fill(m_framebuffer.depth(), depth_clear_value(depth));
-    metric.update([this](clear_depth_metrics_t& metric) {
+    metric.update<clear_depth_metrics_t>([this](clear_depth_metrics_t& metric) {
         metric.m_depth_writes += m_framebuffer.depth().size();
     });
 }
 
-void software_renderer_t::clear_depth(const camera_t& camera, float depth) {
-    auto metric = m_profiler.metric<clear_depth_metrics_t>();
+void software_renderer_t::clear_depth(const camera_t& camera, float depth, profiling::metric_t& parent_metric) {
+    auto metric = parent_metric.metric<clear_depth_metrics_t>();
     const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
     if (bounds.empty()) {
         return;
@@ -82,7 +74,7 @@ void software_renderer_t::clear_depth(const camera_t& camera, float depth) {
     for (auto y = bounds.m_first_y; y < bounds.m_end_y; ++y) {
         const auto offset = std::size_t(y + bounds.m_y) * std::size_t(bounds.m_width) + std::size_t(bounds.m_first_x + bounds.m_x);
         std::ranges::fill(samples.subspan(offset, std::size_t(bounds.m_end_x - bounds.m_first_x)), depth);
-        metric.update([&bounds](clear_depth_metrics_t& metric) noexcept {
+        metric.update<clear_depth_metrics_t>([&bounds](clear_depth_metrics_t& metric) noexcept {
             metric.m_depth_writes += std::size_t(bounds.m_end_x - bounds.m_first_x);
         });
     }
@@ -90,10 +82,11 @@ void software_renderer_t::clear_depth(const camera_t& camera, float depth) {
 
 void software_renderer_t::draw(
     const camera_t& camera,
-    const render_item_t& render_item
+    const render_item_t& render_item,
+    profiling::metric_t& parent_metric
 ) {
-    auto draw_metric = m_profiler.metric<draw_metrics_t>();
-    auto preparation_metric = m_profiler.metric<preparation_metrics_t>();
+    auto draw_metric = parent_metric.metric<draw_metrics_t>();
+    auto preparation_metric = draw_metric.metric<preparation_metrics_t>();
     const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
     if (bounds.empty()) {
         return;
@@ -139,8 +132,8 @@ void software_renderer_t::draw(
 
     preparation_metric.stop();
     const auto indices = geometry->indices();
-    auto vertex_metric = m_profiler.metric<vertex_metrics_t>();
-    vertex_metric.update([expected = indices.size()](vertex_metrics_t& metric) noexcept {
+    auto vertex_metric = draw_metric.metric<vertex_metrics_t>();
+    vertex_metric.update<vertex_metrics_t>([expected = indices.size()](vertex_metrics_t& metric) noexcept {
         metric.m_expected += expected;
     });
     auto& scratch = m_scratch;
@@ -160,7 +153,7 @@ void software_renderer_t::draw(
         for (const auto& input : program.vertex_interface().inputs()) {
             set_vertex_input(io, input, streams[input.index], attributes[input.index], vertex_index);
         }
-        vertex_metric.update([](vertex_metrics_t& metric) noexcept {
+        vertex_metric.update<vertex_metrics_t>([](vertex_metrics_t& metric) noexcept {
             ++metric.m_invocations;
         });
         program.run(bindings, io);
@@ -180,7 +173,7 @@ void software_renderer_t::draw(
     }
 
     vertex_metric.stop();
-    auto raster_metric = m_profiler.metric<raster_metrics_t>();
+    auto raster_metric = draw_metric.metric<raster_metrics_t>();
     const auto vertex = [&](std::size_t index) {
         return view(scratch.m_vertex_results[index], scratch.m_vertex_values);
     };

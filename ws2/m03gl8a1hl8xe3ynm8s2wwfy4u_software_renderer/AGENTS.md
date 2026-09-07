@@ -16,7 +16,7 @@ assembly within those classes.
 - Materials own draw state alongside their program and bindings. Items sharing
   a material share its settings. Applications select materials, organize passes,
   and order draws; the renderer executes the selected material through
-  `draw(camera, render_item)`. See [materials](material.h).
+  `draw(camera, render_item, parent_metric)`. See [materials](material.h).
 - Framebuffers borrow application-owned color and optional depth storage.
   Clearing is explicit and independent of material draw state. See
   [attachments](framebuffer.h) and [drawing and clearing](software_renderer.h).
@@ -31,15 +31,14 @@ assembly within those classes.
 - Planar scenes use the same 3D model with an orthographic camera and explicit
   placement. Maintain one camera model and one public drawing API.
 
-- Each renderer owns an enabled-by-default profiler exposed through profiler().
-  Applications control recording and may measure their own work with that same
-  profiler. Renderer metrics, formatters, counter meanings, and stage boundaries
-  remain owned here; timing statistics,
-  persistent metric storage, and reporting belong to
+- Applications own profilers and pass a borrowed parent metric to drawing and
+  clearing. Each operation creates its own child metric; draw stages create
+  children beneath the draw metric. A default inactive metric disables recording.
+  Renderer metrics, formatters, counter meanings, and stage boundaries remain
+  owned here; tree storage, timing, and reporting belong to
   [`profiling`](../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md).
-  Counter updates run through metric.update(); rendering always executes outside
-  those callbacks, including while profiling is disabled.
-  Renderer counters accumulate across enabled measurements, including partial work
+  Counter updates run through metric.update<T>(); rendering executes outside
+  those callbacks. Counters accumulate per metric path, including partial work
   before an exception. Color and depth clears have distinct counter types.
 
 ## Validation

@@ -13,6 +13,8 @@ Use the software-renderer module's `render_item_t` and related resource types di
 ## Invariants
 
 - Rendering resources are constructed according to the software-renderer public contract rather than application-local representations.
+- The application owns its profiler and passes a frame metric through rendering
+  to the software renderer.
 - The application owns the window and CPU framebuffer allocation, gives borrowed framebuffer storage to the software renderer, and presents that storage through the OpenGL renderer.
 - Shared ownership is used only where the software-renderer resource model shares lifetime.
 

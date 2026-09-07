@@ -6,6 +6,9 @@
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
+// Each metric path owns independent counters; repeated measurements of that path
+// accumulate in the same object. The profiling module owns path identity.
+
 /** @brief Counts color samples written across all measured color clears. */
 struct clear_color_metrics_t {
     std::size_t m_color_writes = 0;
@@ -76,16 +79,13 @@ namespace std {
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_color_metrics_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
-        auto it = ctx.begin();
-        if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid clear_color_metrics_t format specifier");
-        }
-        return it;
+        return ctx.begin();
     }
 
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_color_metrics_t& clear_color_metrics, auto& ctx) const {
         auto out = ctx.out();
-        out = std::format_to(out, "renderer.clear_color color_writes={}", clear_color_metrics.m_color_writes);
+        out = std::format_to(out, "renderer.clear_color");
+        out = std::format_to(out, " color_writes={}", clear_color_metrics.m_color_writes);
         return out;
     }
 };
@@ -93,16 +93,13 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_color_metri
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_depth_metrics_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
-        auto it = ctx.begin();
-        if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid clear_depth_metrics_t format specifier");
-        }
-        return it;
+        return ctx.begin();
     }
 
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_depth_metrics_t& clear_depth_metrics, auto& ctx) const {
         auto out = ctx.out();
-        out = std::format_to(out, "renderer.clear_depth depth_writes={}", clear_depth_metrics.m_depth_writes);
+        out = std::format_to(out, "renderer.clear_depth");
+        out = std::format_to(out, " depth_writes={}", clear_depth_metrics.m_depth_writes);
         return out;
     }
 };
@@ -110,11 +107,7 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_depth_metri
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::draw_metrics_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
-        auto it = ctx.begin();
-        if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid draw_metrics_t format specifier");
-        }
-        return it;
+        return ctx.begin();
     }
 
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::draw_metrics_t&, auto& ctx) const {
@@ -127,11 +120,7 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::draw_metrics_t> {
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::preparation_metrics_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
-        auto it = ctx.begin();
-        if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid preparation_metrics_t format specifier");
-        }
-        return it;
+        return ctx.begin();
     }
 
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::preparation_metrics_t&, auto& ctx) const {
@@ -144,16 +133,14 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::preparation_metri
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_metrics_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
-        auto it = ctx.begin();
-        if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid vertex_metrics_t format specifier");
-        }
-        return it;
+        return ctx.begin();
     }
 
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_metrics_t& vertex_metrics, auto& ctx) const {
         auto out = ctx.out();
-        out = std::format_to(out, "renderer.vertices vertex_invocations={}, expected={}", vertex_metrics.m_invocations, vertex_metrics.m_expected);
+        out = std::format_to(out, "renderer.vertices");
+        out = std::format_to(out, " vertex_invocations={}", vertex_metrics.m_invocations);
+        out = std::format_to(out, ", expected={}", vertex_metrics.m_expected);
         return out;
     }
 };
@@ -161,21 +148,23 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_metrics_t>
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_metrics_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
-        auto it = ctx.begin();
-        if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid raster_metrics_t format specifier");
-        }
-        return it;
+        return ctx.begin();
     }
 
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_metrics_t& raster_metrics, auto& ctx) const {
         auto out = ctx.out();
-        out = std::format_to(out, "renderer.rasterization fragment_invocations={}, discards={}, depth_rejections={}, color_writes={}, depth_writes={}", raster_metrics.m_invocations, raster_metrics.m_discards, raster_metrics.m_depth_rejections, raster_metrics.m_color_writes, raster_metrics.m_depth_writes);
+        out = std::format_to(out, "renderer.rasterization");
+        out = std::format_to(out, " fragment_invocations={}", raster_metrics.m_invocations);
+        out = std::format_to(out, ", discards={}", raster_metrics.m_discards);
+        out = std::format_to(out, ", depth_rejections={}", raster_metrics.m_depth_rejections);
+        out = std::format_to(out, ", color_writes={}", raster_metrics.m_color_writes);
+        out = std::format_to(out, ", depth_writes={}", raster_metrics.m_depth_writes);
         if (raster_metrics.m_invocations == 0) {
             out = std::format_to(out, ", discarded=n/a, depth_rejected=n/a");
         } else {
             const auto percent = 100.0L / raster_metrics.m_invocations;
-            out = std::format_to(out, ", discarded={:.1f}%, depth_rejected={:.1f}%", raster_metrics.m_discards * percent, raster_metrics.m_depth_rejections * percent);
+            out = std::format_to(out, ", discarded={:.1f}%", raster_metrics.m_discards * percent);
+            out = std::format_to(out, ", depth_rejected={:.1f}%", raster_metrics.m_depth_rejections * percent);
         }
         return out;
     }

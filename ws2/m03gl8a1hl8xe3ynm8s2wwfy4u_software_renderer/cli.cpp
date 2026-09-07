@@ -9,6 +9,7 @@
 #include <m03gsy25j4v7nccgmsdov9ioft_shader/api.h>
 #include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
 #include <m03gt1djvvy5atia5evkbg6rqy_software_shader/api.h>
+#include <m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h>
 
 #include <array>
 #include <chrono>
@@ -21,9 +22,29 @@
 #include <numbers>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
+
+namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
+
+struct frame_metrics_t {};
+
+} // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
+
+namespace std {
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::frame_metrics_t> : formatter<string_view> {
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::frame_metrics_t&, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.frame");
+        return out;
+    }
+};
+
+} // namespace std
 
 namespace {
 
@@ -122,6 +143,9 @@ int main() {
         std::vector<rgba8_t> pixels;
         std::vector<float> depth;
         software_renderer_api::software_renderer_t software_renderer(software_renderer_api::framebuffer_t(pixels, 0, 0));
+        m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t profiler;
+        profiler.enabled() = true;
+
         opengl_renderer_api::opengl_renderer_t opengl_renderer(window);
         auto material = std::make_shared<software_renderer_api::material_t>(make_program());
         material->texture(0, make_texture());
@@ -148,6 +172,7 @@ int main() {
         auto previous_frame_started_at = started_at;
 
         while (!window->should_close()) {
+            auto frame_metric = profiler.metric<software_renderer_api::frame_metrics_t>();
             const auto frame_started_at = steady_clock_t::now();
             const auto seconds = std::chrono::duration<float>(frame_started_at - started_at).count();
 
@@ -167,8 +192,8 @@ int main() {
             if (framebuffer.width() == 0 || framebuffer.height() == 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             } else {
-                software_renderer.clear_color({0, 0, 0, 255});
-                software_renderer.clear_depth(1.0F);
+                software_renderer.clear_color({0, 0, 0, 255}, frame_metric);
+                software_renderer.clear_depth(1.0F, frame_metric);
                 render_item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0.25F, seconds * 0.35F, 0.0F}));
                 render_item.translation() = {-0.15F, 0.0F, -1.1F + 0.25F * std::sin(seconds * 0.4F)};
                 const software_renderer_api::camera_t camera(
@@ -177,11 +202,11 @@ int main() {
                 );
                 // Alternate submission order while the surfaces intersect and cross the near plane.
                 if (static_cast<int>(seconds) % 2 == 0) {
-                    software_renderer.draw(camera, render_item);
-                    software_renderer.draw(camera, second_item);
+                    software_renderer.draw(camera, render_item, frame_metric);
+                    software_renderer.draw(camera, second_item, frame_metric);
                 } else {
-                    software_renderer.draw(camera, second_item);
-                    software_renderer.draw(camera, render_item);
+                    software_renderer.draw(camera, second_item, frame_metric);
+                    software_renderer.draw(camera, render_item, frame_metric);
                 }
                 opengl_renderer.present_rgba8(
                     std::as_bytes(std::span<const rgba8_t>(pixels)),
@@ -194,6 +219,8 @@ int main() {
             previous_frame_started_at = frame_started_at;
             std::cout << std::format("frame: {:.2f} ms, framebuffer: {}x{}\n", frame_time.count(), framebuffer.width(), framebuffer.height());
         }
+
+        profiler.report(std::cout);
 
         return 0;
     } catch (const std::exception& error) {

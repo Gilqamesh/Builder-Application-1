@@ -1,112 +1,135 @@
 # Renderer profiling and benchmark
 
-Each ordinary `software_renderer_t` owns a profiler that starts enabled.
-Applications assign `renderer.profiler().enabled() = false` to disable recording
-and `true` to resume it. Rendering and clearing execute in either state.
-Enablement is sampled when each metric is created; existing active metrics finish
-normally after a change, and previously completed results remain available.
+Applications own a `profiling::profiler_t` and pass a borrowed `metric_t&` into
+drawing and clearing. Both types are non-template types. The renderer opens its
+operation metric beneath that parent, and draw opens its stage metrics beneath
+itself. Rendering executes with active or inactive metrics.
 
 ## Use
 
-Producers own their metric data types, constructors, counter meanings, and
-`std::formatter` specializations. Applications measure their own work using the
-same profiler. See [the complete headless caller](../benchmark.cpp).
+Producers own metric data types, constructors, counter meanings, and
+`std::formatter` specializations. See [the complete headless caller](../benchmark.cpp).
 
 ```cpp
 namespace profiling = m03gtjqkhqacstl3luv2ojsz3q_profiling;
 namespace renderer = m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer;
 
-// frame_metrics_t and its std::formatter are application-owned.
+// frame_metrics_t and its std::formatter belong to the application.
 renderer::software_renderer_t software_renderer(framebuffer);
-auto& profiler = software_renderer.profiler();
-profiler.enabled() = true;
-
-auto metric = profiler.metric<frame_metrics_t>();
-software_renderer.clear_color({0, 0, 0, 255});
-software_renderer.clear_depth(1);
-software_renderer.draw(camera, item);
-metric.update([](frame_metrics_t& metric) noexcept {
-    ++metric.m_draws;
-});
-metric.stop();
-
+profiling::profiler_t profiler;
+{
+    auto frame_metric = profiler.metric<frame_metrics_t>();
+    software_renderer.clear_color({0, 0, 0, 255}, frame_metric);
+    software_renderer.clear_depth(1, frame_metric);
+    software_renderer.draw(camera, item, frame_metric);
+    frame_metric.update<frame_metrics_t>([](auto& metrics) noexcept {
+        ++metrics.m_draws;
+    });
+}
 profiler.report(std::cout);
 
-profiler.enabled() = false;
-software_renderer.draw(camera, item); // Rendering still executes; saved results remain.
+// An inactive parent records nothing; rendering still executes.
+profiling::metric_t inactive_metric;
+software_renderer.draw(camera, item, inactive_metric);
 ```
 
-The five usual operations are `enabled()`, `metric<T>()`, `update()`, `stop()`,
-and `report()`. Applications borrow the renderer's profiler for at most the
-renderer's lifetime; other consumers may own or borrow a profiler independently.
+Inside draw, the renderer composes measurements directly:
+
+```cpp
+auto draw_metric = parent_metric.metric<draw_metrics_t>();
+auto preparation_metric = draw_metric.metric<preparation_metrics_t>();
+// Prepare.
+preparation_metric.stop();
+auto vertex_metric = draw_metric.metric<vertex_metrics_t>();
+// Process vertices.
+vertex_metric.stop();
+auto raster_metric = draw_metric.metric<raster_metrics_t>();
+// Rasterize.
+```
+
+The receiver determines the parent. Metrics must finish in reverse start order;
+starting another sibling or stopping a parent while a child is active is rejected.
+Destruction with active children terminates. Normal exception unwinding closes
+children before parents. A stopped recorded metric cannot open more children.
+`update<T>()` checks the stored data type, invokes the callback immediately, and
+propagates its exceptions. Inactive and stopped metrics skip updates. Keep
+application work outside callbacks; arguments and captures still evaluate normally.
 
 ## Data and timing
 
-The profiler constructs one data object per type on first enabled use and keeps it
-until destruction. Constructor arguments initialize it only that first time; later
-measurements reuse it and restart the clock. `update(function)` invokes the
-callable immediately with a borrowed reference to that data and propagates any
-exception. Application work stays outside the callback. `stop()` ends timing;
-destruction calls it automatically. Later updates and stops do nothing.
-Within `update()`, increments accumulate and assignments replace data explicitly.
+Each `(parent node, metric type)` owns one persistent data object and timing record.
+Repeated calls on the same path reuse it. The same type beneath different parents
+has independent counters and timings; recursive types create distinct deeper nodes.
+Constructor arguments initialize data only on that path's first use. Updates
+explicitly accumulate or replace data. New paths may allocate; reusing established
+paths and valid stopping do not allocate, format, perform I/O, or lock.
 
-Default metrics and metrics created while disabled do nothing. They skip lookup,
-allocation, data construction, and clock reads; `update()` skips its callable.
-Arguments and lambda captures still evaluate before calls. Put expensive
-metric-only computations inside the callback. A returned metric holds one pointer;
-disabled use still has runtime checks.
+The profiler starts enabled. Assign `profiler.enabled() = false` to disable
+subsequent root measurements and `true` to resume. A root samples recording once;
+all descendants inherit its decision. Disabled metrics and their descendants skip
+lookup, allocation, construction, clock reads, and update callbacks.
 
-Different metric types can overlap. Starting an already-active type is rejected.
-Repeating a stopped type preserves its application data and adds another timing
-observation. Reads and reports require all metrics stopped. Borrowed result
-pointers remain valid until profiler destruction; read them only with all metrics
-stopped.
-[The profiling public contract](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h)
-owns storage, lifetime, type requirements, and failure guarantees.
+[profiling_metrics.h](../profiling_metrics.h) owns renderer counters and formatters.
+Counters accumulate per metric path, including partial work before exceptions.
+Vertex counters count entered calls and expected selected indices. Raster counters
+count fragment invocations, discards, depth rejections, and actual color/depth
+writes. Both rejection percentages use fragment invocations as the denominator;
+zero invocations reports `n/a`. Draw and preparation contain timing only.
 
-[profiling_metrics.h](../profiling_metrics.h) owns renderer counters and their
-formatters. All renderer counters accumulate across enabled measurements, including
-partial work before exceptions. Color/depth clears accumulate writes separately.
-Vertex metrics count entered calls and expected selected indices. Raster metrics
-count fragment invocations, discards, depth rejections, and color/depth writes.
-Discard and depth-rejection percentages use fragment invocations as the denominator;
-zero invocations reports `n/a`. Draw and preparation metrics contain only timing.
-
-Durations include nested work, such as shaders inside draw. There is no retained
-parent/child relationship. Exception exits retain partial counters and mark the
-latest completion `unwinding`. Lookup and first data construction precede timing;
-stopping reads the clock before updating statistics. First-use allocation
-for a nested type can contribute to an enclosing measurement's duration.
+Durations include nested work. Lookup and first data construction precede that
+node's timer, and stopping reads the clock before updating statistics. Nested
+first-use allocation can contribute to an enclosing measurement's duration.
+Exception exits retain updates and mark the latest completion `unwinding`.
 
 ## Reporting and readback
 
-Reports separate **current application data** from **timing since profiler
-construction**, including exception exits. Each type has count, last duration,
-mean, maximum, total, and age since last completion. Disabling and reporting
-preserve these observations. A stage skipped by a later draw retains its previous
-data; age helps identify older measurements.
+Reports distinguish current data per path from timing across all completions since
+profiler construction. Nodes precede their children, with roots and siblings in
+first-use order. Repeated calls aggregate: `A, B, A` reports A with count 2 followed
+by B with count 1. The report is a summary tree, not an event history.
+
+Each node occupies one line: a tree label, count, last/min/mean/max/total duration,
+age since its last completion, and application data. Durations choose SI units
+from nanoseconds through exaseconds. Columns expand to fit their contents;
+long rows may wrap in the terminal. There is no prologue.
+
+The first word produced by the metric's formatter labels the row; the remaining
+text goes in `Data`. Line breaks and tabs become spaces. Formatters should use
+single-column characters in labels for alignment. A latest completion during
+exception unwinding appends `[unwinding]` to the data. Empty reports print
+`No measurements.` or `Profiling disabled.` according to recording state.
+
+Illustrative report for two draws per frame:
 
 ```text
-Recording: disabled
-Data: current; timing: since profiler construction; inclusive durations
-renderer.draw
-  count=120 last=6.66 ms mean=6.4 ms max=12.1 ms total=768 ms age=30 ms
+Metric                        Count    Last     Min    Mean     Max   Total     Age  Data
+application.frame                 1    1 ms    1 ms    1 ms    1 ms    1 ms    0 ns
+├─ renderer.clear_color           1   10 us   10 us   10 us   10 us   10 us  980 us  color_writes=16
+├─ renderer.clear_depth           1   10 us   10 us   10 us   10 us   10 us  960 us  depth_writes=16
+└─ renderer.draw                  2  400 us  300 us  350 us  400 us  700 us   10 us
+   ├─ renderer.preparation        2   20 us   10 us   15 us   20 us   30 us  380 us
+   ├─ renderer.vertices           2   50 us   30 us   40 us   50 us   80 us  320 us  vertex_invocations=12, expected=12
+   └─ renderer.rasterization      2  300 us  250 us  275 us  300 us  550 us   15 us  fragment_invocations=20, discards=0, depth_rejections=0, color_writes=20, depth_writes=20, discarded=0.0%, depth_rejected=0.0%
 ```
 
-Types appear in descending total duration, with registration order breaking ties.
-Durations scale automatically from nanoseconds to exaseconds. Inclusive durations
-can overlap, so adding them does not give elapsed frame time or CPU utilization.
-There is no sample history or reset.
+Inclusive totals already contain child durations. A skipped stage retains its
+previous data and timing; age identifies older measurements. Reporting and
+recording changes preserve results, including when reporting fails.
+
+Readback uses a complete root-to-leaf type path:
 
 ```cpp
-if (const auto* vertex_metrics = profiler.metrics<renderer::vertex_metrics_t>()) {
-    std::cout << vertex_metrics->m_invocations << '\n';
-    std::cout << profiler.elapsed<renderer::vertex_metrics_t>()->count() << '\n';
+if (const auto* metrics = profiler.metrics<frame_metrics_t, renderer::draw_metrics_t, renderer::vertex_metrics_t>()) {
+    std::cout << metrics->m_invocations << '\n';
 }
 ```
 
-`metrics<T>()` returns the persistent data or null when absent. `elapsed<T>()` and
-`unwinding<T>()` return optional observations, and `size()` counts stored types.
+`metrics<T, Path...>()` returns the leaf data or null when absent. `elapsed` and
+`unwinding` accept the same paths and return optional observations. `size()` counts
+all stored nodes. Reads and reports require all metrics stopped. Borrowed data
+pointers remain valid until profiler destruction; access requires an idle profiler.
+[The profiling public contract](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h)
+owns complete lifetime, construction, enablement, and failure guarantees.
 
 ## Builder benchmark
 
@@ -143,10 +166,10 @@ after all workers succeed.
 A failed run retains its completed workload files and does not produce a complete
 aggregate result.
 
-Result schema version 3 reports the number of stored metric types as `metrics`.
+Result schema version 4 reports the number of stored metric nodes as `metric_nodes`.
 Each workload result includes every timing pair, median, nearest-rank p95, maximum,
 per-run medians, the percentage difference between enabled/disabled medians, peak RSS, and
-stored metric type count (`metrics`). No outliers are removed. Build metadata records the actual
+stored metric node count (`metric_nodes`). No outliers are removed. Build metadata records the actual
 versioned executable, loaded file paths, benchmark compiler version, and whether
 optimization and assertions were enabled in the benchmark translation unit.
 Dependency compile options are explicitly unknown in this runtime metadata;

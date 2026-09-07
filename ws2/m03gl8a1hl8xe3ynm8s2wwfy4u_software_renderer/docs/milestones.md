@@ -26,7 +26,7 @@ Status: implemented; automated validation passed. Consumer smoke validation is r
 
 Status: implemented; automated and visible integration validation passed.
 
-- Outcome: perspective and orthographic scenes use `draw(camera, render_item)`.
+- Outcome: perspective and orthographic scenes use `draw(camera, render_item, parent_metric)`.
   A camera owns one rendering rectangle for viewport mapping and write bounds.
   See [camera.h](../camera.h) and [software_renderer.h](../software_renderer.h).
 - Placement: [render_item_t](../render_item.h) owns 3D translation, rotation, and
@@ -57,8 +57,9 @@ item.scale() = {1, 1, 1};
 item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> {0.25F, 0.5F, 0});
 // Quaternion input uses the same setter:
 item.rotation(m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>(1, 0, 0, 0));
-software_renderer.clear_color(camera, {0, 0, 0, 255});
-software_renderer.draw(camera, item);
+renderer::profiling::metric_t inactive_metric;
+software_renderer.clear_color(camera, {0, 0, 0, 255}, inactive_metric);
+software_renderer.draw(camera, item, inactive_metric);
 ```
 
 ## 2. Depth testing and face culling
@@ -68,7 +69,7 @@ Status: implemented; automated and visible integration validation passed.
 - Outcome: opaque visibility is independent of submission order for distinct
   stored float depths. Equal-depth ties follow the selected comparison.
 - Ownership: [materials](../material.h) own the depth and culling properties.
-  Applications select materials and draw order; `draw(camera, render_item)`
+  Applications select materials and draw order; `draw(camera, render_item, parent_metric)`
   consumes the selected material. Items sharing a material share its settings.
 - Attachments and clearing: [framebuffers](../framebuffer.h) borrow optional
   float depth storage alongside color. [Depth clears](../software_renderer.h)
@@ -97,9 +98,10 @@ framebuffer.depth(depth_pixels);
 software_renderer.framebuffer() = framebuffer;
 item.material()->depth_test(true);
 item.material()->cull(renderer::cull_mode_t::back);
-software_renderer.clear_color(camera, {0, 0, 0, 255});
-software_renderer.clear_depth(camera, 1.0F); // less rejects samples exactly at 1.
-software_renderer.draw(camera, item);
+renderer::profiling::metric_t inactive_metric;
+software_renderer.clear_color(camera, {0, 0, 0, 255}, inactive_metric);
+software_renderer.clear_depth(camera, 1.0F, inactive_metric); // less rejects samples exactly at 1.
+software_renderer.draw(camera, item, inactive_metric);
 ```
 
 ## 3. Blending and color writes
@@ -133,7 +135,7 @@ algorithmic optimization is unstarted. See [the measurement path](profiling.md)
 and [baseline evidence](profiling-baseline.md).
 
 - Outcome: each optimization delivery demonstrates its effect through repeatable measurements while preserving rendering correctness.
-- Measurement ownership: [`profiling`](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md) owns timing statistics, persistent storage, and deferred reporting. Each renderer owns its metrics and a profiler with runtime enablement. Its benchmark driver owns workloads, repeated-run summaries, and comparisons; applications may use the renderer's profiler for their own measurements.
+- Measurement ownership: [`profiling`](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md) owns timing statistics, persistent storage, and deferred reporting. The renderer owns its metric types and measurement boundaries. Applications own profilers and pass parent metrics into rendering. The benchmark driver owns workloads, repeated-run summaries, and comparisons.
 - Metrics: track median and high-percentile elapsed render time and process peak RSS across stable headless workloads. The benchmark records precise timing and memory scopes. Keep these scopes consistent across deliveries. Current Builder runs use its default build; dependency-wide optimization and a new optimized baseline remain deferred.
 - Comparisons: record workload, resolution, rendering settings, hardware, build configuration, and source revision. Report absolute results, percentage changes, and run-to-run variation against both the previous delivery and the established baseline. New feature workloads establish their own baselines.
 - Delivery process: use measured results to select each bounded optimization. Every delivery includes the same comparison report and correctness evidence, making improvements, regressions, and tradeoffs visible. Specific optimization techniques remain undecided until measurements justify them.

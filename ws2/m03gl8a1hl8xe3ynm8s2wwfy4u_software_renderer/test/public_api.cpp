@@ -11,6 +11,7 @@
 #include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
 #include <m03gt1djvvy5atia5evkbg6rqy_software_shader/api.h>
 #include <m03gtgtrh2smvh28qlwgm7gdl4_quaternion/api.h>
+#include <m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h>
 
 #include <algorithm>
 #include <array>
@@ -29,6 +30,7 @@
 #include <source_location>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -69,6 +71,8 @@ namespace software_shader = m03gt1djvvy5atia5evkbg6rqy_software_shader;
 
 using position_t = std::array<float, 2>;
 using program_ptr_t = std::shared_ptr<const software_shader::program_t>;
+
+profiling::metric_t inactive_metric;
 
 constexpr api::rgba8_t clear_color {3, 5, 7, 11};
 constexpr api::rgba8_t red {255, 0, 0, 255};
@@ -275,7 +279,7 @@ std::vector<api::rgba8_t> draw_scene(
         make_geometry(std::move(positions), std::move(indices), topology),
         make_material(std::move(image))
     );
-    renderer.draw(camera, render_item);
+    renderer.draw(camera, render_item, inactive_metric);
     return pixels;
 }
 
@@ -388,7 +392,7 @@ void test_framebuffer() {
 
     api::software_renderer_t renderer(api::framebuffer_t(pixels, 3, 2));
 
-    renderer.clear_color(clear_color);
+    renderer.clear_color(clear_color, inactive_metric);
     test::expect(std::identity(), std::ranges::all_of(pixels, [](const auto& pixel) {
         return same_color(pixel, clear_color);
     }));
@@ -416,7 +420,7 @@ void test_framebuffer() {
     test::expect(std::identity(), framebuffer.pixels().data() == replacement.data());
     test::expect(std::equal_to<>(), framebuffer.width(), 2);
     test::expect(std::equal_to<>(), framebuffer.height(), 2);
-    renderer.clear_color(texture_color);
+    renderer.clear_color(texture_color, inactive_metric);
     test::expect(std::identity(), std::ranges::all_of(replacement, [](const auto& pixel) {
         return same_color(pixel, texture_color);
     }));
@@ -425,20 +429,20 @@ void test_framebuffer() {
 void test_empty_framebuffer() {
     std::vector<api::rgba8_t> pixels;
     api::software_renderer_t renderer(api::framebuffer_t(pixels, 0, 4));
-    test::expect_no_throw([&] { renderer.clear_color(clear_color); });
+    test::expect_no_throw([&] { renderer.clear_color(clear_color, inactive_metric); });
 
     const auto camera = make_camera(8, 8);
     const auto render_item = make_render_item(
         make_geometry({{0.0F, 0.0F}}, {0}, api::vertex_primitive_topology_t::point),
         make_material(make_unorm_texture(red))
     );
-    test::expect_no_throw([&] { renderer.draw(camera, render_item); });
+    test::expect_no_throw([&] { renderer.draw(camera, render_item, inactive_metric); });
     renderer.framebuffer() = api::framebuffer_t(pixels, 4, 0);
-    test::expect_no_throw([&] { renderer.clear_color(clear_color); });
-    test::expect_no_throw([&] { renderer.draw(camera, render_item); });
+    test::expect_no_throw([&] { renderer.clear_color(clear_color, inactive_metric); });
+    test::expect_no_throw([&] { renderer.draw(camera, render_item, inactive_metric); });
     renderer.framebuffer() = api::framebuffer_t(pixels, 0, 0);
-    test::expect_no_throw([&] { renderer.clear_color(clear_color); });
-    test::expect_no_throw([&] { renderer.draw(camera, render_item); });
+    test::expect_no_throw([&] { renderer.clear_color(clear_color, inactive_metric); });
+    test::expect_no_throw([&] { renderer.draw(camera, render_item, inactive_metric); });
 }
 
 void test_topologies_and_clipping() {
@@ -549,7 +553,7 @@ void test_texture_coordinate_interpolation() {
     transformed.material() = make_material(make_unorm_texture(2, 2, texels));
     transformed.translation() = {0.25F, 0.25F, 0.0F};
     transformed.scale() = {0.5F, 0.5F, 1.0F};
-    renderer.draw(make_camera(32, 32), transformed);
+    renderer.draw(make_camera(32, 32), transformed, inactive_metric);
     expect_color(transformed_pixels[pixel_index(14, 14, 32)], red);
     expect_color(transformed_pixels[pixel_index(26, 14, 32)], green);
     expect_color(transformed_pixels[pixel_index(14, 26, 32)], blue);
@@ -572,12 +576,12 @@ void test_shared_material_transform_semantics() {
     left.translation() = {-0.5F, 0.0F, 0.0F};
     auto right = make_render_item(geometry, material);
     right.translation() = {0.5F, 0.0F, 0.0F};
-    renderer.draw(camera, left);
-    renderer.draw(camera, right);
+    renderer.draw(camera, left, inactive_metric);
+    renderer.draw(camera, right, inactive_metric);
     expect_color(pixels[pixel_index(16, 32, 64)], red);
     expect_color(pixels[pixel_index(48, 32, 64)], red);
 
-    renderer.clear_color(clear_color);
+    renderer.clear_color(clear_color, inactive_metric);
     auto trs = make_render_item(
         make_geometry({{0.25F, 0.0F}}, {0}, api::vertex_primitive_topology_t::point),
         material
@@ -585,7 +589,7 @@ void test_shared_material_transform_semantics() {
     trs.scale() = {2.0F, 1.0F, 1.0F};
     trs.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, 0, std::numbers::pi_v<float> * 0.5F}));
     trs.translation() = {0.25F, -0.25F, 0.0F};
-    renderer.draw(camera, trs);
+    renderer.draw(camera, trs, inactive_metric);
     expect_color(pixels[pixel_index(40, 40, 64)], red);
     expect_color(pixels[pixel_index(48, 48, 64)], clear_color);
 }
@@ -618,7 +622,7 @@ void test_matrix_zw_and_sparse_consumed_outputs() {
     );
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
     api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
-    renderer.draw(make_camera(16, 16), item);
+    renderer.draw(make_camera(16, 16), item, inactive_metric);
     expect_color(pixels[pixel_index(8, 8, 16)], {64, 255, 64, 255});
 
     shader::vertex_shader_ast_builder_t smaller_vertex;
@@ -637,8 +641,8 @@ void test_matrix_zw_and_sparse_consumed_outputs() {
         make_geometry({{0.0F, 0.0F}}, {0}, api::vertex_primitive_topology_t::point),
         std::make_shared<api::material_t>(smaller_program)
     );
-    renderer.clear_color(clear_color);
-    renderer.draw(make_camera(16, 16), smaller_item);
+    renderer.clear_color(clear_color, inactive_metric);
+    renderer.draw(make_camera(16, 16), smaller_item, inactive_metric);
     expect_color(pixels[pixel_index(8, 8, 16)], green);
 }
 
@@ -690,7 +694,7 @@ void test_selected_range_indices_and_pre_raster_validation() {
         std::move(geometry),
         std::make_shared<api::material_t>(program)
     );
-    renderer.draw(make_camera(16, 16), item);
+    renderer.draw(make_camera(16, 16), item, inactive_metric);
     expect_color(pixels[pixel_index(8, 8, 16)], red);
 
     shader::vertex_shader_ast_builder_t failing_vertex;
@@ -716,15 +720,15 @@ void test_selected_range_indices_and_pre_raster_validation() {
         ),
         std::make_shared<api::material_t>(failing_program)
     );
-    renderer.clear_color(clear_color);
+    renderer.clear_color(clear_color, inactive_metric);
     test::expect_throws<std::runtime_error>([&] {
-        renderer.draw(make_camera(16, 16), failing_item);
+        renderer.draw(make_camera(16, 16), failing_item, inactive_metric);
     });
     test::expect(std::identity(), std::ranges::all_of(pixels, [](const auto& pixel) {
         return same_color(pixel, clear_color);
     }));
 
-    renderer.draw(make_camera(16, 16), item);
+    renderer.draw(make_camera(16, 16), item, inactive_metric);
     expect_color(pixels[pixel_index(8, 8, 16)], red);
 }
 
@@ -746,10 +750,10 @@ void test_fragment_bindings_are_validated_before_clipped_geometry() {
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
     api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
     test::expect_throws<std::invalid_argument>([&] {
-        renderer.draw(make_camera(16, 16), item);
+        renderer.draw(make_camera(16, 16), item, inactive_metric);
     });
     material->uniform(9, vector4f_t({1.0F, 0.0F, 0.0F, 1.0F}));
-    test::expect_no_throw([&] { renderer.draw(make_camera(16, 16), item); });
+    test::expect_no_throw([&] { renderer.draw(make_camera(16, 16), item, inactive_metric); });
     test::expect(std::identity(), std::ranges::all_of(pixels, [](const auto& pixel) {
         return same_color(pixel, clear_color);
     }));
@@ -791,7 +795,7 @@ void test_vertex_layout_rejection() {
 
     const auto expect_rejected = [&](auto geometry) {
         const auto render_item = make_render_item(std::move(geometry), material);
-        test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, render_item); });
+        test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, render_item, inactive_metric); });
     };
 
     expect_rejected(make_typed_geometry(
@@ -839,23 +843,23 @@ void test_material_resource_mapping() {
     mapped_material->sampler(7, make_sampler());
     mapped_material->uniform(0, 17.0F);
     const auto mapped = make_render_item(geometry, std::move(mapped_material));
-    renderer.draw(camera, mapped);
+    renderer.draw(camera, mapped, inactive_metric);
     expect_color(pixels[pixel_index(4, 4, 8)], texture_color);
 
     auto distinct_material = make_material(make_unorm_texture(green), make_sampler(), program);
     test::expect(std::identity(), distinct_material->program() == program);
     const auto distinct = make_render_item(geometry, distinct_material);
-    renderer.clear_color(clear_color);
-    renderer.draw(camera, distinct);
+    renderer.clear_color(clear_color, inactive_metric);
+    renderer.draw(camera, distinct, inactive_metric);
     expect_color(pixels[pixel_index(4, 4, 8)], green);
 
     distinct_material->texture(0, nullptr);
-    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, distinct); });
+    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, distinct, inactive_metric); });
     test::expect_throws<std::invalid_argument>([&] { (void)distinct_material->bindings().texture(0); });
 
     distinct_material->texture(0, make_unorm_texture(red));
     distinct_material->sampler(0, nullptr);
-    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, distinct); });
+    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, distinct, inactive_metric); });
     test::expect_throws<std::invalid_argument>([&] { (void)distinct_material->bindings().sampler(0); });
 
     auto owned_texture = make_unorm_texture(red);
@@ -891,7 +895,7 @@ void test_nonfinite_clip_position_rejection() {
         ),
         material
     );
-    test::expect_throws<std::runtime_error>([&] { renderer.draw(camera, infinity); });
+    test::expect_throws<std::runtime_error>([&] { renderer.draw(camera, infinity, inactive_metric); });
 
     const auto nan = make_render_item(
         make_geometry(
@@ -901,7 +905,7 @@ void test_nonfinite_clip_position_rejection() {
         ),
         material
     );
-    test::expect_throws<std::runtime_error>([&] { renderer.draw(camera, nan); });
+    test::expect_throws<std::runtime_error>([&] { renderer.draw(camera, nan, inactive_metric); });
 }
 
 program_ptr_t make_clip_program(bool facing = false) {
@@ -922,7 +926,7 @@ std::vector<api::rgba8_t> draw_clip_scene(const std::vector<clip_position_fixtur
     const auto geometry = make_typed_geometry(positions, attribute, std::move(indices), topology);
     const auto material = std::make_shared<api::material_t>(program);
     const auto item = make_render_item(geometry, material);
-    renderer.draw(make_camera(32, 32), item);
+    renderer.draw(make_camera(32, 32), item, inactive_metric);
     return pixels;
 }
 
@@ -1018,7 +1022,7 @@ void test_grid_fragment_state() {
     std::vector<api::rgba8_t> wide_pixels(std::size_t(raster::maximum_extent) + 1);
     api::software_renderer_t wide(api::framebuffer_t(wide_pixels, raster::maximum_extent + 1, 1));
     const auto item = make_render_item(make_geometry({{0, 0}}, {0}, api::vertex_primitive_topology_t::point), make_material(make_unorm_texture(red)));
-    test::expect_throws<std::out_of_range>([&] { wide.draw(make_camera(32, 32), item); });
+    test::expect_throws<std::out_of_range>([&] { wide.draw(make_camera(32, 32), item, inactive_metric); });
 }
 
 using mask_t = std::set<std::array<std::int64_t, 2>>;
@@ -1692,15 +1696,15 @@ void test_camera_regions_and_clears() {
     auto item = make_render_item(quad, std::make_shared<api::material_t>(make_clip_program()));
     for (const api::view_rect_t rect : {api::view_rect_t({{3, 11}, {2, 9}}), api::view_rect_t({{-4, 7}, {-3, 6}}), api::view_rect_t({{10, 25}, {7, 30}})}) {
         camera.view_rect() = rect;
-        renderer.clear_color(clear_color);
-        renderer.draw(camera, item);
+        renderer.clear_color(clear_color, inactive_metric);
+        renderer.draw(camera, item, inactive_metric);
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
                 expect_color(pixels[pixel_index(x, y, width)], rect.contains({x, y}) ? blue : clear_color);
             }
         }
         camera.position()[0] = std::numeric_limits<float>::quiet_NaN();
-        renderer.clear_color(camera, green); // Clearing depends only on the rectangle.
+        renderer.clear_color(camera, green, inactive_metric); // Clearing depends only on the rectangle.
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
                 expect_color(pixels[pixel_index(x, y, width)], rect.contains({x, y}) ? green : clear_color);
@@ -1712,15 +1716,15 @@ void test_camera_regions_and_clears() {
     auto invalid = make_render_item(make_typed_geometry(std::vector<clip_position_fixture_t>{{std::numeric_limits<float>::infinity(), 0, 0, 1}}, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 4), {0}, api::vertex_primitive_topology_t::point), item.material());
     for (const api::view_rect_t rect : {api::view_rect_t({{2, 2}, {0, 5}}), api::view_rect_t({{0, 5}, {1, 1}}), api::view_rect_t({{-8, -1}, {0, 5}}), api::view_rect_t({{20, 30}, {0, 5}}), api::view_rect_t({{0, 5}, {20, 30}})}) {
         camera.view_rect() = rect;
-        renderer.clear_color(clear_color);
-        test::expect_no_throw([&] { renderer.draw(camera, invalid); });
-        test::expect_no_throw([&] { renderer.draw(camera, api::render_item_t()); });
-        renderer.clear_color(camera, green);
+        renderer.clear_color(clear_color, inactive_metric);
+        test::expect_no_throw([&] { renderer.draw(camera, invalid, inactive_metric); });
+        test::expect_no_throw([&] { renderer.draw(camera, api::render_item_t(), inactive_metric); });
+        renderer.clear_color(camera, green, inactive_metric);
         require(colored_pixel_count(pixels) == 0);
     }
     camera.view_rect() = {{0, width}, {0, height}};
-    test::expect_throws<std::runtime_error>([&] { renderer.draw(camera, invalid); });
-    renderer.clear_color(red);
+    test::expect_throws<std::runtime_error>([&] { renderer.draw(camera, invalid, inactive_metric); });
+    renderer.clear_color(red, inactive_metric);
     for (const auto pixel : pixels) { expect_color(pixel, red); }
 
     // Absolute fragment coordinates include the viewport offset.
@@ -1730,8 +1734,8 @@ void test_camera_regions_and_clears() {
     fragment.color(fragment.fragment_coordinate() / vector4f_t({16, 16, 1, 1}));
     item.material() = std::make_shared<api::material_t>(std::make_shared<const software_shader::program_t>(std::move(vertex_shader).finalize(), std::move(fragment).finalize()));
     camera.view_rect() = {{3, 11}, {2, 9}};
-    renderer.clear_color(clear_color);
-    renderer.draw(camera, item);
+    renderer.clear_color(clear_color, inactive_metric);
+    renderer.draw(camera, item, inactive_metric);
     expect_color(pixels[pixel_index(3, 2, width)], {56, 40, 128, 255});
 }
 
@@ -1766,8 +1770,8 @@ void test_region_topologies_and_original_aspect() {
                 } break;
             }
             const auto item = make_render_item(make_typed_geometry(positions, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 4), indices, topology), material);
-            renderer.clear_color(clear_color);
-            renderer.draw(camera, item);
+            renderer.clear_color(clear_color, inactive_metric);
+            renderer.draw(camera, item, inactive_metric);
             require(0 < colored_pixel_count(pixels));
             for (int y = 0; y < height; ++y) {
                 for (int x = 0; x < width; ++x) {
@@ -1784,8 +1788,8 @@ void test_region_topologies_and_original_aspect() {
     const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex_shader).finalize(), std::move(fragment).finalize());
     const auto item = make_render_item(make_typed_geometry(std::vector<std::array<float, 3>>{{1.25F, 0, -2}}, api::vertex_attribute_t(api::vertex_attribute_type_t::R32, 3), {0}, api::vertex_primitive_topology_t::point), std::make_shared<api::material_t>(program));
     const api::camera_t camera({{-8, 8}, {0, 8}}, api::perspective_t(std::numbers::pi_v<float> / 2, 1, 9));
-    renderer.clear_color(clear_color);
-    renderer.draw(camera, item);
+    renderer.clear_color(clear_color, inactive_metric);
+    renderer.draw(camera, item, inactive_metric);
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             const bool expected = (x - 2) * (x - 2) + (y - 4) * (y - 4) <= 9;
@@ -1813,8 +1817,8 @@ void test_textured_3d_near_plane() {
     for (bool perspective : {false, true}) {
         api::camera_t camera({{0, 32}, {0, 32}}, api::orthographic_t({{-1, 1}, {-1, 1}}, 0.75F, 10));
         if (perspective) { camera.projection() = api::perspective_t(std::numbers::pi_v<float> / 2, 0.75F, 10); }
-        renderer.clear_color(clear_color);
-        renderer.draw(camera, item);
+        renderer.clear_color(clear_color, inactive_metric);
+        renderer.draw(camera, item, inactive_metric);
         int checked = 0, visible = 0, clipped = 0;
         for (int y = 0; y < 32; ++y) {
             for (int x = 0; x < 32; ++x) {
@@ -1838,8 +1842,8 @@ void test_textured_3d_near_plane() {
         const auto baseline = pixels;
         camera.position() = {2, 3, 4};
         item.translation() = {2, 3, 3};
-        renderer.clear_color(clear_color);
-        renderer.draw(camera, item);
+        renderer.clear_color(clear_color, inactive_metric);
+        renderer.draw(camera, item, inactive_metric);
         require(std::equal(pixels.begin(), pixels.end(), baseline.begin(), same_color));
         item.translation() = {0, 0, -1};
     }
@@ -1930,8 +1934,8 @@ void test_material_setting_invariants() {
     std::vector<float> depths(pixels.size(), 0.75F);
     api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
     renderer.framebuffer().depth(depths);
-    renderer.draw(make_camera(16, 16), item);
-    renderer.draw(make_camera(16, 16), shared_item);
+    renderer.draw(make_camera(16, 16), item, inactive_metric);
+    renderer.draw(make_camera(16, 16), shared_item, inactive_metric);
     expect_color(pixels[pixel_index(8, 8, 16)], blue);
     require(depths[pixel_index(8, 8, 16)] == 0.5F);
 }
@@ -1977,29 +1981,29 @@ void test_depth_attachment_updates() {
 
     const auto camera = make_camera(16, 16);
     auto item = make_visibility_item({{0, 0, 0, 1}}, {0}, api::vertex_primitive_topology_t::point);
-    renderer.draw(camera, item);
+    renderer.draw(camera, item, inactive_metric);
     require(colored_pixel_count(pixels) == 0); // The replacement attachment rejects the sample.
     renderer.framebuffer().depth(depths);
-    renderer.draw(camera, item);
+    renderer.draw(camera, item, inactive_metric);
     expect_color(pixels[pixel_index(8, 8, 16)], red);
     renderer.framebuffer().depth({});
     require(renderer.framebuffer().depth().empty());
-    renderer.clear_color(clear_color);
-    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, item); });
+    renderer.clear_color(clear_color, inactive_metric);
+    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, item, inactive_metric); });
     item.material()->depth_compare(api::comparison_t::always);
     item.material()->depth_write(false);
-    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, item); });
-    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(1.0F); });
+    test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, item, inactive_metric); });
+    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(1.0F, inactive_metric); });
     require(colored_pixel_count(pixels) == 0);
     item.material()->depth_test(false);
-    renderer.draw(camera, item);
+    renderer.draw(camera, item, inactive_metric);
     expect_color(pixels[pixel_index(8, 8, 16)], red);
     item.material()->depth_test(true);
     renderer.framebuffer() = api::framebuffer_t({}, 0, 0);
-    test::expect_no_throw([&] { renderer.draw(camera, item); });
+    test::expect_no_throw([&] { renderer.draw(camera, item, inactive_metric); });
     renderer.framebuffer() = api::framebuffer_t(pixels, 16, 16);
     api::camera_t outside({{20, 30}, {20, 30}}, api::orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
-    test::expect_no_throw([&] { renderer.draw(outside, item); });
+    test::expect_no_throw([&] { renderer.draw(outside, item, inactive_metric); });
 }
 
 void test_depth_comparisons_and_controls() {
@@ -2024,10 +2028,10 @@ void test_depth_comparisons_and_controls() {
             auto item = make_visibility_item({{0, 0, incoming * 2 - 1, 1}}, {0}, api::vertex_primitive_topology_t::point);
             item.material()->depth_compare(comparisons[comparison]);
             for (bool write : {false, true}) {
-                renderer.clear_color(clear_color);
+                renderer.clear_color(clear_color, inactive_metric);
                 std::ranges::fill(depths, 0.5F);
                 item.material()->depth_write(write);
-                renderer.draw(camera, item);
+                renderer.draw(camera, item, inactive_metric);
                 expect_color(pixels[center], expected[comparison][sample] ? red : clear_color);
                 require(depths[center] == (write && expected[comparison][sample] ? incoming : 0.5F));
             }
@@ -2037,11 +2041,11 @@ void test_depth_comparisons_and_controls() {
     for (bool test_depth : {false, true}) {
         for (bool write_depth : {false, true}) {
             for (float stored : {0.25F, 0.75F}) {
-                renderer.clear_color(clear_color);
+                renderer.clear_color(clear_color, inactive_metric);
                 std::ranges::fill(depths, stored);
                 item.material()->depth_test(test_depth);
                 item.material()->depth_write(write_depth);
-                renderer.draw(camera, item);
+                renderer.draw(camera, item, inactive_metric);
                 const bool passes = !test_depth || stored == 0.75F;
                 expect_color(pixels[center], passes ? red : clear_color);
                 require(depths[center] == (passes && test_depth && write_depth ? 0.5F : stored));
@@ -2051,10 +2055,10 @@ void test_depth_comparisons_and_controls() {
     for (float ndc_z : {-1.0F, 1.0F}) {
         item = make_visibility_item({{0, 0, ndc_z, 1}}, {0}, api::vertex_primitive_topology_t::point);
         for (auto comparison : {api::comparison_t::less, api::comparison_t::less_equal}) {
-            renderer.clear_color(clear_color);
+            renderer.clear_color(clear_color, inactive_metric);
             std::ranges::fill(depths, 1.0F);
             item.material()->depth_compare(comparison);
-            renderer.draw(camera, item);
+            renderer.draw(camera, item, inactive_metric);
             const bool passes = ndc_z == -1 || comparison == api::comparison_t::less_equal;
             expect_color(pixels[center], passes ? red : clear_color);
             require(depths[center] == (ndc_z == -1 ? 0.0F : 1.0F));
@@ -2072,10 +2076,10 @@ void test_depth_visibility_and_fragment_results() {
     auto near_item = make_visibility_item(visibility_quad(-0.5F), indices, api::vertex_primitive_topology_t::triangle);
     auto far_item = make_visibility_item(visibility_quad(0.5F), indices, api::vertex_primitive_topology_t::triangle, {0, 0, 1, 1});
     for (bool reverse : {false, true}) {
-        renderer.clear_color(clear_color);
+        renderer.clear_color(clear_color, inactive_metric);
         std::ranges::fill(depths, 1.0F);
-        renderer.draw(camera, reverse ? near_item : far_item);
-        renderer.draw(camera, reverse ? far_item : near_item);
+        renderer.draw(camera, reverse ? near_item : far_item, inactive_metric);
+        renderer.draw(camera, reverse ? far_item : near_item, inactive_metric);
         for (std::size_t i = 0; i < pixels.size(); ++i) {
             expect_color(pixels[i], red);
             require(depths[i] == 0.25F);
@@ -2087,10 +2091,10 @@ void test_depth_visibility_and_fragment_results() {
         near_item.material() = std::make_shared<api::material_t>(make_visibility_program(write_color, true));
         near_item.material()->uniform(0, vector4f_t({1, 0, 0, 1}));
         near_item.material()->depth_test(true);
-        renderer.clear_color(clear_color);
+        renderer.clear_color(clear_color, inactive_metric);
         std::ranges::fill(depths, 1.0F);
-        renderer.draw(camera, near_item);
-        renderer.draw(camera, far_item);
+        renderer.draw(camera, near_item, inactive_metric);
+        renderer.draw(camera, far_item, inactive_metric);
         for (int y = 0; y < 16; ++y) {
             for (int x = 0; x < 16; ++x) {
                 const auto i = pixel_index(x, y, 16);
@@ -2103,10 +2107,10 @@ void test_depth_visibility_and_fragment_results() {
     auto equal_item = make_visibility_item(visibility_quad(0.5F), indices, api::vertex_primitive_topology_t::triangle);
     for (auto comparison : {api::comparison_t::less, api::comparison_t::less_equal}) {
         equal_item.material()->depth_compare(comparison);
-        renderer.clear_color(clear_color);
+        renderer.clear_color(clear_color, inactive_metric);
         std::ranges::fill(depths, 1.0F);
-        renderer.draw(camera, far_item);
-        renderer.draw(camera, equal_item);
+        renderer.draw(camera, far_item, inactive_metric);
+        renderer.draw(camera, equal_item, inactive_metric);
         for (const auto pixel : pixels) { expect_color(pixel, comparison == api::comparison_t::less ? blue : red); }
     }
     // Two intersecting planes with unequal W: their analytical depth is linear in NDC X.
@@ -2121,10 +2125,10 @@ void test_depth_visibility_and_fragment_results() {
         near_item = make_visibility_item(rising, indices, api::vertex_primitive_topology_t::triangle);
         far_item = make_visibility_item(falling, indices, api::vertex_primitive_topology_t::triangle, {0, 0, 1, 1});
         for (bool reverse : {false, true}) {
-            renderer.clear_color(clear_color);
+            renderer.clear_color(clear_color, inactive_metric);
             std::ranges::fill(depths, 1.0F);
-            renderer.draw(camera, reverse ? near_item : far_item);
-            renderer.draw(camera, reverse ? far_item : near_item);
+            renderer.draw(camera, reverse ? near_item : far_item, inactive_metric);
+            renderer.draw(camera, reverse ? far_item : near_item, inactive_metric);
             for (int y = 0; y < 16; ++y) {
                 for (int x = 0; x < 16; ++x) {
                     const float ndc_x = (float(x) + 0.5F) / 8 - 1;
@@ -2159,9 +2163,9 @@ void test_culling_and_topology_depth() {
         auto positions = visibility_quad(-0.5F);
         for (auto& position : positions) { position[0] *= 0.75F; position[1] *= 0.75F; }
         auto item = make_visibility_item(positions, indices, topology, {1, 0, 0, 1}, make_clip_program(true));
-        renderer.clear_color(clear_color);
+        renderer.clear_color(clear_color, inactive_metric);
         std::ranges::fill(depths, 1.0F);
-        renderer.draw(camera, item);
+        renderer.draw(camera, item, inactive_metric);
         const auto baseline = pixels;
         require(0 < colored_pixel_count(baseline));
         for (bool reverse : {false, true}) {
@@ -2174,9 +2178,9 @@ void test_culling_and_topology_depth() {
                     auto& material = *item.material();
                     material.front_face(winding);
                     material.cull(cull);
-                    renderer.clear_color(clear_color);
+                    renderer.clear_color(clear_color, inactive_metric);
                     std::ranges::fill(depths, 1.0F);
-                    renderer.draw(camera, item);
+                    renderer.draw(camera, item, inactive_metric);
                     const bool front = !triangle || (reverse == (winding == api::winding_t::clockwise));
                     const bool culled = triangle && (cull == api::cull_mode_t::both || (front ? cull == api::cull_mode_t::front : cull == api::cull_mode_t::back));
                     for (std::size_t i = 0; i < pixels.size(); ++i) {
@@ -2193,8 +2197,8 @@ void test_culling_and_topology_depth() {
         item.material()->front_face(api::winding_t::counter_clockwise);
         item.material()->cull(api::cull_mode_t::none);
         std::ranges::fill(depths, 0.0F);
-        renderer.clear_color(clear_color);
-        renderer.draw(camera, item);
+        renderer.clear_color(clear_color, inactive_metric);
+        renderer.draw(camera, item, inactive_metric);
         require(colored_pixel_count(pixels) == 0);
         require(std::ranges::all_of(depths, [](float depth) { return depth == 0.0F; }));
     }
@@ -2209,9 +2213,9 @@ void test_culling_and_topology_depth() {
             for (auto cull : {api::cull_mode_t::front, api::cull_mode_t::back}) {
                 item.material()->cull(cull);
                 item.material()->depth_compare(api::comparison_t::always);
-                renderer.clear_color(clear_color);
+                renderer.clear_color(clear_color, inactive_metric);
                 std::ranges::fill(clipped_depth, 1.0F);
-                renderer.draw(make_camera(32, 32), item);
+                renderer.draw(make_camera(32, 32), item, inactive_metric);
                 const bool visible = reverse ? cull == api::cull_mode_t::back : cull == api::cull_mode_t::front;
                 require(colored_pixel_count(clipped_pixels) == (visible ? 1U : 0U));
                 expect_color(clipped_pixels[0], visible ? red : clear_color);
@@ -2252,10 +2256,10 @@ void test_projected_depth_visibility() {
         std::vector<api::rgba8_t> baseline;
         std::vector<float> baseline_depth;
         for (bool reverse : {false, true}) {
-            renderer.clear_color(clear_color);
+            renderer.clear_color(clear_color, inactive_metric);
             std::ranges::fill(depths, 1.0F);
-            renderer.draw(camera, reverse ? blue_item : red_item);
-            renderer.draw(camera, reverse ? red_item : blue_item);
+            renderer.draw(camera, reverse ? blue_item : red_item, inactive_metric);
+            renderer.draw(camera, reverse ? red_item : blue_item, inactive_metric);
             if (!reverse) { baseline = pixels; baseline_depth = depths; }
             else {
                 require(std::equal(pixels.begin(), pixels.end(), baseline.begin(), same_color));
@@ -2296,13 +2300,13 @@ void test_projected_depth_visibility() {
         }
         // Negative object scale reverses winding; culling follows the transformed face.
         red_item.scale()[0] = -1;
-        renderer.clear_color(clear_color);
+        renderer.clear_color(clear_color, inactive_metric);
         std::ranges::fill(depths, 1.0F);
-        renderer.draw(camera, red_item);
+        renderer.draw(camera, red_item, inactive_metric);
         require(colored_pixel_count(pixels) == 0);
         require(std::ranges::all_of(depths, [](float depth) { return depth == 1.0F; }));
         red_material->front_face(api::winding_t::clockwise);
-        renderer.draw(camera, red_item);
+        renderer.draw(camera, red_item, inactive_metric);
         require(100 < colored_pixel_count(pixels));
         red_material->front_face(api::winding_t::counter_clockwise);
         red_item.scale()[0] = 1;
@@ -2323,9 +2327,9 @@ void test_bounded_depth_writes() {
     };
     for (const auto& rectangle : rectangles) {
         const api::camera_t camera(rectangle, api::orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
-        renderer.clear_color(clear_color);
+        renderer.clear_color(clear_color, inactive_metric);
         std::ranges::fill(depths, 1.0F);
-        renderer.draw(camera, item);
+        renderer.draw(camera, item, inactive_metric);
         for (int y = 0; y < 16; ++y) {
             for (int x = 0; x < 16; ++x) {
                 const auto i = pixel_index(x, y, 16);
@@ -2343,7 +2347,7 @@ void test_bounded_depth_writes() {
     api::framebuffer_t replacement(replacement_pixels, 4, 4);
     replacement.depth(replacement_depth);
     renderer.framebuffer() = replacement;
-    renderer.draw(make_camera(4, 4), item);
+    renderer.draw(make_camera(4, 4), item, inactive_metric);
     require(std::equal(pixels.begin(), pixels.end(), old_pixels.begin(), same_color));
     require(depths == old_depth);
     for (std::size_t i = 0; i < replacement_pixels.size(); ++i) {
@@ -2367,12 +2371,12 @@ void test_depth_clears() {
     item.material()->depth_write(false);
     for (const auto& rectangle : rectangles) {
         api::camera_t camera(rectangle, api::orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
-        renderer.clear_color(clear_color);
-        renderer.clear_depth(1.0F);
-        renderer.draw(camera, item); // A previous draw with writes disabled cannot mask clearing.
+        renderer.clear_color(clear_color, inactive_metric);
+        renderer.clear_depth(1.0F, inactive_metric);
+        renderer.draw(camera, item, inactive_metric); // A previous draw with writes disabled cannot mask clearing.
         const auto previous_colors = pixels;
         camera.position() = {std::numeric_limits<float>::quiet_NaN(), 0, 0};
-        renderer.clear_depth(camera, 0.25F);
+        renderer.clear_depth(camera, 0.25F, inactive_metric);
         require(std::equal(pixels.begin(), pixels.end(), previous_colors.begin(), same_color));
         for (int y = 0; y < 16; ++y) {
             for (int x = 0; x < 16; ++x) {
@@ -2380,29 +2384,29 @@ void test_depth_clears() {
             }
         }
         const auto previous_depths = depths;
-        renderer.clear_color(camera, green);
+        renderer.clear_color(camera, green, inactive_metric);
         require(depths == previous_depths);
     }
     // Clamping includes infinities; NaN is rejected before either clear can write.
     for (float supplied : {-std::numeric_limits<float>::infinity(), -0.5F, 0.0F, 0.5F, 1.0F, 2.0F, std::numeric_limits<float>::infinity()}) {
-        renderer.clear_depth(supplied);
+        renderer.clear_depth(supplied, inactive_metric);
         require(std::ranges::all_of(depths, [&](float depth) { return depth == std::clamp(supplied, 0.0F, 1.0F); }));
-        renderer.clear_depth(make_camera(16, 16), supplied);
+        renderer.clear_depth(make_camera(16, 16), supplied, inactive_metric);
         require(std::ranges::all_of(depths, [&](float depth) { return depth == std::clamp(supplied, 0.0F, 1.0F); }));
     }
     const float nan = std::numeric_limits<float>::quiet_NaN();
-    renderer.clear_depth(0.75F);
-    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(nan); });
-    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(make_camera(16, 16), nan); });
+    renderer.clear_depth(0.75F, inactive_metric);
+    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(nan, inactive_metric); });
+    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(make_camera(16, 16), nan, inactive_metric); });
     require(std::ranges::all_of(depths, [](float depth) { return depth == 0.75F; }));
     renderer.framebuffer() = api::framebuffer_t(pixels, 16, 16);
-    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(1.0F); });
-    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(make_camera(16, 16), 1.0F); });
+    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(1.0F, inactive_metric); });
+    test::expect_throws<std::invalid_argument>([&] { renderer.clear_depth(make_camera(16, 16), 1.0F, inactive_metric); });
     api::camera_t outside({{20, 30}, {20, 30}}, api::orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
-    test::expect_no_throw([&] { renderer.clear_depth(outside, nan); });
+    test::expect_no_throw([&] { renderer.clear_depth(outside, nan, inactive_metric); });
     renderer.framebuffer() = api::framebuffer_t({}, 0, 16);
-    test::expect_no_throw([&] { renderer.clear_depth(nan); });
-    test::expect_no_throw([&] { renderer.clear_depth(make_camera(16, 16), nan); });
+    test::expect_no_throw([&] { renderer.clear_depth(nan, inactive_metric); });
+    test::expect_no_throw([&] { renderer.clear_depth(make_camera(16, 16), nan, inactive_metric); });
 }
 
 void test_profiling() {
@@ -2418,12 +2422,13 @@ void test_profiling() {
     measured_framebuffer.depth(measured_depth);
     normal_framebuffer.depth(normal_depth);
     api::software_renderer_t measured(measured_framebuffer);
-    auto& profiler = measured.profiler();
+    profiling::profiler_t profiler;
     require(profiler.enabled() && profiler.size() == 0);
     api::software_renderer_t normal(normal_framebuffer);
-    normal.profiler().enabled() = false;
-    require(!std::as_const(normal).profiler().enabled());
-    require(&std::as_const(measured).profiler() == &profiler);
+    const auto measure = [&](auto&& function) {
+        auto metric = profiler.metric<application_metrics_t>();
+        std::invoke(function, metric);
+    };
     const auto camera = make_camera(16, 16);
     std::size_t vertex_invocations = 0;
     raster_metrics_t expected_raster;
@@ -2436,27 +2441,27 @@ void test_profiling() {
         }
         if (mode == 4) { item.material()->cull(api::cull_mode_t::both); }
         const std::size_t draws = mode == 5 ? 2 : 1;
-        const auto render = [&](auto& renderer) {
-            renderer.clear_color(clear_color);
-            renderer.clear_depth(mode == 1 ? 0.0F : 1.0F);
-            for (std::size_t i = 0; i < draws; ++i) { renderer.draw(camera, item); }
+        const auto render = [&](auto& renderer, profiling::metric_t& parent_metric) {
+            renderer.clear_color(clear_color, parent_metric);
+            renderer.clear_depth(mode == 1 ? 0.0F : 1.0F, parent_metric);
+            for (std::size_t i = 0; i < draws; ++i) { renderer.draw(camera, item, parent_metric); }
         };
         {
             auto metric = profiler.metric<application_metrics_t>();
-            render(measured);
-            metric.update([draws](application_metrics_t& metric) noexcept { metric.m_items = draws; });
+            render(measured, metric);
+            metric.update<application_metrics_t>([draws](application_metrics_t& metric) noexcept { metric.m_items = draws; });
         }
-        render(normal);
+        render(normal, inactive_metric);
         require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
         require(measured_depth == normal_depth);
         require(profiler.size() == 7);
         require(profiler.metrics<application_metrics_t>()->m_items == draws);
-        require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == 256 * std::size_t(mode + 1));
-        require(profiler.metrics<clear_depth_metrics_t>()->m_depth_writes == 256 * std::size_t(mode + 1));
-        const auto* vertex_metrics = profiler.metrics<vertex_metrics_t>();
+        require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->m_color_writes == 256 * std::size_t(mode + 1));
+        require(profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->m_depth_writes == 256 * std::size_t(mode + 1));
+        const auto* vertex_metrics = profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>();
         vertex_invocations += 6 * draws;
         require(vertex_metrics->m_invocations == vertex_invocations && vertex_metrics->m_expected == vertex_invocations);
-        const auto* raster_metrics = profiler.metrics<raster_metrics_t>();
+        const auto* raster_metrics = profiler.metrics<application_metrics_t, draw_metrics_t, raster_metrics_t>();
         expected_raster.m_invocations += mode == 4 ? 0 : 256 * draws;
         expected_raster.m_discards += mode == 2 || mode == 3 ? 128 : 0;
         expected_raster.m_depth_rejections += mode == 1 || mode == 5 ? 256 : 0;
@@ -2474,17 +2479,28 @@ void test_profiling() {
     require(report.str().find("application.frame") != std::string::npos && report.str().find("items=2") != std::string::npos);
     require(report.str().find("vertex_invocations=42, expected=42") != std::string::npos);
 
+    const auto report_text = report.str();
+    const auto color_position = report_text.find("\n├─ renderer.clear_color");
+    const auto depth_position = report_text.find("\n├─ renderer.clear_depth");
+    const auto draw_position = report_text.find("\n└─ renderer.draw");
+    const auto preparation_position = report_text.find("\n   ├─ renderer.preparation");
+    const auto vertex_position = report_text.find("\n   ├─ renderer.vertices");
+    const auto raster_position = report_text.find("\n   └─ renderer.rasterization");
+    require(color_position < depth_position && depth_position < draw_position);
+    require(draw_position < preparation_position && preparation_position < vertex_position);
+    require(vertex_position < raster_position && raster_position != std::string::npos);
+
     // Invalid resources update timing; counters retain all work completed so far.
-    test::expect_throws([&] { measured.draw(camera, api::render_item_t{}); });
-    test::expect_throws([&] { normal.draw(camera, api::render_item_t{}); });
-    require(profiler.size() == 7 && profiler.unwinding<draw_metrics_t>() == true && profiler.unwinding<preparation_metrics_t>() == true);
-    require(profiler.metrics<vertex_metrics_t>()->m_invocations == vertex_invocations);
+    test::expect_throws([&] { measure([&](profiling::metric_t& metric) { measured.draw(camera, api::render_item_t{}, metric); }); });
+    test::expect_throws([&] { normal.draw(camera, api::render_item_t{}, inactive_metric); });
+    require(profiler.size() == 7 && profiler.unwinding<application_metrics_t, draw_metrics_t>() == true && profiler.unwinding<application_metrics_t, draw_metrics_t, preparation_metrics_t>() == true);
+    require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->m_invocations == vertex_invocations);
 
     // Empty intersections retain their original validation bypass in both configurations.
     auto empty_camera = make_camera(0, 0);
-    test::expect_no_throw([&] { measured.draw(empty_camera, api::render_item_t{}); });
-    test::expect_no_throw([&] { normal.draw(empty_camera, api::render_item_t{}); });
-    require(profiler.size() == 7 && profiler.unwinding<draw_metrics_t>() == false);
+    test::expect_no_throw([&] { measure([&](profiling::metric_t& metric) { measured.draw(empty_camera, api::render_item_t{}, metric); }); });
+    test::expect_no_throw([&] { normal.draw(empty_camera, api::render_item_t{}, inactive_metric); });
+    require(profiler.size() == 7 && profiler.unwinding<application_metrics_t, draw_metrics_t>() == false);
 
     // Points, lines, all assembly forms, and clipping use the same instrumented path.
     for (const auto topology : {api::vertex_primitive_topology_t::point, api::vertex_primitive_topology_t::line,
@@ -2495,12 +2511,12 @@ void test_profiling() {
         auto positions = visibility_quad(0);
         positions[0] = {-2, 2, -2, 1};
         auto item = make_visibility_item(positions, indices, topology);
-        measured.clear_color(clear_color); normal.clear_color(clear_color);
-        measured.clear_depth(1); normal.clear_depth(1);
-        measured.draw(camera, item); normal.draw(camera, item);
+        measure([&](profiling::metric_t& metric) { measured.clear_color(clear_color, metric); }); normal.clear_color(clear_color, inactive_metric);
+        measure([&](profiling::metric_t& metric) { measured.clear_depth(1, metric); }); normal.clear_depth(1, inactive_metric);
+        measure([&](profiling::metric_t& metric) { measured.draw(camera, item, metric); }); normal.draw(camera, item, inactive_metric);
         vertex_invocations += indices.size();
-        require(profiler.metrics<vertex_metrics_t>()->m_invocations == vertex_invocations);
-        require(profiler.metrics<vertex_metrics_t>()->m_expected == vertex_invocations);
+        require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->m_invocations == vertex_invocations);
+        require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->m_expected == vertex_invocations);
         require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
         require(measured_depth == normal_depth);
     }
@@ -2517,35 +2533,35 @@ void test_profiling() {
     auto throwing_item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
     throwing_item.material() = std::make_shared<api::material_t>(throwing_program);
     throwing_item.material()->uniform(0, false);
-    test::expect_throws<std::runtime_error>([&] { measured.draw(camera, throwing_item); });
-    test::expect_throws<std::runtime_error>([&] { normal.draw(camera, throwing_item); });
+    test::expect_throws<std::runtime_error>([&] { measure([&](profiling::metric_t& metric) { measured.draw(camera, throwing_item, metric); }); });
+    test::expect_throws<std::runtime_error>([&] { normal.draw(camera, throwing_item, inactive_metric); });
     require(profiler.size() == 7);
-    require(profiler.unwinding<vertex_metrics_t>() == true);
-    require(profiler.metrics<vertex_metrics_t>()->m_invocations == vertex_invocations + 1);
-    require(profiler.metrics<vertex_metrics_t>()->m_expected == vertex_invocations + 6);
-    require(profiler.unwinding<preparation_metrics_t>() == false);
+    require(profiler.unwinding<application_metrics_t, draw_metrics_t, vertex_metrics_t>() == true);
+    require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->m_invocations == vertex_invocations + 1);
+    require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->m_expected == vertex_invocations + 6);
+    require(profiler.unwinding<application_metrics_t, draw_metrics_t, preparation_metrics_t>() == false);
 
-    // Enablement affects new measurements; an active application metric still finishes.
+    // Enablement affects subsequent roots; the active frame still records children.
     {
         auto metric = profiler.metric<application_metrics_t>();
         profiler.enabled() = false;
-        metric.update([](application_metrics_t& metric) noexcept { metric.m_items = 3; });
+        measured.clear_color(make_camera(2, 2), clear_color, metric);
+        metric.update<application_metrics_t>([](application_metrics_t& metric) noexcept { metric.m_items = 3; });
     }
     require(profiler.metrics<application_metrics_t>()->m_items == 3);
-    require(!normal.profiler().enabled() && normal.profiler().size() == 0);
-    const auto color_writes = profiler.metrics<clear_color_metrics_t>()->m_color_writes;
-    const auto depth_writes = profiler.metrics<clear_depth_metrics_t>()->m_depth_writes;
-    measured.clear_color(empty_camera, clear_color);
-    require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == color_writes);
+    const auto color_writes = profiler.metrics<application_metrics_t, clear_color_metrics_t>()->m_color_writes;
+    const auto depth_writes = profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->m_depth_writes;
+    measure([&](profiling::metric_t& metric) { measured.clear_color(empty_camera, clear_color, metric); });
+    require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->m_color_writes == color_writes);
     profiler.enabled() = true;
-    measured.clear_color(empty_camera, clear_color);
-    measured.clear_depth(empty_camera, 1);
-    require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == color_writes);
-    require(profiler.metrics<clear_depth_metrics_t>()->m_depth_writes == depth_writes);
-    measured.clear_color(make_camera(2, 2), clear_color);
-    measured.clear_depth(make_camera(2, 2), 1);
-    require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == color_writes + 4);
-    require(profiler.metrics<clear_depth_metrics_t>()->m_depth_writes == depth_writes + 4);
+    measure([&](profiling::metric_t& metric) { measured.clear_color(empty_camera, clear_color, metric); });
+    measure([&](profiling::metric_t& metric) { measured.clear_depth(empty_camera, 1, metric); });
+    require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->m_color_writes == color_writes);
+    require(profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->m_depth_writes == depth_writes);
+    measure([&](profiling::metric_t& metric) { measured.clear_color(make_camera(2, 2), clear_color, metric); });
+    measure([&](profiling::metric_t& metric) { measured.clear_depth(make_camera(2, 2), 1, metric); });
+    require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->m_color_writes == color_writes + 4);
+    require(profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->m_depth_writes == depth_writes + 4);
     require(profiler.size() == 7);
 }
 

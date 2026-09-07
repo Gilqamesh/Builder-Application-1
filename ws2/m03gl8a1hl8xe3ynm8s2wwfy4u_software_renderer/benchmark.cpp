@@ -134,15 +134,15 @@ std::vector<render_item_t> make_workload(std::string_view name) {
     throw std::invalid_argument("unknown benchmark workload");
 }
 
-std::int64_t render_frame(software_renderer_t& software_renderer, const camera_t& camera, const std::vector<render_item_t>& items) {
+std::int64_t render_frame(software_renderer_t& software_renderer, const camera_t& camera, const std::vector<render_item_t>& items, profiling::profiler_t& profiler) {
     const auto start = std::chrono::steady_clock::now();
     {
-        auto metric = software_renderer.profiler().metric<frame_metrics_t>();
-        software_renderer.clear_color({0, 0, 0, 255});
-        software_renderer.clear_depth(1);
+        auto metric = profiler.metric<frame_metrics_t>();
+        software_renderer.clear_color({0, 0, 0, 255}, metric);
+        software_renderer.clear_depth(1, metric);
         for (const auto& item : items) {
-            software_renderer.draw(camera, item);
-            metric.update([](frame_metrics_t& metric) noexcept { ++metric.m_draws; });
+            software_renderer.draw(camera, item, metric);
+            metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.m_draws; });
         }
     }
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
@@ -210,9 +210,10 @@ json_t benchmark_t::run_workload() const {
     framebuffer_t normal_buffer(normal_pixels, m_size, m_size), measured_buffer(measured_pixels, m_size, m_size);
     normal_buffer.depth(normal_depth); measured_buffer.depth(measured_depth);
     software_renderer_t normal(normal_buffer);
-    normal.profiler().enabled() = false;
+    profiling::profiler_t normal_profiler;
+    normal_profiler.enabled() = false;
     software_renderer_t measured(measured_buffer);
-    auto& profiler = measured.profiler();
+    profiling::profiler_t profiler;
     profiler.enabled() = true;
     const camera_t camera({{0, m_size}, {0, m_size}}, orthographic_t({{-1, 1}, {-1, 1}}, 0.1F, 10.0F));
     std::vector<std::array<std::int64_t, 4>> observations;
@@ -221,11 +222,11 @@ json_t benchmark_t::run_workload() const {
         for (int sample = -m_warmup; sample < m_samples; ++sample) {
             std::int64_t normal_ns, measured_ns;
             if ((run % 2 + sample % 2) % 2 == 0) {
-                normal_ns = render_frame(normal, camera, items);
-                measured_ns = render_frame(measured, camera, items);
+                normal_ns = render_frame(normal, camera, items, normal_profiler);
+                measured_ns = render_frame(measured, camera, items, profiler);
             } else {
-                measured_ns = render_frame(measured, camera, items);
-                normal_ns = render_frame(normal, camera, items);
+                measured_ns = render_frame(measured, camera, items, profiler);
+                normal_ns = render_frame(normal, camera, items, normal_profiler);
             }
             if (!std::equal(normal_pixels.begin(), normal_pixels.end(), measured_pixels.begin(), [](rgba8_t a, rgba8_t b) { return std::bit_cast<std::uint32_t>(a) == std::bit_cast<std::uint32_t>(b); }) || normal_depth != measured_depth) {
                 throw std::runtime_error("benchmark enabled/disabled profiling results differ");
@@ -268,7 +269,7 @@ json_t benchmark_t::run_workload() const {
         {"summary", {{"normal", normal_summary}, {"profiled", profiled_summary}}},
         {"median_overhead_percent", (profiled_median / normal_median - 1) * 100},
         {"peak_rss_bytes", peak_rss_bytes},
-        {"metrics", profiler.size()}
+        {"metric_nodes", profiler.size()}
     };
 }
 
@@ -297,11 +298,11 @@ json_t benchmark_t::metadata(const filesystem::path_t& program) const {
     }
     if (!maps.eof()) { throw std::runtime_error("benchmark could not read loaded artifact mappings"); }
     return {
-        {"schema_version", 3}, {"workload_version", 1},
+        {"schema_version", 4}, {"workload_version", 1},
         {"size", m_size}, {"warmup_per_run", m_warmup}, {"samples_per_run", m_samples}, {"runs", m_runs},
         {"cpu", cpu}, {"platform", std::format("{} {} {}", platform.sysname, platform.release, platform.machine)},
         {"scope", "frame measurement, full color/depth clears, fixed draw sequence; setup, comparison, reporting excluded"},
-        {"report", "persistent application data; inclusive timing statistics across all enabled completions, including warmup; descending total duration"},
+        {"report", "persistent data per metric path; inclusive timing statistics across all enabled completions, including warmup; parents before children in first-use order"},
         {"peak_rss_scope", "Linux VmHWM through workload capture and text report; both profiling configurations, setup and warmup included; summaries and JSON serialization excluded"},
         {"build", {
             {"system", "Builder"}, {"binary", program.string()}, {"loaded_files", std::move(loaded_files)},

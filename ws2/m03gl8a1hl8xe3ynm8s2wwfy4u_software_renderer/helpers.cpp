@@ -821,7 +821,7 @@ void shade_sample(
     bool front_facing,
     std::span<const varying_entry_t> inputs,
     software_shader::fragment_io_t& io,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 ) {
     if (x < bounds.m_first_x || y < bounds.m_first_y || bounds.m_end_x <= x || bounds.m_end_y <= y) {
         return;
@@ -838,12 +838,12 @@ void shade_sample(
         front_facing
     );
     set_fragment_inputs(io, inputs);
-    metric.update([](raster_metrics_t& metric) noexcept {
+    metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
         ++metric.m_invocations;
     });
     material.program()->run(material.bindings(), io);
     if (io.discarded()) {
-        metric.update([](raster_metrics_t& metric) noexcept {
+        metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
             ++metric.m_discards;
         });
         return;
@@ -853,21 +853,21 @@ void shade_sample(
         const auto comparison = material.depth_compare();
         const bool passes = comparison == comparison_t::always || (comparison != comparison_t::never && depth_passes(comparison, depth, framebuffer.depth()[index]));
         if (!passes) {
-            metric.update([](raster_metrics_t& metric) noexcept {
+            metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
                 ++metric.m_depth_rejections;
             });
             return;
         }
         if (material.depth_write()) {
             framebuffer.depth()[index] = depth;
-            metric.update([](raster_metrics_t& metric) noexcept {
+            metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
                 ++metric.m_depth_writes;
             });
         }
     }
     if (const auto color = io.color()) {
         framebuffer.pixels()[index] = to_rgba8(*color);
-        metric.update([](raster_metrics_t& metric) noexcept {
+        metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
             ++metric.m_color_writes;
         });
     }
@@ -880,7 +880,7 @@ void rasterize_point(
     const pipeline_vertex_view_t& vertex,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 ) {
     if (!inside_clip_volume(vertex)) {
         return;
@@ -928,7 +928,7 @@ void rasterize_line(
     clipping_workspace_t& clipping,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 ) {
     const auto clipped_index = clip_line(first, second, clipping);
     if (!clipped_index) {
@@ -990,7 +990,7 @@ void rasterize_triangle(
     raster_workspace_t& workspace,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 ) {
     prepare_triangle(first, second, third, bounds.m_view_width, bounds.m_view_height, workspace);
     if (workspace.m_empty) {

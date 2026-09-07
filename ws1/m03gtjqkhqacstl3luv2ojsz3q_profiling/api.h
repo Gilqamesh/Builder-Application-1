@@ -3,34 +3,35 @@
 
 # include "helpers.h"
 
+# include <array>
 # include <chrono>
 # include <concepts>
 # include <cstddef>
 # include <format>
 # include <functional>
-# include <memory>
 # include <optional>
 # include <ostream>
 # include <stdexcept>
+# include <tuple>
 # include <type_traits>
 # include <typeinfo>
 # include <utility>
-# include <vector>
 
 namespace m03gtjqkhqacstl3luv2ojsz3q_profiling {
 
 /**
- * @brief Times one measurement until stop() or destruction.
+ * @brief Measures one tree node until stop() or destruction and opens explicit children.
  *
- * The profiler outlives its active metrics. Default metrics are inactive.
+ * The owning profiler outlives its metrics. Metrics are single-threaded and must
+ * finish in reverse start order. Explicit misuse is rejected without stopping;
+ * destruction with active children terminates. Exception exits retain updates.
+ * Default and disabled metrics are inactive and produce inactive children.
  */
-template <typename T>
 class metric_t {
 public:
     metric_t() noexcept;
-    // Used by profiler_t::metric().
-    template <typename... Args>
-    explicit metric_t(stored_metric_t<T>& stored_metric, Args&&... args);
+    // Internal factory construction; storage.start() has already started this node.
+    metric_t(storage_t& storage, metric_base_t& metric) noexcept;
     ~metric_t();
     metric_t(const metric_t&) = delete;
     metric_t& operator=(const metric_t&) = delete;
@@ -39,42 +40,46 @@ public:
 
     explicit operator bool() const noexcept;
     /**
-     * @brief Invokes function immediately with T& while active; otherwise does nothing.
+     * @brief Opens a child identified by this node and T, inheriting recording from this measurement.
      *
-     * The reference is borrowed for this invocation; the callable is not retained
-     * and its exceptions propagate. Put metric-only work inside the callable:
-     * capture expressions are evaluated even when inactive.
+     * Requires this measurement to be the active leaf. A stopped recorded metric
+     * cannot open children. Type, construction, and allocation rules match profiler_t::metric().
      */
-    template <typename F>
+    template <typename T, typename... Args>
+    metric_t metric(Args&&... args);
+    /**
+     * @brief Invokes function with the stored T& while active, rejecting a mismatched type.
+     *
+     * The reference is borrowed for this invocation and exceptions propagate.
+     * Put metric-only work inside the callable; captures still evaluate normally.
+     * Inactive and stopped metrics skip the callable and the runtime type check.
+     */
+    template <typename T, typename F>
     requires std::invocable<F, T&>
-    void update(F&& function) noexcept(std::is_nothrow_invocable_v<F, T&>);
-
-    /** @brief Stops timing once; subsequent updates, stops, and destruction do nothing. */
-    void stop() noexcept;
+    void update(F&& function);
+    /** @brief Finishes a leaf measurement; subsequent updates, stops, and destruction do nothing. */
+    void stop();
 
 private:
-    static_assert(std::is_object_v<T> && std::same_as<T, std::remove_cv_t<T>>, "profiling requires an unqualified metric object type");
-    static_assert(std::is_nothrow_destructible_v<T>, "profiling requires nonthrowing metric destruction");
-    static_assert(std::formattable<const T, char>, "profiling requires a usable std::formatter for the const metric");
-
-    stored_metric_t<T>* m_stored_metric = nullptr;
+    storage_t* m_storage = nullptr;
+    metric_base_t* m_metric = nullptr;
 };
 
 /**
- * @brief Retains persistent data and lifetime timing statistics for each metric type.
+ * @brief Owns persistent metric data and inclusive timing statistics for each metric path.
  *
- * Single-threaded and initially enabled. Enablement affects new measurements;
- * active measurements finish normally. Disabled creation skips lookup, allocation,
- * T construction, and clock reads; argument expressions still evaluate normally.
- * Storage grows internally; constructing a profiler allocates nothing.
+ * Single-threaded and initially enabled. Root creation samples enablement;
+ * descendants inherit it, so recording changes affect subsequent roots.
+ * Disabled creation skips lookup, allocation, T construction, and clock reads;
+ * argument expressions still evaluate. Construction allocates nothing.
  *
- * One measurement of each type may be active; different types may overlap.
- * Each type is constructed once and reused; only update() changes its data.
- * Durations are inclusive monotonic elapsed time. Exception exits preserve updates.
+ * Roots and siblings execute sequentially. Every child finishes before its parent.
+ * A type under different parents has independent data; repeated calls on the same
+ * path reuse data. Recursive types create distinct nodes at each depth.
  *
- * Reads, reports, and destruction require all metrics stopped. Returned data
- * pointers remain valid until profiler destruction; access requires all metrics
- * stopped. Data borrowed inside T must remain valid through deferred use.
+ * Reads and reports require all metrics stopped. Returned data pointers remain
+ * valid until profiler destruction; access requires all metrics stopped. Data
+ * borrowed inside T must remain valid through deferred use.
  */
 class profiler_t {
 public:
@@ -88,53 +93,62 @@ public:
     bool& enabled() noexcept;
     const bool& enabled() const noexcept;
     /**
-     * @brief Creates a measurement, rejecting an already-active type when enabled.
+     * @brief Opens a root measurement when enabled and idle.
      *
      * T needs nonthrowing construction/destruction and a const std::formatter;
      * keep construction, destruction, and updates allocation-free. T need not move.
-     * Arguments initialize T only on first enabled use; later calls leave them
-     * unused, although argument expressions still evaluate. First use may allocate;
-     * failure preserves previous results. Reuse and stopping perform no profiler
-     * allocation, formatting, I/O, or locking.
+     * Arguments construct T only on first use of this path. First use may allocate;
+     * allocation failure preserves completed results and the active branch.
+     * Producer construction must not reenter the profiler; reads and new
+     * measurements are rejected during construction.
+     * Reuse and valid stopping perform no profiler allocation, formatting, I/O, or locking.
      */
     template <typename T, typename... Args>
-    metric_t<T> metric(Args&&... args);
+    metric_t metric(Args&&... args);
     /**
-     * @brief Reports current data and count, last/mean/max/total duration, and age since completion.
+     * @brief Reports nodes before their children, with siblings in first-use order.
      *
-     * Timing includes every completion since construction, including exception exits.
-     * Order is descending total duration, with registration order breaking ties.
-     * Durations use SI prefixes from ns to Es and up to three decimal places.
-     * Disabling and reporting preserve results, including when reporting fails.
+     * One line per metric, with tree connectors and aligned count, last/min/mean/max/
+     * total duration, age since last completion, and data columns. Statistics include
+     * exception exits and every completion since profiler construction. Durations
+     * use SI prefixes from ns to Es and up to three decimal places.
+     * The formatter's first whitespace-delimited word labels the metric; remaining
+     * text is data. Line breaks and tabs become spaces. Labels use single-column
+     * UTF-8 characters for alignment. Columns expand without truncating or wrapping
+     * output. The latest exception exit adds [unwinding].
+     * Nonempty reports start with the column headings. Empty reports say
+     * "No measurements." or "Profiling disabled." according to enablement.
+     * Reporting preserves results even on failure. Repeated calls aggregate;
+     * first-use tree order is preserved rather than chronological event order.
      */
     void report(std::ostream& out) const;
 
-    /** @brief Returns the stored T, or null when absent. */
-    template <typename T>
-    const T* metrics() const;
-    /** @brief Returns T's latest duration, or no value when absent. */
-    template <typename T>
+    /** @brief Returns data at the complete root-to-leaf type path, or null when absent. */
+    template <typename T, typename... Path>
+    const std::tuple_element_t<sizeof...(Path), std::tuple<T, Path...>>* metrics() const;
+    /** @brief Returns the path's latest inclusive duration, or no value when absent. */
+    template <typename T, typename... Path>
     std::optional<std::chrono::nanoseconds> elapsed() const;
-    /** @brief Returns whether T's latest completion occurred during unwinding, or no value when absent. */
-    template <typename T>
+    /** @brief Returns whether the path's latest completion occurred during unwinding, or no value when absent. */
+    template <typename T, typename... Path>
     std::optional<bool> unwinding() const;
+    /** @brief Counts stored nodes across the tree. */
     std::size_t size() const;
 
 private:
-    const metric_base_t* find(const std::type_info& type) const;
-    void require_stopped() const;
+    template <typename T, typename... Path>
+    const metric_base_t* find() const;
 
-    std::vector<std::unique_ptr<metric_base_t>> m_metrics;
-    bool m_enabled;
+    storage_t m_storage;
+    bool m_enabled = true;
 };
 
 } // namespace m03gtjqkhqacstl3luv2ojsz3q_profiling
 
 namespace std {
 
-template <typename T>
-struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<T>>;
-
+template <>
+struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t>;
 template <>
 struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t>;
 
@@ -142,98 +156,71 @@ struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t>;
 
 namespace m03gtjqkhqacstl3luv2ojsz3q_profiling {
 
-template <typename T>
-metric_t<T>::metric_t() noexcept = default;
-
-template <typename T>
-template <typename... Args>
-metric_t<T>::metric_t(stored_metric_t<T>& stored_metric, Args&&... args):
-    m_stored_metric(&stored_metric)
-{
-    static_assert(std::is_nothrow_constructible_v<T, Args...>, "profiling requires nonthrowing metric construction from the supplied arguments");
-    if (stored_metric.m_active) {
-        throw std::logic_error("profiler_t::metric cannot start an already-active metric type");
+template <typename T, typename... Args>
+metric_t metric_t::metric(Args&&... args) {
+    if (!m_storage) {
+        return metric_t();
     }
-    // Block reads and same-type reentry during first construction.
-    stored_metric.m_active = true;
-    if (!stored_metric.m_metrics) {
-        stored_metric.m_metrics.emplace(std::forward<Args>(args)...);
+    if (!m_metric) {
+        throw std::logic_error("metric_t::metric cannot open a child after stop");
     }
-    stored_metric.start();
+    return metric_t(*m_storage, m_storage->start<T>(m_metric, std::forward<Args>(args)...));
 }
 
-template <typename T>
-metric_t<T>::~metric_t() {
-    stop();
-}
-
-template <typename T>
-metric_t<T>::operator bool() const noexcept {
-    return m_stored_metric != nullptr;
-}
-
-template <typename T>
-template <typename F>
+template <typename T, typename F>
     requires std::invocable<F, T&>
-void metric_t<T>::update(F&& function) noexcept(std::is_nothrow_invocable_v<F, T&>) {
-    if (m_stored_metric) {
-        std::invoke(std::forward<F>(function), *m_stored_metric->m_metrics);
-    }
-}
-
-template <typename T>
-void metric_t<T>::stop() noexcept {
-    if (auto* stored_metric = std::exchange(m_stored_metric, nullptr)) {
-        stored_metric->stop();
+void metric_t::update(F&& function) {
+    static_assert(std::is_object_v<T> && std::same_as<T, std::remove_cv_t<T>>);
+    if (m_metric) {
+        if (*m_metric->type != typeid(T)) {
+            throw std::logic_error("metric_t::update type does not match this metric's stored data");
+        }
+        std::invoke(std::forward<F>(function), *static_cast<stored_metric_t<T>*>(m_metric)->metrics);
     }
 }
 
 template <typename T, typename... Args>
-metric_t<T> profiler_t::metric(Args&&... args) {
-    static_assert(std::is_nothrow_constructible_v<T, Args...>, "profiling requires nonthrowing metric construction from the supplied arguments");
+metric_t profiler_t::metric(Args&&... args) {
     if (!m_enabled) {
-        return metric_t<T>();
+        return metric_t();
     }
-    for (const auto& metric : m_metrics) {
-        if (*metric->m_type == typeid(T)) {
-            return metric_t<T>(static_cast<stored_metric_t<T>&>(*metric), std::forward<Args>(args)...);
-        }
-    }
-    if (m_metrics.capacity() == 0) {
-        m_metrics.reserve(16);
-    }
-    auto stored_metric = std::make_unique<stored_metric_t<T>>();
-    auto* destination = stored_metric.get();
-    m_metrics.push_back(std::move(stored_metric));
-    return metric_t<T>(*destination, std::forward<Args>(args)...);
+    return metric_t(m_storage, m_storage.start<T>(nullptr, std::forward<Args>(args)...));
 }
 
-template <typename T>
-const T* profiler_t::metrics() const {
-    static_assert(std::is_object_v<T> && std::same_as<T, std::remove_cv_t<T>>);
-    const auto* metric = static_cast<const stored_metric_t<T>*>(find(typeid(T)));
-    return metric && metric->m_count ? &*metric->m_metrics : nullptr;
+template <typename T, typename... Path>
+const std::tuple_element_t<sizeof...(Path), std::tuple<T, Path...>>* profiler_t::metrics() const {
+    using leaf_t = std::tuple_element_t<sizeof...(Path), std::tuple<T, Path...>>;
+    const auto* metric = static_cast<const stored_metric_t<leaf_t>*>(find<T, Path...>());
+    return metric ? &*metric->metrics : nullptr;
 }
 
-template <typename T>
+template <typename T, typename... Path>
 std::optional<std::chrono::nanoseconds> profiler_t::elapsed() const {
-    const auto* metric = find(typeid(T));
-    return metric && metric->m_count ? std::optional(metric->m_elapsed) : std::nullopt;
+    const auto* metric = find<T, Path...>();
+    return metric ? std::optional(metric->elapsed) : std::nullopt;
 }
 
-template <typename T>
+template <typename T, typename... Path>
 std::optional<bool> profiler_t::unwinding() const {
-    const auto* metric = find(typeid(T));
-    return metric && metric->m_count ? std::optional(metric->m_unwinding) : std::nullopt;
+    const auto* metric = find<T, Path...>();
+    return metric ? std::optional(metric->unwinding) : std::nullopt;
+}
+
+template <typename T, typename... Path>
+const metric_base_t* profiler_t::find() const {
+    static_assert(std::is_object_v<T> && std::same_as<T, std::remove_cv_t<T>>);
+    static_assert(((std::is_object_v<Path> && std::same_as<Path, std::remove_cv_t<Path>>) && ...));
+    const std::array path {&typeid(T), &typeid(Path)...};
+    return m_storage.find(path);
 }
 
 } // namespace m03gtjqkhqacstl3luv2ojsz3q_profiling
 
 namespace std {
 
-template <typename T>
-struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<T>> : formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_base_t> {
-    auto format(const m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<T>& metric, auto& ctx) const {
+template <>
+struct formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t> : formatter<m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_base_t> {
+    auto format(const m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "{{ active: {} }}", static_cast<bool>(metric));
         return out;

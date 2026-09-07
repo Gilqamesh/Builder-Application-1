@@ -279,7 +279,7 @@ void shade_sample(
     bool front_facing,
     std::span<const varying_entry_t> inputs,
     software_shader::fragment_io_t& io,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 );
 
 void rasterize_point(
@@ -289,7 +289,7 @@ void rasterize_point(
     const pipeline_vertex_view_t& vertex,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 );
 
 void rasterize_line(
@@ -301,7 +301,7 @@ void rasterize_line(
     clipping_workspace_t& clipping,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 );
 
 void rasterize_triangle(
@@ -314,7 +314,7 @@ void rasterize_triangle(
     raster_workspace_t& workspace,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 );
 
 // The renderer and validation consume the same pre-shading coverage events.

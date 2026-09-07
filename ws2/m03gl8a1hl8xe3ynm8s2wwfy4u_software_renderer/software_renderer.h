@@ -52,21 +52,15 @@ namespace profiling = m03gtjqkhqacstl3luv2ojsz3q_profiling;
  * Passing samples write depth when enabled and overwrite color when supplied;
  * an unwritten color preserves color while still permitting depth writes.
  * There is no blending.
+ *
+ * Drawing and clearing borrow a parent metric for the call and create children
+ * beneath it. Pass a default inactive metric when recording is unnecessary.
+ * Measured operations require an active leaf parent; the profiler owns all data.
  */
 class software_renderer_t {
 public:
     /** @brief Copies attachment views; later changes to the supplied view do not rebind this renderer. */
     explicit software_renderer_t(framebuffer_t framebuffer);
-
-    /**
-     * @brief Exposes this renderer's owned profiler, which starts enabled.
-     *
-     * Applications may measure their own work with this profiler. Each metric type
-     * retains its data and accumulates timing statistics. Borrowed use of
-     * the profiler ends with this renderer.
-     */
-    profiling::profiler_t& profiler() noexcept;
-    const profiling::profiler_t& profiler() const noexcept;
 
     software_renderer_t(const software_renderer_t&) = delete;
     software_renderer_t& operator=(const software_renderer_t&) = delete;
@@ -76,7 +70,7 @@ public:
     framebuffer_t& framebuffer() noexcept;
     const framebuffer_t& framebuffer() const noexcept;
 
-    void clear_color(rgba8_t color);
+    void clear_color(rgba8_t color, profiling::metric_t& parent_metric);
 
     /**
      * @brief Fills the intersection of the camera rectangle and framebuffer.
@@ -84,7 +78,7 @@ public:
      * Camera pose, projection, materials, and shader state do not affect clearing.
      * Empty intersections do no work.
      */
-    void clear_color(const camera_t& camera, rgba8_t color);
+    void clear_color(const camera_t& camera, rgba8_t color, profiling::metric_t& parent_metric);
 
     /**
      * @brief Fills the depth attachment independently of draw state, preserving color.
@@ -93,7 +87,7 @@ public:
      * to [0,1], including infinities; NaN is rejected before writing any samples.
      * Empty framebuffers do no work, including validation.
      */
-    void clear_depth(float depth);
+    void clear_depth(float depth, profiling::metric_t& parent_metric);
 
     /**
      * @brief Clears depth within the intersection of the camera rectangle and framebuffer.
@@ -101,7 +95,7 @@ public:
      * Uses clear_depth's value and attachment rules. Camera pose and projection
      * do not affect clearing; empty intersections do no work, including validation.
      */
-    void clear_depth(const camera_t& camera, float depth);
+    void clear_depth(const camera_t& camera, float depth, profiling::metric_t& parent_metric);
 
     /**
      * @brief Draws a render item using its material's program and the camera.
@@ -113,12 +107,11 @@ public:
      * Validates current geometry, material bindings, and shader interfaces before
      * vertex execution. Camera rectangles support the full signed-int endpoint range.
      */
-    void draw(const camera_t& camera, const render_item_t& render_item);
+    void draw(const camera_t& camera, const render_item_t& render_item, profiling::metric_t& parent_metric);
 
 private:
     framebuffer_t m_framebuffer;
     scratch_t m_scratch;
-    profiling::profiler_t m_profiler;
 };
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

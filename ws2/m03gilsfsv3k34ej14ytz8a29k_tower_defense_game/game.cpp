@@ -5,6 +5,7 @@
 #include <m03gsy25j4v7nccgmsdov9ioft_shader/api.h>
 #include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
 #include <m03gt1djvvy5atia5evkbg6rqy_software_shader/api.h>
+#include <m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h>
 
 #include <algorithm>
 #include <array>
@@ -19,6 +20,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -77,6 +79,25 @@ std::shared_ptr<const software_shader::program_t> make_program() {
 }
 
 } // namespace
+
+namespace m03gilsfsv3k34ej14ytz8a29k_tower_defense_game {
+
+struct frame_metrics_t {};
+
+} // namespace m03gilsfsv3k34ej14ytz8a29k_tower_defense_game
+
+namespace std {
+
+template <>
+struct formatter<m03gilsfsv3k34ej14ytz8a29k_tower_defense_game::frame_metrics_t> : formatter<string_view> {
+    auto format(const m03gilsfsv3k34ej14ytz8a29k_tower_defense_game::frame_metrics_t&, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.frame");
+        return out;
+    }
+};
+
+} // namespace std
 
 namespace m03gilsfsv3k34ej14ytz8a29k_tower_defense_game {
 
@@ -223,7 +244,8 @@ game_t::~game_t() {
 }
 
 void game_t::run() {
-    m_software_renderer.profiler().enabled() = true;
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t profiler;
+    profiler.enabled() = true;
 
     m_window->swap_interval(1);
 
@@ -232,6 +254,7 @@ void game_t::run() {
 
     auto previous_frame_time = std::chrono::steady_clock::now();
     while (!m_window->should_close()) {
+        auto frame_metric = profiler.metric<frame_metrics_t>();
         const auto frame_time = std::chrono::steady_clock::now();
         const auto dt = std::chrono::duration<float>(frame_time - previous_frame_time).count();
 
@@ -239,7 +262,7 @@ void game_t::run() {
         input_states.commit();
 
         update(dt);
-        render();
+        render(frame_metric);
 
         const auto frame_time_ms = std::chrono::duration<double, std::milli>(frame_time - previous_frame_time);
         previous_frame_time = frame_time;
@@ -247,7 +270,7 @@ void game_t::run() {
         std::cout << std::format("frame: {:.2f} ms, framebuffer: {}x{}\n", frame_time_ms.count(), framebuffer.width(), framebuffer.height());
     }
 
-    m_software_renderer.profiler().report(std::cout);
+    profiler.report(std::cout);
 }
 
 void game_t::update(float dt) {
@@ -321,7 +344,7 @@ void game_t::update(float dt) {
     m_camera.view_rect() = m_camera.view_rect().inflate(camera_view_lengths_dp);
 }
 
-void game_t::render() {
+void game_t::render(m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& parent_metric) {
     const auto size = m_window->framebuffer_size();
     auto framebuffer = m_software_renderer.framebuffer();
     if (framebuffer.width() != size[0] || framebuffer.height() != size[1]) {
@@ -333,9 +356,9 @@ void game_t::render() {
         return;
     }
 
-    m_software_renderer.clear_color(ray_white());
+    m_software_renderer.clear_color(ray_white(), parent_metric);
     for (const auto& render_item : m_render_items) {
-        m_software_renderer.draw(m_camera, render_item);
+        m_software_renderer.draw(m_camera, render_item, parent_metric);
     }
 
     m_opengl_renderer.present_rgba8(

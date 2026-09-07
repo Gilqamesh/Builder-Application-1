@@ -7,6 +7,8 @@
 # include <m03gl22hn0dqmosreqjie9tg5m_opengl_renderer/api.h>
 # include <m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/software_renderer.h>
 
+# include <m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h>
+
 # include <memory>
 # include <vector>
 
@@ -21,7 +23,7 @@ public:
 
 private:
     void update(float dt);
-    void render();
+    void render(m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& parent_metric);
 
 private:
     m03gkcdy62bnz808pmk4uzkjra_glfw::glfw_t glfw;
