@@ -387,8 +387,8 @@ void test_formatting() {
     test::expect(std::equal_to<>(), std::format("{}", texture_api::format_t::rgba8_srgb), std::string("rgba8_srgb"));
     test::expect(std::equal_to<>(), std::format("{}", texture_api::filter_t::linear), std::string("linear"));
     test::expect(std::equal_to<>(), std::format("{}", texture_api::address_mode_t::repeat), std::string("repeat"));
-    test::expect(std::equal_to<>(), std::format("{}", texture), std::string("{ format: rgba8_unorm, width: 1, height: 1 }"));
-    test::expect(std::equal_to<>(), std::format("{}", sampler), std::string("{ filter: linear, address_u: repeat, address_v: clamp_to_edge }"));
+    test::expect(std::equal_to<>(), std::format("{}", texture), std::string("{ format: rgba8_unorm, width: 1, height: 1, levels: 1 }"));
+    test::expect(std::equal_to<>(), std::format("{}", sampler), std::string("{ filter: linear, minification: linear, mipmap: nearest, address_u: repeat, address_v: clamp_to_edge }"));
 }
 
 template <typename T>
@@ -453,9 +453,135 @@ void test_pixel_views() {
     test::expect(std::identity(), empty_copy.view().bytes().empty());
 }
 
+
+void test_mip_storage_and_generation() {
+    using namespace texture_api;
+    const sampler_t nearest(filter_t::nearest, address_mode_t::clamp_to_edge, address_mode_t::clamp_to_edge);
+    for (const auto dimensions : {std::array<std::size_t, 2>{7, 3}, {1, 7}, {7, 1}, {4, 4}}) {
+        const auto width = dimensions[0], height = dimensions[1];
+        texture_t texture(texture_description_t {format_t::rgba8_unorm, width, height, 3},
+            byte_stream_api::byte_stream_t(std::vector<std::byte>(width * height * 4)));
+        test::expect(std::equal_to<>(), texture.level_count(), std::size_t(3));
+        test::expect(std::equal_to<>(), texture.view(1).width(), std::max(std::size_t(1), width / 2));
+        test::expect(std::equal_to<>(), texture.view(1).height(), std::max(std::size_t(1), height / 2));
+        test::expect(std::equal_to<>(), texture.view(2).width(), std::size_t(1));
+        test::expect(std::equal_to<>(), texture.bytes().size(), width * height * 4);
+        const auto base_view = texture.view();
+        const auto lower_view = texture.view(1);
+        const auto last_view = texture.view(2);
+        for (std::size_t i = 0; i < width * height; ++i) {
+            base_view.bytes()[i * 4] = std::byte(255);
+            base_view.bytes()[i * 4 + 3] = std::byte(128);
+        }
+        // Lower levels retain their initialized bytes until explicit generation.
+        expect_color(sample_lod(texture, nearest, coordinates_t{0.5F, 0.5F}, 2), color_t(0));
+        texture.generate_mipmaps();
+        test::expect(std::identity(), base_view.bytes().data() == texture.view().bytes().data());
+        test::expect(std::identity(), lower_view.bytes().data() == texture.view(1).bytes().data());
+        test::expect(std::identity(), last_view.bytes().data() == texture.view(2).bytes().data());
+        expect_color(sample_lod(texture, nearest, coordinates_t{0.5F, 0.5F}, 2), color_t{1, 0, 0, 128.0F / 255});
+        texture_t copied(texture);
+        test::expect(std::identity(), copied.view(1).bytes().data() != lower_view.bytes().data());
+        for (std::size_t level = 0; level < 3; ++level) {
+            test::expect(std::identity(), std::ranges::equal(copied.view(level).bytes(), texture.view(level).bytes()));
+        }
+        copied.view(2).bytes()[1] = std::byte{71};
+        test::expect(std::identity(), texture.view(2).bytes()[1] == std::byte{0});
+        texture_t moved(std::move(copied));
+        test::expect(std::equal_to<>(), copied.level_count(), std::size_t(0));
+        copied.generate_mipmaps();
+        test::expect_throws([&] { (void)copied.view(0); });
+        copied = moved;
+        moved = std::move(copied);
+        test::expect(std::equal_to<>(), moved.level_count(), std::size_t(3));
+        test::expect(std::identity(), moved.view(2).bytes()[1] == std::byte{71});
+        test::expect_throws([&] { (void)texture.view(3); });
+        test::expect_throws([&] { (void)std::as_const(texture).view(3); });
+    }
+    for (std::size_t levels : {std::size_t(0), std::size_t(4), std::numeric_limits<std::size_t>::max()}) {
+        test::expect_throws([&] {
+            texture_t invalid(texture_description_t {format_t::rgba8_unorm, 7, 3, levels}, byte_stream_api::byte_stream_t(std::vector<std::byte>(84)));
+        });
+    }
+    texture_t prefix(texture_description_t {format_t::rgba8_unorm, 7, 3, 2}, byte_stream_api::byte_stream_t(std::vector<std::byte>(84)));
+    prefix.view().bytes()[24] = std::byte{255}; // The last column contributes to the rightmost destination texel.
+    prefix.generate_mipmaps();
+    test::expect(std::identity(), prefix.view(1).bytes()[8] == std::byte{36}); // 255/(7/3*3) = 255/7.
+    test::expect(std::identity(), prefix.view(1).bytes()[0] == std::byte{0});
+    texture_t odd(texture_description_t {format_t::rgba8_unorm, 3, 1, 2}, bytes({0, 0, 0, 0, 255, 0, 0, 255, 0, 0, 0, 0}));
+    odd.generate_mipmaps();
+    expect_color(sample_lod(odd, nearest, coordinates_t{0.5F, 0.5F}, 1), color_t{1.0F/3, 0, 0, 1.0F/3});
+    texture_t srgb(texture_description_t {format_t::rgba8_srgb, 2, 1, 2}, bytes({0, 0, 0, 0, 255, 255, 255, 255}));
+    srgb.generate_mipmaps();
+    test::expect(std::identity(), srgb.view(1).bytes()[0] == std::byte{188} && srgb.view(1).bytes()[3] == std::byte{128});
+    texture_t half(texture_description_t {format_t::rgba16_float, 2, 1, 2},
+        bytes({0x00,0x44, 0x00,0xc0, 0x00,0x38, 0x00,0x40, 0x00,0x48, 0x00,0xc4, 0x00,0x3c, 0x00,0x44}));
+    half.generate_mipmaps();
+    expect_color(sample_lod(half, nearest, coordinates_t{0.5F, 0.5F}, 1), color_t{6, -3, 0.75F, 3});
+    std::vector<std::byte> hdr_bytes;
+    for (float component : {4.0F, -2.0F, 0.5F, 2.0F, 8.0F, -4.0F, 1.0F, 4.0F}) { append_u32(hdr_bytes, std::bit_cast<std::uint32_t>(component)); }
+    texture_t hdr(texture_description_t {format_t::rgba32_float, 2, 1, 2}, byte_stream_api::byte_stream_t(std::move(hdr_bytes)));
+    hdr.generate_mipmaps();
+    expect_color(sample_lod(hdr, nearest, coordinates_t{0.5F, 0.5F}, 1), color_t{6, -3, 0.75F, 3});
+    test::expect(std::identity(), !std::format("{}", texture_description_t{format_t::rgba32_float, 2, 1, 2}).empty());
+}
+
+
+void test_mip_half_rounding() {
+    using namespace texture_api;
+    const std::array<std::array<std::uint16_t,3>,4> cases {{{0x3c00,0x3c01,0x3c00},{0x3c01,0x3c02,0x3c02},{0,1,0},{1,2,2}}};
+    for (const auto& entry:cases) {
+        std::vector<std::byte> storage;
+        for (auto bits:{entry[0],entry[1]}) {
+            for(int i=0;i<4;++i){storage.push_back(std::byte(bits&255));storage.push_back(std::byte(bits>>8));}
+        }
+        texture_t texture(texture_description_t{format_t::rgba16_float,2,1,2},byte_stream_api::byte_stream_t(std::move(storage)));
+        texture.generate_mipmaps();
+        const auto result=texture.view(1).bytes();
+        test::expect(std::identity(),result[0]==std::byte(entry[2]&255)&&result[1]==std::byte(entry[2]>>8));
+    }
+}
+
+void test_explicit_lod_filters() {
+    using namespace texture_api;
+    texture_t texture(texture_description_t {format_t::rgba8_unorm, 4, 1, 3}, bytes({255,0,0,255, 0,255,0,255, 255,0,0,255, 0,255,0,255}));
+    auto level = texture.view(1).bytes();
+    const std::array<std::byte, 8> lower {std::byte{0},std::byte{0},std::byte{255},std::byte{255}, std::byte{0},std::byte{0},std::byte{255},std::byte{255}};
+    std::ranges::copy(lower, level.begin());
+    std::ranges::fill(texture.view(2).bytes(), std::byte{255});
+    const sampler_t sampler(sampler_description_t {filter_t::nearest, filter_t::linear, filter_t::linear, address_mode_t::repeat, address_mode_t::clamp_to_edge});
+    const coordinates_t uv{0.25F, 0.5F};
+    expect_color(sample(texture, sampler, uv), color_t{0,1,0,1});
+    expect_color(sample_lod(texture, sampler, uv, -10), color_t{0,1,0,1});
+    expect_color(sample_lod(texture, sampler, uv, 0.5F), color_t{0.25F,0.25F,0.5F,1});
+    expect_color(sample_lod(texture, sampler, uv, 1.5F), color_t{0.5F,0.5F,1,1});
+    expect_color(sample_lod(texture, sampler, uv, std::numeric_limits<float>::max()), color_t{1,1,1,1});
+    expect_color(sample_lod(texture, sampler, coordinates_t{-0.75F,0.5F}, 0.5F), color_t{0.25F,0.25F,0.5F,1});
+    const sampler_t nearest(sampler_description_t {filter_t::nearest, filter_t::nearest, filter_t::nearest});
+    expect_color(sample_lod(texture, nearest, uv, 0.5F), color_t{0,1,0,1});
+    expect_color(sample_lod(texture, nearest, uv, std::nextafter(0.5F, 1.0F)), color_t{0,0,1,1});
+    expect_color(sample_lod(texture, nearest, uv, 1.5F), color_t{0,0,1,1});
+    for (float invalid : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()}) {
+        test::expect_throws([&] { (void)sample_lod(texture, nearest, uv, invalid); });
+    }
+    for (int field = 0; field < 5; ++field) {
+        sampler_description_t description;
+        if (field == 0) { description.magnification_filter = static_cast<filter_t>(99); }
+        if (field == 1) { description.minification_filter = static_cast<filter_t>(99); }
+        if (field == 2) { description.mipmap_filter = static_cast<filter_t>(99); }
+        if (field == 3) { description.address_u = static_cast<address_mode_t>(99); }
+        if (field == 4) { description.address_v = static_cast<address_mode_t>(99); }
+        test::expect_throws([&] { (void)sampler_t(description); });
+    }
+    test::expect(std::identity(), !std::format("{}", sampler_description_t{}).empty());
+}
+
 int main() {
     return test::run([] {
         test_pixel_views();
+        test_mip_storage_and_generation();
+        test_mip_half_rounding();
+        test_explicit_lod_filters();
         test_texture_construction();
         test_texture_move_semantics();
         test_sampler_construction();

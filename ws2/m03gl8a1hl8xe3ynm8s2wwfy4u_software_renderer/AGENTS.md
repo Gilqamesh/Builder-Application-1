@@ -50,14 +50,18 @@ assembly within those classes.
   those callbacks. Counters accumulate per metric path, including partial work
   before an exception. Color, depth and stencil clears have distinct counter types.
 
+- Materials select first/last provoking vertices; first is the default. Selection
+  follows original topology before clipping or winding adjustment. Shader inputs
+  own interpolation modes; rasterization and supported varying types belong here.
+
 ## Validation
 
 Deterministic CPU pipeline behavior is validated headlessly within this module. Presentation and the tower-defense scene are integration checks owned by their respective consumers.
 
 ## Intended direction
 
-Extend the existing 3D CPU rasterizer and planar rendering with interpolation modes
-and mipmapped texture sampling.
+Continue the general-purpose 3D CPU rasterizer and planar rendering through
+measured incremental optimization and the remaining feature milestones.
 
 Shader construction, shader execution, texture storage/sampling, and
 application-owned scene organization and presentation retain their
@@ -69,5 +73,5 @@ See the [feature milestones](docs/milestones.md) for scope and completion eviden
 
 ## Open decisions
 
-- Completion scope: interpolation modes, instancing, multiple color
+- Completion scope: instancing, multiple color
   targets, multisampling, and advanced texture sampling.

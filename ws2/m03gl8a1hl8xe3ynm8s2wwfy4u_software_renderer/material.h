@@ -132,6 +132,9 @@ enum class color_mask_t : unsigned {
 color_mask_t operator|(color_mask_t left, color_mask_t right);
 color_mask_t operator&(color_mask_t left, color_mask_t right);
 
+/** @brief Selects the original topology vertex supplying flat inputs. */
+enum class provoking_vertex_t { first, last };
+
 /**
  * @brief Owns an immutable shader program, bindings, and mutable draw state.
  *
@@ -212,6 +215,17 @@ public:
     void front_face(winding_t winding);
     winding_t front_face() const;
 
+    /**
+     * @brief Selects the flat-input source; defaults to first and preserves state on invalid input.
+     *
+     * Lists and strips select the first/last vertex in assembly order before winding
+     * adjustment. A fan triangle (v0, vi, vi+1) selects vi or vi+1. A closing loop
+     * segment (v_last, v0) selects v_last or v0. Points select their only vertex.
+     * Clipping never changes the selection, including when that vertex is removed.
+     */
+    void provoking_vertex(provoking_vertex_t provoking_vertex);
+    provoking_vertex_t provoking_vertex() const;
+
     void cull(cull_mode_t mode);
     cull_mode_t cull() const;
 
@@ -252,6 +266,7 @@ private:
     stencil_state_t m_stencil_front;
     stencil_state_t m_stencil_back;
     winding_t m_front_face = winding_t::counter_clockwise;
+    provoking_vertex_t m_provoking_vertex = provoking_vertex_t::first;
     cull_mode_t m_cull = cull_mode_t::none;
     bool m_blend = false;
     blend_equation_t m_blend_color;
@@ -292,6 +307,9 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_equation_t>
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_mask_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::provoking_vertex_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::material_t>;
@@ -603,6 +621,24 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_mask_t> {
 };
 
 template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::provoking_vertex_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') { throw std::format_error("invalid provoking_vertex_t format specifier"); }
+        return it;
+    }
+    auto format(m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::provoking_vertex_t provoking_vertex, auto& ctx) const {
+        auto out = ctx.out();
+        switch (provoking_vertex) {
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::provoking_vertex_t::first: { out = std::format_to(out, "first"); } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::provoking_vertex_t::last: { out = std::format_to(out, "last"); } break;
+            default: { out = std::format_to(out, "invalid({})", static_cast<int>(provoking_vertex)); } break;
+        }
+        return out;
+    }
+};
+
+template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::material_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
@@ -625,6 +661,7 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::material_t> {
         out = std::format_to(out, ", stencil_front: {}", material.stencil_front());
         out = std::format_to(out, ", stencil_back: {}", material.stencil_back());
         out = std::format_to(out, ", front_face: {}", material.front_face());
+        out = std::format_to(out, ", provoking_vertex: {}", material.provoking_vertex());
         out = std::format_to(out, ", cull: {}", material.cull());
         out = std::format_to(out, ", blend: {}", material.blend());
         out = std::format_to(out, ", blend_color: {}", material.blend_color());

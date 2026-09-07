@@ -103,7 +103,7 @@ void canonicalize_locations(std::vector<shader_interface_element_t>& elements, s
     canonical.reserve(elements.size());
     for (const auto& element : elements) {
         if (!canonical.empty() && canonical.back().index == element.index) {
-            if (canonical.back().type != element.type) {
+            if (canonical.back().type != element.type || canonical.back().interpolation != element.interpolation) {
                 invalid_interface(std::string(collection) + " location has inconsistent types");
             }
             continue;
@@ -132,7 +132,7 @@ void canonicalize_bindings(std::vector<shader_interface_element_t>& elements) {
         if (!canonical.empty() &&
             binding_namespace(canonical.back().type) == binding_namespace(element.type) &&
             canonical.back().index == element.index) {
-            if (canonical.back().type != element.type) {
+            if (canonical.back().type != element.type || canonical.back().interpolation != element.interpolation) {
                 invalid_interface("binding has inconsistent types");
             }
             continue;
@@ -183,9 +183,13 @@ public:
         auto samplers = interface_elements(m_samplers);
         bindings.insert(bindings.end(), textures.begin(), textures.end());
         bindings.insert(bindings.end(), samplers.begin(), samplers.end());
+        auto inputs = interface_elements(m_inputs);
+        for (auto& input : inputs) {
+            input.interpolation = m_interpolations.at(input.index);
+        }
         return {
             m_stage,
-            interface_elements(m_inputs),
+            std::move(inputs),
             interface_elements(m_outputs),
             std::move(bindings)
         };
@@ -202,6 +206,10 @@ public:
             invalid("input is not a value type");
         }
         consistent(m_inputs, node.location(), node.type(), "input location has inconsistent types");
+        const auto [iterator, inserted] = m_interpolations.emplace(node.location(), node.interpolation());
+        if (!inserted && iterator->second != node.interpolation()) {
+            invalid("input location has conflicting interpolation declarations");
+        }
     }
 
     void visit(const shader_uniform_node_t& node) override {
@@ -433,7 +441,10 @@ public:
                 }
                 break;
             case shader_call_operation_t::sample:
-                if (arguments.size() != 3 || arguments[0]->type() != shader_data_type<shader_texture_2d_t>() ||
+            case shader_call_operation_t::sample_lod:
+                if (arguments.size() != (node.operation() == shader_call_operation_t::sample ? 3U : 4U) ||
+                    (node.operation() == shader_call_operation_t::sample_lod && arguments[3]->type() != shader_data_type<float>()) ||
+                    arguments[0]->type() != shader_data_type<shader_texture_2d_t>() ||
                     arguments[1]->type() != shader_data_type<shader_sampler_t>() ||
                     arguments[2]->type() != shader_data_type<vector_t<float, 2>>() ||
                     node.type() != shader_data_type<vector_t<float, 4>>()) {
@@ -670,6 +681,7 @@ private:
     std::unordered_set<const shader_local_node_t*> m_declared_locals;
     std::vector<const shader_local_node_t*> m_visible_locals;
     std::unordered_map<std::uint32_t, shader_data_type_t> m_inputs;
+    std::unordered_map<std::uint32_t, interpolation_t> m_interpolations;
     std::unordered_map<std::uint32_t, shader_data_type_t> m_uniforms;
     std::unordered_map<std::uint32_t, shader_data_type_t> m_textures;
     std::unordered_map<std::uint32_t, shader_data_type_t> m_samplers;
@@ -704,6 +716,23 @@ shader_interface_t::shader_interface_t(
     if (m_stage != shader_stage_t::vertex && m_stage != shader_stage_t::fragment) {
         invalid_interface("unknown shader stage");
     }
+    const auto validate_interpolation = [](const auto& elements, bool fragment_inputs) {
+        for (const auto& element : elements) {
+            switch (element.interpolation) {
+                case interpolation_t::perspective: { } break;
+                case interpolation_t::noperspective:
+                case interpolation_t::flat: {
+                    if (!fragment_inputs) {
+                        invalid_interface("interpolation is only selectable on fragment inputs");
+                    }
+                } break;
+                default: { invalid_interface("unknown interpolation mode"); } break;
+            }
+        }
+    };
+    validate_interpolation(m_inputs, stage == shader_stage_t::fragment);
+    validate_interpolation(m_outputs, false);
+    validate_interpolation(m_bindings, false);
     canonicalize_locations(m_inputs, "input");
     canonicalize_locations(m_outputs, "output");
     canonicalize_bindings(m_bindings);
@@ -797,12 +826,14 @@ shader_constant_node_t::shader_constant_node_t(shader_literal_t value):
 const shader_literal_t& shader_constant_node_t::value() const { return m_value; }
 void shader_constant_node_t::accept(shader_ast_visitor_t& visitor) const { visitor.visit(*this); }
 
-shader_input_node_t::shader_input_node_t(shader_data_type_t type, std::uint32_t location):
+shader_input_node_t::shader_input_node_t(shader_data_type_t type, std::uint32_t location, interpolation_t interpolation):
     shader_expression_node_t(type),
-    m_location(location)
+    m_location(location),
+    m_interpolation(interpolation)
 {
 }
 std::uint32_t shader_input_node_t::location() const { return m_location; }
+interpolation_t shader_input_node_t::interpolation() const { return m_interpolation; }
 void shader_input_node_t::accept(shader_ast_visitor_t& visitor) const { visitor.visit(*this); }
 
 shader_uniform_node_t::shader_uniform_node_t(shader_data_type_t type, std::uint32_t binding):
@@ -1043,5 +1074,21 @@ shader_expression_t<vector_t<float, 4>> sample(
     ));
 }
 shader_expression_t<vector_t<float, 4>> sample(shader_expression_t<shader_texture_2d_t> texture, shader_expression_t<shader_sampler_t> sampler, vector_t<float, 2> coordinates) { return sample(texture, sampler, texture.builder()->constant(std::move(coordinates))); }
+
+shader_expression_t<vector_t<float, 4>> sample_lod(shader_expression_t<shader_texture_2d_t> texture, shader_expression_t<shader_sampler_t> sampler, shader_expression_t<vector_t<float, 2>> coordinates, shader_expression_t<float> lod) {
+    return texture.builder()->expression<vector_t<float, 4>>(std::make_unique<shader_call_node_t>(
+        shader_data_type<vector_t<float, 4>>(), shader_call_operation_t::sample_lod,
+        std::vector<const shader_expression_node_t*>{texture.node(), sampler.node(), coordinates.node(), lod.node()}
+    ));
+}
+shader_expression_t<vector_t<float, 4>> sample_lod(shader_expression_t<shader_texture_2d_t> texture, shader_expression_t<shader_sampler_t> sampler, shader_expression_t<vector_t<float, 2>> coordinates, float lod) {
+    return sample_lod(texture, sampler, coordinates, texture.builder()->constant(lod));
+}
+shader_expression_t<vector_t<float, 4>> sample_lod(shader_expression_t<shader_texture_2d_t> texture, shader_expression_t<shader_sampler_t> sampler, vector_t<float, 2> coordinates, shader_expression_t<float> lod) {
+    return sample_lod(texture, sampler, texture.builder()->constant(coordinates), lod);
+}
+shader_expression_t<vector_t<float, 4>> sample_lod(shader_expression_t<shader_texture_2d_t> texture, shader_expression_t<shader_sampler_t> sampler, vector_t<float, 2> coordinates, float lod) {
+    return sample_lod(texture, sampler, texture.builder()->constant(coordinates), texture.builder()->constant(lod));
+}
 
 } // namespace m03gsy25j4v7nccgmsdov9ioft_shader

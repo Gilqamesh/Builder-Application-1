@@ -21,8 +21,13 @@ namespace profiling = m03gtjqkhqacstl3luv2ojsz3q_profiling;
  * @brief Renders camera-relative render items into a borrowed CPU framebuffer.
  *
  * Mesh streams must match consumed vertex input locations and types; selected
- * indices must fit signed 32-bit vertex indices. Fragment inputs must be floating-point
- * scalars or vectors, with perspective-correct interpolation of primitive-local values.
+ * indices must fit signed 32-bit vertex indices. Fragment inputs support float scalars/vectors in perspective (default),
+ * noperspective, and flat modes, plus signed/unsigned 32-bit scalars/vectors in flat
+ * mode. Fragment declarations own interpolation. Flat values come from the material's
+ * original-topology provoking vertex and survive its removal by clipping.
+ * Noperspective values interpolate linearly in screen space, including clipped edges.
+ * Clipping carries W times those values until projection, avoiding intermediate zero-W
+ * division; the existing surviving-zero-W and snapping rules still apply.
  *
  * Vertex invocations receive render_item_t's object-to-world transform and a
  * world-to-clip matrix derived from camera_t's pose and projection. The camera's
@@ -132,7 +137,7 @@ public:
      * Enabled depth/stencil testing requires the corresponding attachment.
      * Validates current geometry, material bindings, and shader interfaces before
      * vertex execution. Textures reflected in either stage must not overlap any
-     * attached color, depth or stencil storage, even when writes are disabled.
+     * attached color, depth or stencil storage at any mip level, even when writes are disabled.
      * This conservative resource restriction uses entire byte ranges, including
      * partial overlap; unused extra bindings are accepted. Sequential draws may
      * render and sample the same texture after selecting a different framebuffer.

@@ -13,3 +13,7 @@ Shader execution belongs to backend modules. Primitive processing, framebuffer b
 - Generic numbered outputs remain available independently of special outputs.
 - Reflection records the typed inputs, numbered outputs, and bindings required by an AST.
 - Vertex shaders can read backend-supplied `object_to_world` and `world_to_clip` semantics as homogeneous `matrix<float, 4, 4>` values.
+
+- Fragment inputs own perspective, noperspective, or flat interpolation metadata.
+  Numbered vertex outputs retain location/type compatibility; standalone invocation
+  value support remains independent of renderer interpolation eligibility.

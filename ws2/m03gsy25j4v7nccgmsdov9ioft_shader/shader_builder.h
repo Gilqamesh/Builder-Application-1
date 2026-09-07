@@ -6,6 +6,7 @@
 # include <concepts>
 # include <cstdint>
 # include <functional>
+# include <format>
 # include <memory>
 # include <span>
 # include <stdexcept>
@@ -19,9 +20,13 @@ enum class shader_stage_t { vertex, fragment };
 enum class shader_builtin_t { vertex_index, instance_index, object_to_world, world_to_clip, fragment_coordinate, front_facing };
 enum class shader_output_t { location, position, color };
 
+/** @brief Selects fragment-input interpolation; other interface elements use perspective. */
+enum class interpolation_t { perspective, noperspective, flat };
+
 struct shader_interface_element_t {
     std::uint32_t index;
     shader_data_type_t type;
+    interpolation_t interpolation = interpolation_t::perspective;
 };
 
 class shader_interface_t {
@@ -143,7 +148,8 @@ public:
     shader_expression_t<T> expression(std::unique_ptr<Node> expression);
 
     template <shader_value T>
-    shader_expression_t<T> input(std::uint32_t location);
+    /** @brief Declares an input; non-default interpolation is available only in fragment shaders. */
+    shader_expression_t<T> input(std::uint32_t location, interpolation_t interpolation = interpolation_t::perspective);
 
     template <shader_value T>
     void output(std::uint32_t location, shader_expression_t<T> expression);
@@ -288,12 +294,14 @@ private:
 
 class shader_input_node_t final : public shader_expression_node_t {
 public:
-    shader_input_node_t(shader_data_type_t type, std::uint32_t location);
+    shader_input_node_t(shader_data_type_t type, std::uint32_t location, interpolation_t interpolation = interpolation_t::perspective);
     std::uint32_t location() const;
+    interpolation_t interpolation() const;
     void accept(shader_ast_visitor_t& visitor) const override;
 
 private:
     std::uint32_t m_location;
+    interpolation_t m_interpolation;
 };
 
 class shader_uniform_node_t final : public shader_expression_node_t {
@@ -470,6 +478,13 @@ public:
 
 } // namespace m03gsy25j4v7nccgmsdov9ioft_shader
 
+namespace std {
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::interpolation_t>;
+
+} // namespace std
+
 namespace m03gsy25j4v7nccgmsdov9ioft_shader {
 
 template <shader_value T>
@@ -509,8 +524,8 @@ shader_expression_t<T> shader_ast_builder_t::expression(std::unique_ptr<Node> ex
 }
 
 template <shader_value T>
-shader_expression_t<T> shader_ast_builder_t::input(std::uint32_t location) {
-    return expression<T>(std::make_unique<shader_input_node_t>(shader_data_type<T>(), location));
+shader_expression_t<T> shader_ast_builder_t::input(std::uint32_t location, interpolation_t interpolation) {
+    return expression<T>(std::make_unique<shader_input_node_t>(shader_data_type<T>(), location, interpolation));
 }
 
 template <shader_value T>
@@ -646,5 +661,30 @@ const shader_expression_node_t* shader_ast_builder_t::require(shader_expression_
 }
 
 } // namespace m03gsy25j4v7nccgmsdov9ioft_shader
+
+namespace std {
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::interpolation_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid interpolation_t format specifier");
+        }
+        return it;
+    }
+    auto format(m03gsy25j4v7nccgmsdov9ioft_shader::interpolation_t interpolation, auto& ctx) const {
+        auto out = ctx.out();
+        switch (interpolation) {
+            case m03gsy25j4v7nccgmsdov9ioft_shader::interpolation_t::perspective: { out = std::format_to(out, "perspective"); } break;
+            case m03gsy25j4v7nccgmsdov9ioft_shader::interpolation_t::noperspective: { out = std::format_to(out, "noperspective"); } break;
+            case m03gsy25j4v7nccgmsdov9ioft_shader::interpolation_t::flat: { out = std::format_to(out, "flat"); } break;
+            default: { out = std::format_to(out, "invalid({})", static_cast<int>(interpolation)); } break;
+        }
+        return out;
+    }
+};
+
+} // namespace std
 
 #endif // M03GSY25J4V7NCCGMSDOV9IOFT_SHADER_SHADER_BUILDER_H

@@ -32,6 +32,15 @@ enum class address_mode_t {
     repeat
 };
 
+/** @brief Describes independent magnification, minification, mip filtering and addressing. */
+struct sampler_description_t {
+    filter_t magnification_filter = filter_t::nearest;
+    filter_t minification_filter = filter_t::nearest;
+    filter_t mipmap_filter = filter_t::nearest;
+    address_mode_t address_u = address_mode_t::clamp_to_edge;
+    address_mode_t address_v = address_mode_t::clamp_to_edge;
+};
+
 /**
  * @brief Describes texture filtering and independent `u` and `v` addressing.
  */
@@ -42,20 +51,26 @@ public:
      */
     sampler_t(filter_t filter, address_mode_t address_u, address_mode_t address_v);
 
+    /** @brief Validates all description enumerators and stores immutable sampling settings. */
+    explicit sampler_t(sampler_description_t sampler_description);
+
+    /** @brief Returns the base-level magnification filter, preserving the legacy accessor. */
     filter_t filter() const noexcept;
+
+    filter_t magnification_filter() const noexcept;
+    filter_t minification_filter() const noexcept;
+    filter_t mipmap_filter() const noexcept;
 
     address_mode_t address_u() const noexcept;
 
     address_mode_t address_v() const noexcept;
 
 private:
-    filter_t m_filter;
-    address_mode_t m_address_u;
-    address_mode_t m_address_v;
+    sampler_description_t m_description;
 };
 
 /**
- * @brief Samples a texture at normalized `(u, v)` coordinates and returns linear RGBA without changing alpha association.
+ * @brief Samples level zero with the magnification filter at normalized `(u, v)` coordinates and returns linear RGBA without changing alpha association.
  *
  * `coordinates[0]` is `u`/`x` and `coordinates[1]` is `v`/`y`. Nearest-neighbor filtering addresses `floor(c * dimension)`. Bilinear filtering uses `p = c * dimension - 0.5` and addresses `floor(p)` and `floor(p) + 1` independently in each dimension. Stored sRGB color channels are decoded before filtering; RGBA components are filtered independently without premultiplication or division by alpha. Storage and sampling prescribe no alpha association; shaders and blend equations determine its interpretation.
  *
@@ -68,6 +83,22 @@ m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 4> sample(
     m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2> coordinates
 );
 
+/**
+ * @brief Samples an explicit finite LOD, clamping level selection to allocated storage.
+ *
+ * Nonpositive LOD uses magnification filtering; positive LOD uses minification
+ * filtering, even for one-level storage. Nearest mip filtering chooses the closest
+ * level with exact halfway ties toward the lower level. Linear mip filtering blends
+ * adjacent filtered levels in linear RGBA. Addressing and alpha semantics match sample().
+ * Empty textures, non-finite coordinates and non-finite LOD fail.
+ */
+m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 4> sample_lod(
+    const texture_t& texture,
+    const sampler_t& sampler,
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2> coordinates,
+    float lod
+);
+
 } // namespace m03gt0l0q3l4b1k27eab5k7py1_texture
 
 namespace std {
@@ -77,6 +108,9 @@ struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::filter_t>;
 
 template <>
 struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::address_mode_t>;
+
+template <>
+struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::sampler_description_t>;
 
 template <>
 struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::sampler_t>;
@@ -142,6 +176,20 @@ struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::address_mode_t> {
 };
 
 template <>
+struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::sampler_description_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gt0l0q3l4b1k27eab5k7py1_texture::sampler_description_t& description, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ magnification: {}", description.magnification_filter);
+        out = std::format_to(out, ", minification: {}", description.minification_filter);
+        out = std::format_to(out, ", mipmap: {}", description.mipmap_filter);
+        out = std::format_to(out, ", address_u: {}", description.address_u);
+        out = std::format_to(out, ", address_v: {} }}", description.address_v);
+        return out;
+    }
+};
+
+template <>
 struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::sampler_t> {
     constexpr auto parse(std::format_parse_context& context) {
         auto iterator = context.begin();
@@ -156,6 +204,8 @@ struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::sampler_t> {
 
         out = std::format_to(out, "{{ ");
         out = std::format_to(out, "filter: {}", sampler.filter());
+        out = std::format_to(out, ", minification: {}", sampler.minification_filter());
+        out = std::format_to(out, ", mipmap: {}", sampler.mipmap_filter());
         out = std::format_to(out, ", address_u: {}", sampler.address_u());
         out = std::format_to(out, ", address_v: {}", sampler.address_v());
         out = std::format_to(out, " }}");

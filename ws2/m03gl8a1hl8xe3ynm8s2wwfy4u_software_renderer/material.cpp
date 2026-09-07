@@ -149,6 +149,18 @@ winding_t material_t::front_face() const {
     return m_front_face;
 }
 
+void material_t::provoking_vertex(provoking_vertex_t provoking_vertex) {
+    switch (provoking_vertex) {
+        case provoking_vertex_t::first:
+        case provoking_vertex_t::last: { m_provoking_vertex = provoking_vertex; } break;
+        default: { throw std::invalid_argument(std::format("material_t::provoking_vertex rejects invalid selection {}", provoking_vertex)); } break;
+    }
+}
+
+provoking_vertex_t material_t::provoking_vertex() const {
+    return m_provoking_vertex;
+}
+
 void material_t::cull(cull_mode_t mode) {
     switch (mode) {
         case cull_mode_t::none:

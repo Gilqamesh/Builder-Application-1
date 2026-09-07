@@ -35,7 +35,19 @@ namespace type_erased_array = m03gjfvd6i5jzbmngb2ldoooza_type_erased_array;
 
 using vector2f_t = m03gsy25j4v7nccgmsdov9ioft_shader::vector_t<float, 2>;
 using vector4f_t = m03gsy25j4v7nccgmsdov9ioft_shader::vector_t<float, 4>;
-using varying_t = std::variant<float, vector2f_t, m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>, vector4f_t>;
+// Carry W*attribute through clipping, postponing division until W is positive.
+// Double storage avoids overflow and division by zero at intermediate clip vertices.
+struct noperspective_t {
+    std::array<double, 4> numerators {};
+    std::size_t count = 0;
+};
+
+using varying_t = std::variant<float, vector2f_t, shader::vector_t<float, 3>, vector4f_t, noperspective_t>;
+using flat_t = std::variant<float, vector2f_t, shader::vector_t<float, 3>, vector4f_t,
+    std::int32_t, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 4>,
+    std::uint32_t, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 4>>;
+using flat_entry_t = std::pair<std::uint32_t, flat_t>;
+using flat_values_t = std::vector<flat_entry_t>;
 using varying_entry_t = std::pair<std::uint32_t, varying_t>;
 using varying_values_t = std::vector<varying_entry_t>;
 using grid_point_t = std::array<std::int64_t, 2>;
@@ -68,11 +80,13 @@ struct raster_bounds_t {
 struct pipeline_vertex_t {
     vector4f_t m_clip_position;
     std::array<std::size_t, 2> m_outputs; // Offset and count in the owning value buffer.
+    std::array<std::size_t, 2> m_flat_outputs {};
 };
 
 struct pipeline_vertex_view_t {
     vector4f_t m_clip_position;
     std::span<const varying_entry_t> m_outputs;
+    std::span<const flat_entry_t> m_flat_outputs {};
 };
 
 struct clipping_buffer_t {
@@ -130,6 +144,9 @@ struct screen_vertex_t {
 struct scratch_t {
     std::vector<pipeline_vertex_t> m_vertex_results;
     varying_values_t m_vertex_values;
+    flat_values_t m_flat_values;
+    std::vector<shader::shader_interface_element_t> m_interpolated_inputs;
+    std::vector<shader::shader_interface_element_t> m_flat_inputs;
     clipping_workspace_t m_clipping;
     raster_workspace_t m_raster;
     varying_values_t m_fragment_inputs;
@@ -163,7 +180,7 @@ int compare_record(const projected_vertex_t& a, const projected_vertex_t& b);
 
 bool edge_record_less(const scan_event_t& a, const scan_event_t& b, std::span<const projected_vertex_t> vertices);
 
-pipeline_vertex_view_t view(const pipeline_vertex_t& vertex, const varying_values_t& values);
+pipeline_vertex_view_t view(const pipeline_vertex_t& vertex, const varying_values_t& values, const flat_values_t& flat_values = {});
 
 double clip_distance(const pipeline_vertex_view_t& vertex, std::size_t plane);
 
@@ -193,7 +210,7 @@ void scanline_events(std::span<const projected_vertex_t> vertices, std::int64_t 
 
 sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::span<const projected_vertex_t> vertices, std::int64_t x, std::int64_t y);
 
-// Returns window depth and reciprocal W, and writes perspective-correct varyings.
+// Returns window depth and reciprocal W, and resolves each interpolated payload.
 std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, varying_values_t& outputs);
 
 bool finite(const vector4f_t& vector);
@@ -236,7 +253,7 @@ void set_vertex_input(
     std::uint32_t vertex_index
 );
 
-bool supported_fragment_input(shader::shader_data_type_t type);
+bool supported_fragment_input(const shader::shader_interface_element_t& input);
 
 template <typename T>
 T require_vertex_output(
@@ -248,6 +265,8 @@ varying_t vertex_output(
     const software_shader::vertex_io_t& io,
     const shader::shader_interface_element_t& input
 );
+
+flat_t flat_output(const software_shader::vertex_io_t& io, const shader::shader_interface_element_t& input);
 
 std::optional<screen_vertex_t> project(
     const pipeline_vertex_view_t& vertex,
@@ -298,7 +317,8 @@ void shade_sample(
     bool front_facing,
     std::span<const varying_entry_t> inputs,
     software_shader::fragment_io_t& io,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric,
+    std::span<const flat_entry_t> flat_inputs = {}
 );
 
 void rasterize_point(
@@ -333,7 +353,8 @@ void rasterize_triangle(
     raster_workspace_t& workspace,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric,
+    std::span<const flat_entry_t> flat_inputs = {}
 );
 
 // The renderer and validation consume the same pre-shading coverage events.
@@ -343,6 +364,9 @@ void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
 
 namespace std {
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::noperspective_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_bounds_t>;
@@ -526,6 +550,20 @@ void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
 
 namespace std {
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::noperspective_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::noperspective_t& noperspective, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ count: {}", noperspective.count);
+        for (std::size_t i = 0; i < noperspective.count; ++i) {
+            out = std::format_to(out, ", {}", noperspective.numerators[i]);
+        }
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_bounds_t> {

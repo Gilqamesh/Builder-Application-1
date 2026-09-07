@@ -1,6 +1,6 @@
 # Software renderer milestones
 
-Status: milestones 0–4 are implemented and validated. Milestone 6 has profiling and an initial optimized baseline; algorithmic optimization remains unstarted. Milestone 5 remains proposed and unstarted. Public behavior is owned by the module headers.
+Status: milestones 0–5 are implemented and validated. Milestone 6 has profiling, the historical baseline and a consistently optimized milestone 5 comparison; broader algorithmic optimization remains unstarted. Public behavior is owned by the module headers.
 
 Baseline: [Builder-Modules at 540bbede71740d24292cc3b7cd9c8ed126eca0c3](https://github.com/Gilqamesh/Builder-Modules/tree/540bbede71740d24292cc3b7cd9c8ed126eca0c3).
 
@@ -158,11 +158,35 @@ Status: implemented; headless, native consumer, visible integration, and benchma
 
 ## 5. Interpolation modes and mipmapped sampling
 
-Status: unstarted.
+Status: implemented in 5A and 5B; headless, native consumer, visible integration,
+and optimized benchmark validation passed.
 
-- Outcome: flat varyings, including integer values; noperspective interpolation; mipmapped textures and explicit LOD sampling.
-- Open decisions: interpolation metadata and linking, provoking-vertex rules through clipping/topology assembly, mip storage/generation, and LOD filtering. Keep reflection changes in shader, execution in software_shader, interpolation in the renderer, and sampling in texture.
-- Acceptance criteria: flat values remain constant across clipped primitives, screen-linear and perspective interpolation visibly differ as intended, and explicit LOD selects/blends validated mip levels. Automatic derivative-based LOD is a separate later decision.
+- 5A: fragment-owned perspective, noperspective and flat interpolation; float
+  scalars/vectors in all modes and signed/unsigned 32-bit scalars/vectors in flat.
+  Shader reflection owns mode metadata; software_shader retains location/type
+  linking and broader standalone invocation types. The renderer owns eligibility
+  and interpolation. See [shader interfaces](../../m03gsy25j4v7nccgmsdov9ioft_shader/shader_builder.h)
+  and [drawing](../software_renderer.h).
+- Materials own first/last provoking-vertex selection, defaulting to first, with
+  original-topology selection before winding adjustment or clipping. Fan and loop
+  rules are documented in [material.h](../material.h). Flat payloads remain separate
+  from clipped/interpolated values; noperspective payloads carry W times attributes
+  through clipping in double precision, then use screen-linear interpolation.
+- 5B: texture-owned, fixed-address mip prefixes; explicit in-place area-weighted
+  generation for all four formats; independent magnification/minification/mip
+  filters; typed explicit LOD calls in both shader stages. Existing constructors,
+  level-zero access and ordinary sample behavior are preserved. See [texture storage](../../../ws1/m03gt0l0q3l4b1k27eab5k7py1_texture/texture.h)
+  and [sampling](../../../ws1/m03gt0l0q3l4b1k27eab5k7py1_texture/sampler.h).
+- Feedback preparation checks every allocated mip of reflected textures in both
+  stages against every attachment, including disabled writes and partial overlap.
+  Applications explicitly sequence render, regenerate and sample operations.
+- Acceptance evidence covers topology/provoking selection, clipped and pathological
+  coverage, mixed interpolation, exact integer payloads, mip dimensions/formats,
+  odd-size footprints, stable views, LOD filtering and full two-pass integration.
+  [The caller guide](interpolation-and-mipmaps.md) gives examples and precise scope.
+- [Optimized measurements](milestone-5-performance.md) retain nine existing workloads
+  and four feature baselines. No milestone 5 semantic decision remains open.
+  Automatic derivatives/LOD, anisotropy and specialized mip generation remain deferred.
 
 ## 6. Measurement and incremental optimization
 
@@ -172,7 +196,7 @@ and [baseline evidence](profiling-baseline.md).
 
 - Outcome: each optimization delivery demonstrates its effect through repeatable measurements while preserving rendering correctness.
 - Measurement ownership: [`profiling`](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md) owns timing statistics, persistent storage, and deferred reporting. The renderer owns its metric types and measurement boundaries. Applications own profilers and pass parent metrics into rendering. The benchmark driver owns workloads, repeated-run summaries, and comparisons.
-- Metrics: track median and high-percentile elapsed render time and process peak RSS across stable headless workloads. The benchmark records precise timing and memory scopes. Keep these scopes consistent across deliveries. Current Builder runs use its default build; dependency-wide optimization and a new optimized baseline remain deferred.
+- Metrics: track median and high-percentile elapsed render time and process peak RSS across stable headless workloads. The benchmark records precise timing and memory scopes. Keep these scopes consistent across deliveries. Normal Builder runs use its default build. Milestone 5 records a separate, consistently optimized build of the renderer and performance-relevant dependencies; general Builder optimization configuration remains deferred.
 - Comparisons: record workload, resolution, rendering settings, hardware, build configuration, and source revision. Report absolute results, percentage changes, and run-to-run variation against both the previous delivery and the established baseline. New feature workloads establish their own baselines.
 - Delivery process: use measured results to select each bounded optimization. Every delivery includes the same comparison report and correctness evidence, making improvements, regressions, and tradeoffs visible. Specific optimization techniques remain undecided until measurements justify them.
 - Acceptance criteria: repeated runs establish measurement variability, and each optimization delivery has comparable before/after results with passing correctness validation.
@@ -608,6 +632,83 @@ and establish three feature baselines. This is a feature delivery without an
 algorithmic optimization claim. Colorless framebuffers, floating-point color
 attachments, early testing and milestone 5 remain deferred. Only the active
 tower-defense presentation path was visually checked.
+
+### Milestone 5 implementation record — 2026-09-07
+
+Reviewed base: `2924350`. Changes are in the working tree; no commit was created.
+The attached review settled fragment-owned interpolation, configurable provoking
+vertices with first as default, fixed mip allocations, explicit in-place generation,
+area-weighted reduction, separate filters and explicit LOD numeric rules.
+Public contracts are owned by the linked headers above. No milestone 5 semantic
+decision remains open.
+
+Changed shader files: `AGENTS.md`, `shader_builder.h`, `shader_expression.h`,
+`shader.cpp`, and `test/public_api.cpp`. Changed software_shader files:
+`software_shader.cpp` and `test/public_api.cpp`. Changed texture files:
+`AGENTS.md`, `texture.h/.cpp`, `sampler.h/.cpp`, the shared codec/addressing
+`helpers.h/.cpp`, and `test/public_api.cpp`. Changed renderer files:
+`AGENTS.md`, `material.h/.cpp`, `helpers.h/.cpp`, `software_renderer.h/.cpp`,
+`test/public_api.cpp`, `cli.cpp`, `benchmark.cpp`, this roadmap,
+`docs/interpolation-and-mipmaps.md`, and `docs/milestone-5-performance.md/.json`.
+
+Checks obtained from changed source (all exit 0):
+
+```sh
+python3 /tmp/renderer-m5-implementation/check_5a.py
+python3 /tmp/renderer-m5-implementation/build.py after shader software_shader texture renderer benchmark
+python3 /tmp/renderer-m5-implementation/build.py after renderer
+CCACHE_DIR=/tmp/renderer-m5-implementation/ccache /tmp/renderer-m1-implementation/install_binary m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
+CCACHE_DIR=/tmp/renderer-m5-implementation/ccache /tmp/renderer-m1-implementation/install_binary m03gilsfsv3k34ej14ytz8a29k_tower_defense_game
+python3 /tmp/renderer-m5-implementation/smoke.py m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer 'Software Renderer' renderer-desktop
+python3 /tmp/renderer-m5-implementation/smoke.py m03gilsfsv3k34ej14ytz8a29k_tower_defense_game 'Tower Defense Game' tower-defense
+artifacts/m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/latest/binary/benchmark/install/benchmark --help
+python3 /tmp/renderer-m5-implementation/record_performance.py
+git -C /home/gilqamesh/Projects/Builder-Modules diff --check
+```
+
+5A passed separately before mip integration. Final optimized GNU C++23 validation
+passed all four public suites. Native Builder rebuilt with Clang C++23 and launched
+each module's public runner once; renderer/demo/benchmark and all tower-defense
+source paths compiled successfully. Byte comparison confirmed all 53 C++ source
+files in these modules match their installed source copies. The new mixed-input
+point/line tests passed in both GNU and native Clang validation.
+
+Focused checks cover conflicting input metadata and invalid declarations; all
+supported flat scalar/vector types; exact signed/unsigned values beyond float
+precision; first/last selection in all seven topologies; indexed order and removed
+provoking vertices; analytical screen-linear and perspective differences; mixed
+modes in one program; all clip planes, zero/negative-W inputs, crossed and concave
+coverage fixtures; mip prefixes and dimensions, copying/moving, stable lower-level
+views, odd-size area weighting, all four formats and HDR/alpha preservation;
+binary16 normal/subnormal halfway rounding; mip and within-level filters, nearest
+ties, finite LOD clamping, rejection of non-finite LOD, typed AST validation and
+execution in both stages; nonzero-mip feedback rejection and a full
+render -> regenerate -> fractional-LOD sample sequence. Existing depth, stencil,
+blending, camera and profiling regressions also pass.
+
+Both X11 desktop checks presented content and closed normally. Inspected captures
+are `/tmp/renderer-m5-implementation/renderer-desktop-smoke-0.png` (960x540,
+interpolation modes and split level-zero/LOD-1.5 composite) and
+`tower-defense-smoke-0.png` (1600x1200, preserving its 400x200 rendering region).
+The initial sandboxed demo launch could not open X11; the desktop launch succeeded.
+The native unoptimized renderer required about 30 seconds to present its first
+captured frame. Only the active tower-defense rendering path was visually checked.
+
+The attempted texture ASan/UBSan build could not link because sanitizer runtime
+libraries are absent (`libasan.so.8.0.0`; no GNU static or Clang ASan runtime was
+available). No sanitizer result is claimed. Its command and log are
+`python3 /tmp/renderer-m5-implementation/sanitize_texture.py` and `sanitizer.log`.
+Initial new-test fixture failures (unsupported scalar casts, missing reference
+attachments, offscreen-only lines, an incomplete triangle list and an earlier
+cross-builder rejection) were corrected; final suites pass.
+
+[Performance commands and analysis](milestone-5-performance.md) and
+[raw evidence](milestone-5-performance.json) establish an optimized baseline and
+compare all nine existing workloads, with four added feature workloads. Default
+unprofiled medians increased by 0.34–12.44% in the retained comparison; variation and
+uncontrolled external load limit causal conclusions. This delivers renderer
+features and measurement evidence; broader performance optimization remains later
+scope. Automatic derivatives/LOD and advanced sampling remain deferred.
 
 ## Deferred scope
 

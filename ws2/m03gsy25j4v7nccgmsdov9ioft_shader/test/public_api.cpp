@@ -31,6 +31,70 @@ void expect_element(
     test::expect(std::identity(), element.type == type);
 }
 
+
+
+void test_explicit_lod_ast_validation() {
+    for (int invalid = 0; invalid < 3; ++invalid) {
+        shader::fragment_shader_ast_builder_t fragment;
+        const auto texture = fragment.resource<shader::shader_texture_2d_t>(0);
+        const auto sampler = fragment.resource<shader::shader_sampler_t>(0);
+        const auto uv = fragment.constant(vector2f_t({0.5F,0.5F}));
+        const auto lod = fragment.constant(std::int32_t(1));
+        std::vector<const shader::shader_expression_node_t*> operands {texture.node(),sampler.node(),uv.node()};
+        if (invalid != 0) { operands.push_back(invalid == 1 ? lod.node() : uv.node()); }
+        const auto expression = fragment.expression<vector4f_t>(std::make_unique<shader::shader_call_node_t>(
+            shader::shader_data_type<vector4f_t>(),shader::shader_call_operation_t::sample_lod,std::move(operands)));
+        fragment.color(expression);
+        test::expect_throws([&]{(void)std::move(fragment).finalize();});
+    }
+    shader::fragment_shader_ast_builder_t fragment, foreign;
+    const auto texture = fragment.resource<shader::shader_texture_2d_t>(0);
+    const auto sampler = fragment.resource<shader::shader_sampler_t>(0);
+    test::expect_throws([&]{
+        fragment.color(shader::sample_lod(texture,sampler,vector2f_t({0,0}),foreign.constant(1.0F)));
+        (void)std::move(fragment).finalize();
+    });
+    shader::vertex_shader_ast_builder_t vertex;
+    vertex.position(vector4f_t({0,0,0,1}));
+    const auto image = vertex.resource<shader::shader_texture_2d_t>(0);
+    const auto filtering = vertex.resource<shader::shader_sampler_t>(0);
+    const auto coordinates = vertex.constant(vector2f_t({0,0}));
+    vertex.output(0,shader::sample_lod(image,filtering,coordinates,vertex.constant(0.5F)));
+    vertex.output(1,shader::sample_lod(image,filtering,coordinates,0.5F));
+    vertex.output(2,shader::sample_lod(image,filtering,vector2f_t({0,0}),vertex.constant(0.5F)));
+    vertex.output(3,shader::sample_lod(image,filtering,vector2f_t({0,0}),0.5F));
+    const auto ast=std::move(vertex).finalize();
+    test::expect(std::equal_to<>(),ast.interface().bindings().size(),std::size_t(2));
+}
+
+void test_interpolation_metadata() {
+    for (auto mode : {shader::interpolation_t::perspective, shader::interpolation_t::noperspective, shader::interpolation_t::flat}) {
+        shader::fragment_shader_ast_builder_t fragment;
+        fragment.output(0, fragment.input<vector4f_t>(7, mode));
+        const auto ast = std::move(fragment).finalize();
+        test::expect(std::identity(), ast.interface().inputs()[0].interpolation == mode);
+        test::expect(std::identity(), !std::format("{}", mode).empty());
+    }
+    for (auto mode : {shader::interpolation_t::noperspective, shader::interpolation_t::flat, static_cast<shader::interpolation_t>(99)}) {
+        shader::vertex_shader_ast_builder_t vertex;
+        vertex.position(vertex.input<vector4f_t>(0, mode));
+        test::expect_throws([&] { (void)std::move(vertex).finalize(); });
+    }
+    shader::fragment_shader_ast_builder_t conflict;
+    conflict.output(0, conflict.input<float>(3, shader::interpolation_t::flat));
+    conflict.output(1, conflict.input<float>(3, shader::interpolation_t::noperspective));
+    test::expect_throws([&] { (void)std::move(conflict).finalize(); });
+    test::expect_throws([&] {
+        (void)shader::shader_interface_t(shader::shader_stage_t::fragment,
+            {{0, shader::shader_data_type<float>(), shader::interpolation_t::flat},
+             {0, shader::shader_data_type<float>(), shader::interpolation_t::perspective}}, {}, {});
+    });
+    test::expect_throws([&] {
+        (void)shader::shader_interface_t(shader::shader_stage_t::fragment,
+            {{0, shader::shader_data_type<float>(), static_cast<shader::interpolation_t>(99)}}, {}, {});
+    });
+}
+
 void test_repeated_branch_outputs() {
     shader::vertex_shader_ast_builder_t vertex;
     const auto position = vertex.input<vector4f_t>(0);
@@ -301,6 +365,8 @@ void test_vertex_matrix_builtins() {
 
 int main() {
     return test::run([] {
+        test_explicit_lod_ast_validation();
+        test_interpolation_metadata();
         test_repeated_branch_outputs();
         test_dead_expressions_are_inert();
         test_binding_namespaces();

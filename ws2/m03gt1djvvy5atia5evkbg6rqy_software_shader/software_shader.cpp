@@ -790,15 +790,23 @@ public:
                     value(evaluate(*arguments[2]))
                 );
                 break;
-            case shader::shader_call_operation_t::sample: {
+            case shader::shader_call_operation_t::sample:
+            case shader::shader_call_operation_t::sample_lod: {
                 const auto texture_resource = evaluate(*arguments[0]);
                 const auto sampler_resource = evaluate(*arguments[1]);
                 const auto coordinates = value(evaluate(*arguments[2]));
-                m_evaluation = make_value(texture::sample(
-                    texture_value(texture_resource),
-                    sampler_value(sampler_resource),
-                    typed_value<shader::vector_t<float, 2>>(coordinates)
-                ));
+                if (node.operation() == shader::shader_call_operation_t::sample) {
+                    m_evaluation = make_value(texture::sample(
+                        texture_value(texture_resource), sampler_value(sampler_resource),
+                        typed_value<shader::vector_t<float, 2>>(coordinates)
+                    ));
+                } else {
+                    const float lod = typed_value<float>(value(evaluate(*arguments[3])));
+                    m_evaluation = make_value(texture::sample_lod(
+                        texture_value(texture_resource), sampler_value(sampler_resource),
+                        typed_value<shader::vector_t<float, 2>>(coordinates), lod
+                    ));
+                }
                 break;
             }
             default: throw std::logic_error("software shader encountered an unsupported call operation");

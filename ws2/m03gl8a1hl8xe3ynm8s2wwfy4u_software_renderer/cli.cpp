@@ -11,7 +11,9 @@
 #include <m03gt1djvvy5atia5evkbg6rqy_software_shader/api.h>
 #include <m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h>
 
+#include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -63,7 +65,7 @@ using vector2f_t = shader::vector_t<float, 2>;
 using vector3f_t = shader::vector_t<float, 3>;
 using vector4f_t = shader::vector_t<float, 4>;
 
-std::shared_ptr<const software_shader::program_t> make_program() {
+std::shared_ptr<const software_shader::program_t> make_program(shader::interpolation_t interpolation = shader::interpolation_t::perspective) {
     shader::vertex_shader_ast_builder_t vertex;
     const auto position = vertex.input<vector3f_t>(0);
     const auto local = vertex.construct<vector4f_t>(position, 1.0F);
@@ -71,7 +73,7 @@ std::shared_ptr<const software_shader::program_t> make_program() {
     vertex.output(0, shader::swizzle<0, 1>(position) * 0.5F + vector2f_t({0.5F, 0.5F}));
 
     shader::fragment_shader_ast_builder_t fragment;
-    const auto coordinates = fragment.input<vector2f_t>(0);
+    const auto coordinates = fragment.input<vector2f_t>(0, interpolation);
     const auto image = fragment.resource<shader::shader_texture_2d_t>(0);
     const auto sampler = fragment.resource<shader::shader_sampler_t>(0);
     fragment.color(shader::sample(image, sampler, coordinates) * fragment.uniform<vector4f_t>(0));
@@ -149,20 +151,24 @@ int main() {
         profiler.enabled() = true;
 
         opengl_renderer_api::opengl_renderer_t opengl_renderer(window);
-        auto material = std::make_shared<software_renderer_api::material_t>(make_program());
-        material->texture(0, make_texture());
-        material->sampler(0, std::make_shared<texture::sampler_t>(
-            texture::filter_t::nearest,
-            texture::address_mode_t::clamp_to_edge,
-            texture::address_mode_t::clamp_to_edge
-        ));
+        const auto make_surface_material = [](shader::interpolation_t interpolation) {
+            auto material = std::make_shared<software_renderer_api::material_t>(make_program(interpolation));
+            material->texture(0, make_texture());
+            material->sampler(0, std::make_shared<texture::sampler_t>(
+                texture::filter_t::nearest,
+                texture::address_mode_t::clamp_to_edge,
+                texture::address_mode_t::clamp_to_edge
+            ));
+            material->depth_test(true);
+            material->stencil_test(true);
+            material->stencil_front({.comparison = software_renderer_api::comparison_t::equal, .reference = 1});
+            material->stencil_back(material->stencil_front());
+            material->cull(software_renderer_api::cull_mode_t::back);
+            return material;
+        };
+        auto material = make_surface_material(shader::interpolation_t::perspective);
         material->uniform(0, vector4f_t({1.0F, 0.6F, 0.6F, 1.0F}));
-        material->depth_test(true);
-        material->stencil_test(true);
-        material->stencil_front({.comparison = software_renderer_api::comparison_t::equal, .reference = 1});
-        material->stencil_back(material->stencil_front());
-        material->cull(software_renderer_api::cull_mode_t::back);
-        auto second_material = std::make_shared<software_renderer_api::material_t>(*material);
+        auto second_material = make_surface_material(shader::interpolation_t::noperspective);
         second_material->uniform(0, vector4f_t({0.6F, 0.7F, 1.0F, 1.0F}));
         software_renderer_api::render_item_t render_item;
         render_item.geometry() = make_geometry();
@@ -174,7 +180,7 @@ int main() {
         second_item.translation() = {0.15F, 0.0F, -1.35F};
 
         auto transparent_item = render_item;
-        auto transparent_material = std::make_shared<software_renderer_api::material_t>(*transparent_item.material());
+        auto transparent_material = make_surface_material(shader::interpolation_t::flat);
         transparent_material->uniform(0, vector4f_t({0.5F, 1.0F, 0.7F, 0.45F}));
         transparent_material->blend(true);
         transparent_material->blend_color({software_renderer_api::blend_factor_t::src_alpha, software_renderer_api::blend_factor_t::one_minus_src_alpha, software_renderer_api::blend_op_t::add});
@@ -197,7 +203,12 @@ int main() {
                 fragment.branch(0.21F < shader::dot(centered, centered), [&] { fragment.discard(); });
                 fragment.color(vector4f_t({0, 0, 0, 0}));
             } else {
-                fragment.color(shader::sample(fragment.resource<shader::shader_texture_2d_t>(0), fragment.resource<shader::shader_sampler_t>(0), coordinates));
+                const auto sampled_texture = fragment.resource<shader::shader_texture_2d_t>(0);
+                const auto sampled_sampler = fragment.resource<shader::shader_sampler_t>(0);
+                fragment.color(shader::sample(sampled_texture, sampled_sampler, coordinates));
+                fragment.branch(0.5F < shader::swizzle<0>(coordinates), [&] {
+                    fragment.color(shader::sample_lod(sampled_texture, sampled_sampler, coordinates, 1.5F));
+                });
             }
             return std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
         };
@@ -211,11 +222,12 @@ int main() {
         mask.material()->stencil_back(mask.material()->stencil_front());
         auto postprocess = mask;
         postprocess.material() = std::make_shared<software_renderer_api::material_t>(make_screen_program(false));
-        postprocess.material()->sampler(0, std::make_shared<texture::sampler_t>(texture::filter_t::linear, texture::address_mode_t::clamp_to_edge, texture::address_mode_t::clamp_to_edge));
+        postprocess.material()->sampler(0, std::make_shared<texture::sampler_t>(texture::sampler_description_t {texture::filter_t::linear, texture::filter_t::linear, texture::filter_t::linear}));
         postprocess.material()->blend(true);
         postprocess.material()->blend_color({software_renderer_api::blend_factor_t::one, software_renderer_api::blend_factor_t::one_minus_src_alpha, software_renderer_api::blend_op_t::add});
         postprocess.material()->blend_alpha({software_renderer_api::blend_factor_t::one, software_renderer_api::blend_factor_t::one_minus_src_alpha, software_renderer_api::blend_op_t::add});
 
+        std::cout << "Surfaces: perspective (red), noperspective (blue), flat (green). Composite: level zero on the left, explicit LOD 1.5 on the right.\n";
         const auto started_at = steady_clock_t::now();
         auto previous_frame_started_at = started_at;
 
@@ -233,7 +245,7 @@ int main() {
                 depth.resize(pixels.size());
                 stencil.resize(pixels.size());
                 if (!pixels.empty()) {
-                    target = std::make_shared<texture::texture_t>(texture::format_t::rgba8_srgb, std::size_t(size[0]), std::size_t(size[1]), byte_stream::byte_stream_t(std::vector<std::byte>(pixels.size() * 4)));
+                    target = std::make_shared<texture::texture_t>(texture::texture_description_t {texture::format_t::rgba8_srgb, std::size_t(size[0]), std::size_t(size[1]), std::size_t(std::bit_width(unsigned(std::max(size[0], size[1]))))}, byte_stream::byte_stream_t(std::vector<std::byte>(pixels.size() * 4)));
                     postprocess.material()->texture(0, target);
                     postprocess.material()->uniform(0, vector2f_t({float(size[0]), float(size[1])}));
                     mask.material()->uniform(0, vector2f_t({float(size[0]), float(size[1])}));
@@ -272,6 +284,7 @@ int main() {
                 }
                 // Source-over into transparent storage produces premultiplied intermediate RGBA.
                 software_renderer.draw(camera, transparent_item, frame_metric);
+                target->generate_mipmaps();
                 software_renderer.framebuffer() = framebuffer;
                 software_renderer.clear_color({28, 36, 48, 255}, frame_metric);
                 software_renderer.draw(camera, postprocess, frame_metric);

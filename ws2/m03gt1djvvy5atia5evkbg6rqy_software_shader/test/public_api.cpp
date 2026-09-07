@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -65,6 +66,41 @@ texture::texture_t single_texel(std::array<std::uint8_t, 4> color) {
         1,
         byte_stream::byte_stream_t(std::move(bytes))
     );
+}
+
+
+void test_explicit_lod_execution() {
+    texture::texture_t target(texture::texture_description_t {texture::format_t::rgba8_unorm, 2, 1, 2},
+        byte_stream::byte_stream_t(std::vector<std::byte>{std::byte{255},std::byte{0},std::byte{0},std::byte{255},std::byte{0},std::byte{0},std::byte{255},std::byte{255}}));
+    target.generate_mipmaps();
+    const texture::sampler_t sampler(texture::sampler_description_t {texture::filter_t::nearest, texture::filter_t::nearest, texture::filter_t::linear});
+    shader::vertex_shader_ast_builder_t vertex;
+    vertex.position(vector4f_t({0,0,0,1}));
+    vertex.output(0, shader::sample_lod(vertex.resource<shader::shader_texture_2d_t>(0), vertex.resource<shader::shader_sampler_t>(0), vector2f_t({0.25F,0.5F}), vertex.uniform<float>(0)));
+    shader::fragment_shader_ast_builder_t fragment;
+    fragment.output(0, fragment.input<vector4f_t>(0));
+    fragment.color(shader::sample_lod(fragment.resource<shader::shader_texture_2d_t>(0), fragment.resource<shader::shader_sampler_t>(0), vector2f_t({0.25F,0.5F}), fragment.uniform<float>(0)));
+    software_shader::program_t program(std::move(vertex).finalize(), std::move(fragment).finalize());
+    software_shader::bindings_t bindings;
+    bindings.texture(0, target); bindings.sampler(0, sampler);
+    software_shader::vertex_io_t vertex_io(0,0);
+    software_shader::fragment_io_t fragment_io(vector4f_t(0), true);
+    for (float lod : {0.0F, 0.5F, 1.0F, 9.0F}) {
+        bindings.uniform(0, lod);
+        program.run(bindings, vertex_io);
+        const auto expected = texture::sample_lod(target, sampler, vector2f_t({0.25F,0.5F}), lod);
+        fragment_io.input(0, *vertex_io.output<vector4f_t>(0));
+        program.run(bindings, fragment_io);
+        for (std::size_t component = 0; component < 4; ++component) {
+            expect_near((*vertex_io.output<vector4f_t>(0))[component], expected[component]);
+            expect_near((*fragment_io.color())[component], expected[component]);
+        }
+    }
+    bindings.uniform(0, std::numeric_limits<float>::quiet_NaN());
+    test::expect_throws([&] { program.run(bindings, vertex_io); });
+    test::expect(std::identity(), !vertex_io.output<vector4f_t>(0));
+    test::expect_throws([&] { program.run(bindings, fragment_io); });
+    test::expect(std::identity(), !fragment_io.color());
 }
 
 void test_program_link_validation() {
@@ -554,6 +590,7 @@ void test_scalar_operations() {
 
 int main() {
     return test::run([] {
+        test_explicit_lod_execution();
         test_program_link_validation();
         test_vertex_execution_is_fresh_and_reads_current_state();
         test_vertex_transform_state_defaults_overrides_and_reset();

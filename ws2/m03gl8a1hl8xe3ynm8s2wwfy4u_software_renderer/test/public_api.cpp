@@ -3380,6 +3380,277 @@ void test_stencil_facing_and_filtering() {
     expect_color(pixels[3], {0, 255, 0, 255});
 }
 
+
+void test_interpolation_and_provoking_vertices() {
+    using topology_t = vertex_primitive_topology_t;
+    const std::vector<clip_position_fixture_t> positions {{-2, -1, 0, 1}, {0.75F, -0.75F, 0, 1}, {-0.5F, 2, 0, 1}, {0.5F, 0.5F, 0, 1}};
+    shader::vertex_shader_ast_builder_t vertex;
+    vertex.position(vertex.input<vector4f_t>(0));
+    const auto index = vertex.vertex_index();
+    for (std::int32_t i = 0; i < 4; ++i) {
+        vertex.branch(index == i, [&] {
+            vertex.output(0, shader::vector_t<std::uint32_t, 2>({std::uint32_t(0xf0000000) + std::uint32_t(i), std::uint32_t(0xffffffff)}));
+            vertex.output(1, shader::vector_t<std::int32_t, 3>({std::int32_t(-2000000000) + i, std::int32_t(-2147483647), std::int32_t(2147483647)}));
+            vertex.output(2, float(i));
+        });
+    }
+    shader::fragment_shader_ast_builder_t fragment;
+    const auto unsigned_ids = fragment.input<shader::vector_t<std::uint32_t, 2>>(0, shader::interpolation_t::flat);
+    const auto signed_ids = fragment.input<shader::vector_t<std::int32_t, 3>>(1, shader::interpolation_t::flat);
+    const auto id = fragment.input<float>(2, shader::interpolation_t::flat);
+    fragment.color(vector4f_t({1, 0, 1, 1}));
+    for (std::int32_t i = 0; i < 4; ++i) {
+        fragment.branch((shader::swizzle<0>(unsigned_ids) == std::uint32_t(0xf0000000) + std::uint32_t(i)) &&
+            (shader::swizzle<1>(unsigned_ids) == std::uint32_t(0xffffffff)) &&
+            (shader::swizzle<0>(signed_ids) == std::int32_t(-2000000000) + i) &&
+            (shader::swizzle<1>(signed_ids) == std::int32_t(-2147483647)) &&
+            (shader::swizzle<2>(signed_ids) == std::int32_t(2147483647)) && (id == float(i)),
+            [&] { fragment.color(vector4f_t({float(i + 1) / 4, 1, 0, 1})); });
+    }
+    const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+    auto material = std::make_shared<material_t>(program);
+    require(material->provoking_vertex() == provoking_vertex_t::first);
+    material->provoking_vertex(provoking_vertex_t::last);
+    test::expect_throws([&] { material->provoking_vertex(static_cast<provoking_vertex_t>(99)); });
+    require(material->provoking_vertex() == provoking_vertex_t::last);
+    const material_t copied(*material);
+    require(copied.provoking_vertex() == provoking_vertex_t::last);
+    // Literal assembly and provoking indices provide an independent topology oracle.
+    const std::array topologies {topology_t::point, topology_t::line, topology_t::line_strip, topology_t::line_loop,
+        topology_t::triangle, topology_t::triangle_strip, topology_t::triangle_fan};
+    const std::array<std::vector<std::vector<std::uint32_t>>, 7> primitives {{
+        {{2}, {0}, {3}, {1}}, {{2, 0}, {3, 1}}, {{2, 0}, {0, 3}, {3, 1}}, {{2, 0}, {0, 3}, {3, 1}, {1, 2}},
+        {{2, 0, 3}}, {{0, 2, 3}, {0, 3, 1}}, {{2, 0, 3}, {2, 3, 1}}
+    }};
+    const std::array<std::vector<std::uint32_t>, 7> first_ids {{{2, 0, 3, 1}, {2, 3}, {2, 0, 3}, {2, 0, 3, 1}, {2}, {2, 0}, {0, 3}}};
+    const std::array<std::vector<std::uint32_t>, 7> last_ids {{{2, 0, 3, 1}, {0, 1}, {0, 3, 1}, {0, 3, 1, 2}, {3}, {3, 1}, {3, 1}}};
+    const auto camera = make_camera(32, 32);
+    for (auto convention : {provoking_vertex_t::first, provoking_vertex_t::last}) {
+        material->provoking_vertex(convention);
+        for (std::size_t t = 0; t < topologies.size(); ++t) {
+            std::vector<rgba8_t> actual(32 * 32, clear_color), expected(actual);
+            software_renderer_t renderer(framebuffer_t(actual, 32, 32));
+            auto item = make_render_item(make_typed_geometry(positions, vertex_attribute_t(vertex_attribute_type_t::R32, 4), t == 4 ? std::vector<std::uint32_t>{2, 0, 3} : std::vector<std::uint32_t>{2, 0, 3, 1}, topologies[t]), material);
+            renderer.draw(camera, item, inactive_metric);
+            renderer.framebuffer() = framebuffer_t(expected, 32, 32);
+            for (std::size_t p = 0; p < primitives[t].size(); ++p) {
+                const auto id = (convention == provoking_vertex_t::first ? first_ids : last_ids)[t][p];
+                const auto primitive_topology = primitives[t][p].size() == 1 ? topology_t::point : (primitives[t][p].size() == 2 ? topology_t::line : topology_t::triangle);
+                auto reference = make_visibility_item(positions, primitives[t][p], primitive_topology, {float(id + 1) / 4, 1, 0, 1});
+                reference.material()->depth_test(false);
+                renderer.draw(camera, reference, inactive_metric);
+            }
+            require(colored_pixel_count(actual) != 0);
+            for (std::size_t p = 0; p < actual.size(); ++p) { expect_color(actual[p], expected[p]); }
+        }
+    }
+}
+
+void test_noperspective_clipping() {
+    const auto camera = make_camera(32, 32);
+    for (bool clipped : {false, true}) {
+        const float extent = clipped ? 2 : 1;
+        const std::vector<clip_position_fixture_t> positions {{-extent, -extent, 0, 1}, {2 * extent, -2 * extent, 0, 2}, {-4 * extent, 4 * extent, 0, 4}};
+        std::vector<rgba8_t> perspective_pixels(32 * 32, clear_color);
+        std::size_t differences = 0;
+        for (auto mode : {shader::interpolation_t::perspective, shader::interpolation_t::noperspective}) {
+            shader::vertex_shader_ast_builder_t vertex;
+            const auto position = vertex.input<vector4f_t>(0);
+            vertex.position(position);
+            vertex.output(0, (shader::swizzle<0, 1>(position) / shader::swizzle<3>(position) + vector2f_t(1)) / 2.0F);
+            shader::fragment_shader_ast_builder_t fragment;
+            const auto uv = fragment.input<vector2f_t>(0, mode);
+            fragment.color(fragment.construct<vector4f_t>(uv, 0.0F, 1.0F));
+            auto material = std::make_shared<material_t>(std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize()));
+            auto item = make_render_item(make_typed_geometry(positions, vertex_attribute_t(vertex_attribute_type_t::R32, 4), {0, 1, 2}, vertex_primitive_topology_t::triangle), material);
+            std::vector<rgba8_t> pixels(32 * 32, clear_color);
+            software_renderer_t renderer(framebuffer_t(pixels, 32, 32));
+            renderer.draw(camera, item, inactive_metric);
+            if (mode == shader::interpolation_t::perspective) { perspective_pixels = pixels; continue; }
+            for (int y = 0; y < 32; ++y) {
+                for (int x = 0; x < 32; ++x) {
+                    const auto p = pixel_index(x, y, 32);
+                    require(same_color(pixels[p], clear_color) == same_color(perspective_pixels[p], clear_color));
+                    if (!same_color(pixels[p], clear_color)) {
+                        const int red = int(std::floor((x + 0.5) / 32 * 255 + 0.5));
+                        const int green = int(std::floor((1 - (y + 0.5) / 32) * 255 + 0.5));
+                        require(std::abs(int(pixels[p].red) - red) <= 1 && std::abs(int(pixels[p].green) - green) <= 1);
+                        differences += !same_color(pixels[p], perspective_pixels[p]);
+                    }
+                }
+            }
+        }
+        require(100 < differences);
+    }
+}
+
+
+void test_render_generate_sample_lod() {
+    auto target = std::make_shared<texture::texture_t>(texture::texture_description_t {texture::format_t::rgba8_unorm, 2, 1, 2},
+        byte_stream::byte_stream_t(std::vector<std::byte>(8)));
+    const auto lower_view = target->view(1);
+    software_renderer_t renderer(framebuffer_t(target->view()));
+    renderer.clear_color(blue, inactive_metric);
+    auto source = make_visibility_item(visibility_quad(0), {0,1,2,2,1,3}, vertex_primitive_topology_t::triangle, {1,0,0,1});
+    source.material()->depth_test(false);
+    const camera_t first_pixel({{0,1},{0,1}}, orthographic_t({{-1,1},{-1,1}},0,2));
+    renderer.draw(first_pixel, source, inactive_metric);
+    target->generate_mipmaps();
+    require(lower_view.bytes().data() == target->view(1).bytes().data());
+    require(lower_view.bytes()[0] == std::byte{128} && lower_view.bytes()[2] == std::byte{128});
+    shader::vertex_shader_ast_builder_t vertex;
+    vertex.position(vertex.input<vector4f_t>(0));
+    shader::fragment_shader_ast_builder_t fragment;
+    fragment.color(shader::sample_lod(fragment.resource<shader::shader_texture_2d_t>(0), fragment.resource<shader::shader_sampler_t>(0), vector2f_t({0.25F,0.5F}), 0.5F));
+    auto material = std::make_shared<material_t>(std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize()));
+    material->texture(0, target);
+    material->sampler(0, std::make_shared<texture::sampler_t>(texture::sampler_description_t{texture::filter_t::nearest, texture::filter_t::nearest, texture::filter_t::linear}));
+    auto postprocess = make_render_item(make_typed_geometry(visibility_quad(0), vertex_attribute_t(vertex_attribute_type_t::R32,4), {0,1,2,2,1,3}, vertex_primitive_topology_t::triangle), material);
+    std::vector<rgba8_t> output(2,clear_color);
+    renderer.framebuffer() = framebuffer_t(output,2,1);
+    renderer.draw(make_camera(2,1),postprocess,inactive_metric);
+    for (auto color : output) { expect_color(color, {192,0,64,255}); }
+    // A borrowed lower-level framebuffer remains bound after generation.
+    renderer.framebuffer() = framebuffer_t(lower_view);
+    renderer.clear_color(green,inactive_metric);
+    require(target->view(1).bytes()[1] == std::byte{255});
+    target->generate_mipmaps();
+    require(renderer.framebuffer().pixels().bytes()[1] == std::byte{0});
+    // Every reflected resource level is checked even if sampling selects level zero.
+    for (bool vertex_sampling : {false,true}) {
+        auto feedback = make_render_item(postprocess.geometry(), make_material(target, make_sampler(), make_target_program(vertex_sampling)));
+        feedback.material()->uniform(0,vector2f_t({2,1}));
+        feedback.material()->color_write(color_mask_t::none);
+        for (std::size_t level = 0; level < target->level_count(); ++level) {
+            renderer.framebuffer() = framebuffer_t(target->view(level));
+            profiling::profiler_t profiler;
+            {
+                auto metric = profiler.metric<application_metrics_t>();
+                test::expect_throws([&] { renderer.draw(make_camera(2,1),feedback,metric); });
+            }
+            require(profiler.metrics<application_metrics_t,draw_metrics_t,vertex_metrics_t>() == nullptr);
+        }
+    }
+}
+
+void test_flat_type_eligibility() {
+    const auto check = []<typename scalar_t, std::size_t count>() {
+        using input_t = std::conditional_t<count == 1, scalar_t, shader::vector_t<scalar_t,count>>;
+        input_t expected;
+        if constexpr (count == 1) { expected = scalar_t(17); }
+        else { for (std::size_t i = 0; i < count; ++i) { expected[i] = scalar_t(i + 17); } }
+        shader::vertex_shader_ast_builder_t vertex;
+        vertex.position(vertex.input<vector4f_t>(0));
+        vertex.output(1, expected);
+        shader::fragment_shader_ast_builder_t fragment;
+        const auto input = fragment.input<input_t>(1,shader::interpolation_t::flat);
+        auto matches = fragment.constant(true);
+        if constexpr (count == 1) { matches = input == expected; }
+        else {
+            [&]<std::size_t... I>(std::index_sequence<I...>) {
+                ((matches = matches && (shader::swizzle<I>(input) == expected[I])), ...);
+            }(std::make_index_sequence<count>{});
+        }
+        fragment.color(vector4f_t({1,0,0,1}));
+        fragment.branch(matches,[&] { fragment.color(vector4f_t({0,1,0,1})); });
+        auto material = std::make_shared<material_t>(std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(),std::move(fragment).finalize()));
+        auto item = make_render_item(make_typed_geometry(std::vector<clip_position_fixture_t>{{0,0,0,1}},vertex_attribute_t(vertex_attribute_type_t::R32,4),{0},vertex_primitive_topology_t::point),material);
+        std::vector<rgba8_t> pixels(64,clear_color);
+        software_renderer_t renderer(framebuffer_t(pixels,8,8));
+        renderer.draw(make_camera(8,8),item,inactive_metric);
+        require(colored_pixel_count(pixels) != 0);
+        for (auto color : pixels) { if (!same_color(color,clear_color)) { expect_color(color,green); } }
+    };
+    check.template operator()<float,1>(); check.template operator()<float,2>(); check.template operator()<float,3>(); check.template operator()<float,4>();
+    check.template operator()<std::int32_t,1>(); check.template operator()<std::int32_t,2>(); check.template operator()<std::int32_t,3>(); check.template operator()<std::int32_t,4>();
+    check.template operator()<std::uint32_t,1>(); check.template operator()<std::uint32_t,2>(); check.template operator()<std::uint32_t,3>(); check.template operator()<std::uint32_t,4>();
+    for (auto mode : {shader::interpolation_t::perspective,shader::interpolation_t::noperspective}) {
+        shader::vertex_shader_ast_builder_t vertex;
+        vertex.position(vector4f_t({0,0,0,1}));vertex.output(0,std::int32_t(1));
+        shader::fragment_shader_ast_builder_t fragment;
+        fragment.output(0,fragment.input<std::int32_t>(0,mode));
+        auto material=std::make_shared<material_t>(std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(),std::move(fragment).finalize()));
+        auto item=make_render_item(make_typed_geometry(std::vector<clip_position_fixture_t>{{0,0,0,1}},vertex_attribute_t(vertex_attribute_type_t::R32,4),{0},vertex_primitive_topology_t::point),material);
+        std::vector<rgba8_t> pixels(64,clear_color);software_renderer_t renderer(framebuffer_t(pixels,8,8));
+        test::expect_throws([&]{renderer.draw(make_camera(8,8),item,inactive_metric);});
+        require(colored_pixel_count(pixels)==0);
+    }
+}
+
+
+void test_interpolation_coverage_and_clip_planes() {
+    for (auto mode : {shader::interpolation_t::perspective, shader::interpolation_t::noperspective, shader::interpolation_t::flat}) {
+        shader::vertex_shader_ast_builder_t vertex;
+        vertex.position(vertex.input<vector4f_t>(0));
+        vertex.output(0, vector4f_t({0,0,1,1}));
+        shader::fragment_shader_ast_builder_t fragment;
+        fragment.color(fragment.input<vector4f_t>(0, mode));
+        const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(),std::move(fragment).finalize());
+        for (const auto& fixture : {crossing,concave}) {
+            for (const auto& indices : {std::vector<std::uint32_t>{0,1,2}, {2,1,0}, {1,2,0}}) {
+                const auto pixels=draw_clip_scene({fixture.begin(),fixture.end()},indices,vertex_primitive_topology_t::triangle,program);
+                require(colored_pixel_count(pixels)==1);expect_color(pixels[0],blue);
+            }
+        }
+        for (std::size_t plane=0;plane<6;++plane) {
+            std::vector<clip_position_fixture_t> positions {{-0.75F,-0.75F,0,1},{1.5F,-1.5F,0,2},{0,3,0,4}};
+            positions[0][plane/2]=(plane%2==0?-2.0F:2.0F);
+            const auto expected=draw_clip_scene(positions,{0,1,2},vertex_primitive_topology_t::triangle,make_clip_program());
+            const auto pixels=draw_clip_scene(positions,{0,1,2},vertex_primitive_topology_t::triangle,program);
+            require(colored_pixel_count(pixels)!=0);
+            for(std::size_t i=0;i<pixels.size();++i){expect_color(pixels[i],expected[i]);}
+        }
+        // Behind-eye and zero-W input vertices use clipping before projection.
+        for (float w : {-1.0F,0.0F}) {
+            const std::vector<clip_position_fixture_t> positions {{0,2,0,w},{-1,-1,0,1},{1,-1,0,1}};
+            const auto expected=draw_clip_scene(positions,{0,1,2},vertex_primitive_topology_t::triangle,make_clip_program());
+            const auto pixels=draw_clip_scene(positions,{0,1,2},vertex_primitive_topology_t::triangle,program);
+            for(std::size_t i=0;i<pixels.size();++i){expect_color(pixels[i],expected[i]);}
+        }
+    }
+}
+
+void test_mixed_interpolation_on_points_and_lines() {
+    shader::vertex_shader_ast_builder_t vertex;
+    const auto position = vertex.input<vector4f_t>(0);
+    vertex.position(position);
+    const auto u = (shader::swizzle<0>(position) / shader::swizzle<3>(position) + 1.0F) / 2.0F;
+    vertex.output(0, u);
+    vertex.output(1, vertex.construct<shader::vector_t<float,3>>(u, 0.25F, 0.75F));
+    vertex.output(2, u);
+    vertex.output(3, std::uint32_t(0xfedcba98));
+    shader::fragment_shader_ast_builder_t fragment;
+    const auto scalar = fragment.input<float>(0, shader::interpolation_t::noperspective);
+    const auto vector = fragment.input<shader::vector_t<float,3>>(1, shader::interpolation_t::noperspective);
+    const auto perspective = fragment.input<float>(2);
+    const auto flat = fragment.input<std::uint32_t>(3, shader::interpolation_t::flat);
+    fragment.branch((flat != std::uint32_t(0xfedcba98)) || (shader::swizzle<1>(vector) != 0.25F) || (shader::swizzle<2>(vector) != 0.75F), [&] { fragment.discard(); });
+    fragment.color(fragment.construct<vector4f_t>(scalar, shader::swizzle<0>(vector), perspective, 1.0F));
+    const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+    for (auto topology : {vertex_primitive_topology_t::point, vertex_primitive_topology_t::line, vertex_primitive_topology_t::line_strip, vertex_primitive_topology_t::line_loop}) {
+        for (bool clipped : {false, true}) {
+            const bool point = topology == vertex_primitive_topology_t::point;
+            const float extent = clipped ? 2 : 1;
+            const std::vector<clip_position_fixture_t> positions = point ? std::vector<clip_position_fixture_t>{{0,0,0,4}} : std::vector<clip_position_fixture_t>{{-extent,0,0,1},{2*extent,0,0,2}};
+            const auto pixels = draw_clip_scene(positions, point ? std::vector<std::uint32_t>{0} : std::vector<std::uint32_t>{0,1}, topology, program);
+            require(colored_pixel_count(pixels) != 0);
+            for (int y = 0; y < 32; ++y) {
+                for (int x = 0; x < 32; ++x) {
+                    const auto color = pixels[pixel_index(x,y,32)];
+                    if (same_color(color,clear_color)) { continue; }
+                    const double screen = (x + 0.5) / 32;
+                    const auto expected = point ? 128 : int(std::floor(screen*255+0.5));
+                    require(std::abs(int(color.red)-expected) <= 1 && std::abs(int(color.green)-expected) <= 1);
+                    if (!point && !clipped) {
+                        const auto smooth = int(std::floor(screen/(2-screen)*255+0.5));
+                        require(std::abs(int(color.blue)-smooth) <= 1);
+                    }
+                }
+            }
+        }
+    }
+}
+
 void run_resource_tests() {
     test_rotation_and_item_transform();
     test_resource_model();
@@ -3395,6 +3666,12 @@ void run_framebuffer_tests() {
 }
 
 void run_pipeline_tests() {
+    test_mixed_interpolation_on_points_and_lines();
+    test_interpolation_coverage_and_clip_planes();
+    test_render_generate_sample_lod();
+    test_flat_type_eligibility();
+    test_interpolation_and_provoking_vertices();
+    test_noperspective_clipping();
     test_stencil_facing_and_filtering();
     test_target_views_and_feedback();
     test_direct_two_pass();

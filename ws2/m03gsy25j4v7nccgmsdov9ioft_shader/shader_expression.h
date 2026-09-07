@@ -186,7 +186,7 @@ enum class shader_binary_operation_t {
     equal, not_equal, less, less_equal, greater, greater_equal,
     logical_and, logical_or, dot, cross, power, reflect, minimum, maximum, step
 };
-enum class shader_call_operation_t { clamp, mix, smoothstep, sample };
+enum class shader_call_operation_t { clamp, mix, smoothstep, sample, sample_lod };
 
 template <shader_type T>
 constexpr shader_data_type_t shader_data_type();
@@ -488,6 +488,12 @@ shader_expression_t<vector_t<float, 4>> sample(
     shader_expression_t<shader_texture_2d_t> texture, shader_expression_t<shader_sampler_t> sampler,
     shader_expression_t<vector_t<float, 2>> coordinates);
 shader_expression_t<vector_t<float, 4>> sample(shader_expression_t<shader_texture_2d_t> texture, shader_expression_t<shader_sampler_t> sampler, vector_t<float, 2> coordinates);
+
+/** @brief Samples an explicit LOD in either shader stage; filtering and numeric validity belong to the sampler. */
+shader_expression_t<vector_t<float, 4>> sample_lod(shader_expression_t<shader_texture_2d_t> texture, shader_expression_t<shader_sampler_t> sampler, shader_expression_t<vector_t<float, 2>> coordinates, shader_expression_t<float> lod);
+shader_expression_t<vector_t<float, 4>> sample_lod(shader_expression_t<shader_texture_2d_t> texture, shader_expression_t<shader_sampler_t> sampler, shader_expression_t<vector_t<float, 2>> coordinates, float lod);
+shader_expression_t<vector_t<float, 4>> sample_lod(shader_expression_t<shader_texture_2d_t> texture, shader_expression_t<shader_sampler_t> sampler, vector_t<float, 2> coordinates, shader_expression_t<float> lod);
+shader_expression_t<vector_t<float, 4>> sample_lod(shader_expression_t<shader_texture_2d_t> texture, shader_expression_t<shader_sampler_t> sampler, vector_t<float, 2> coordinates, float lod);
 
 bool shader_expression_type_matches(const shader_expression_node_t* expression, shader_data_type_t type);
 const shader_expression_node_t* shader_constant_expression(shader_ast_builder_t* builder, shader_literal_t literal);

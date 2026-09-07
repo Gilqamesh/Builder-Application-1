@@ -11,3 +11,8 @@ textures, keep borrowed attachments alive, and sequence rendering and sampling.
 
 Sampling leaves alpha association to shaders and blend equations. Its transfer and
 filtering contract is owned by [sampler.h](sampler.h).
+
+- Textures allocate a fixed contiguous prefix of mip levels at construction.
+  Explicit generation updates lower-level contents in place; writable edits never
+  trigger regeneration. Applications sequence rendering, regeneration and sampling.
+  Pixel-view lifetimes and sampling rules are owned by the public headers.

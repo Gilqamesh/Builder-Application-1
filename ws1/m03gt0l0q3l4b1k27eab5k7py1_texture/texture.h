@@ -9,12 +9,22 @@
 # include <format>
 # include <span>
 # include <stdexcept>
+# include <vector>
 
 namespace m03gt0l0q3l4b1k27eab5k7py1_texture {
+
+/** @brief Describes a contiguous mip prefix with one format and floor-halved dimensions. */
+struct texture_description_t {
+    format_t format;
+    std::size_t width;
+    std::size_t height;
+    std::size_t levels = 1;
+};
 
 /**
  * @brief Owns tightly packed, row-major two-dimensional RGBA texels.
  *
+ * Existing view(), bytes(), width() and height() access level zero.
  * Texel `(0, 0)` begins at byte zero and `x` varies fastest. The texture defines no image-space orientation or implicit vertical flip. Construction from texel bytes requires non-zero extent. A moved-from texture retains its format but has zero extent and no bytes.
  */
 class texture_t {
@@ -31,6 +41,15 @@ public:
         std::size_t height,
         m03gagbht2l61mj6qitacwbmea_byte_stream::byte_stream_t bytes
     );
+
+    /**
+     * @brief Initializes level zero from exact packed bytes and allocates zero-filled lower levels.
+     *
+     * Requires nonzero dimensions and 1..full-chain levels. Each next dimension is
+     * max(1, previous/2), ending at 1x1; overlong chains and byte-count overflow fail.
+     * Allocation and level addresses remain fixed until assignment, move or destruction.
+     */
+    texture_t(texture_description_t texture_description, m03gagbht2l61mj6qitacwbmea_byte_stream::byte_stream_t bytes);
 
     texture_t(const texture_t& other);
 
@@ -53,6 +72,27 @@ public:
     pixel_view_t view() && = delete;
     const_pixel_view_t view() const&& = delete;
 
+    /** @brief Borrows an allocated mip level; an out-of-range level fails, including on an empty texture. */
+    pixel_view_t view(std::size_t level) &;
+    const_pixel_view_t view(std::size_t level) const&;
+    pixel_view_t view(std::size_t level) && = delete;
+    const_pixel_view_t view(std::size_t level) const&& = delete;
+
+    std::size_t level_count() const noexcept;
+
+    /**
+     * @brief Replaces allocated lower levels with area-weighted box averages of their preceding levels.
+     *
+     * Includes complete odd-sized source footprints. RGB is averaged linearly and
+     * encoded again for sRGB; alpha is averaged independently without association
+     * changes. Float formats preserve HDR range, using IEEE arithmetic; binary16
+     * conversion rounds to nearest, ties to even. UNORM rounds ties upward.
+     * Storage and all borrowed views remain valid. Level zero is unchanged.
+     * Edits never regenerate implicitly: lower levels retain their contents until
+     * explicitly written or regenerated. Empty and one-level textures do no work.
+     */
+    void generate_mipmaps();
+
     format_t format() const noexcept;
 
     std::size_t width() const noexcept;
@@ -68,9 +108,10 @@ public:
     std::span<const std::byte> bytes() const&& = delete;
 
 private:
-    // Copy assignment updates the potentially throwing storage before the non-throwing metadata so an allocation failure preserves the invariant.
+    // Copy assignment constructs a complete replacement before updating this owner.
     m03gagbht2l61mj6qitacwbmea_byte_stream::byte_stream_t m_bytes;
     pixel_view_t m_pixels;
+    std::vector<pixel_view_t> m_levels; // Lower levels in the same allocation.
 };
 
 } // namespace m03gt0l0q3l4b1k27eab5k7py1_texture
@@ -78,11 +119,27 @@ private:
 namespace std {
 
 template <>
+struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::texture_description_t>;
+
+template <>
 struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::texture_t>;
 
 } // namespace std
 
 namespace std {
+
+template <>
+struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::texture_description_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gt0l0q3l4b1k27eab5k7py1_texture::texture_description_t& description, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ format: {}", description.format);
+        out = std::format_to(out, ", width: {}", description.width);
+        out = std::format_to(out, ", height: {}", description.height);
+        out = std::format_to(out, ", levels: {} }}", description.levels);
+        return out;
+    }
+};
 
 template <>
 struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::texture_t> {
@@ -101,6 +158,7 @@ struct formatter<m03gt0l0q3l4b1k27eab5k7py1_texture::texture_t> {
         out = std::format_to(out, "format: {}", texture.format());
         out = std::format_to(out, ", width: {}", texture.width());
         out = std::format_to(out, ", height: {}", texture.height());
+        out = std::format_to(out, ", levels: {}", texture.level_count());
         out = std::format_to(out, " }}");
 
         return out;

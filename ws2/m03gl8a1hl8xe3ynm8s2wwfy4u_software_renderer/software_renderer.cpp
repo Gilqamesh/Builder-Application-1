@@ -6,6 +6,7 @@
 #include <format>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
@@ -168,10 +169,14 @@ void software_renderer_t::draw(
         }
         validate_vertex_attribute(attributes[input.index], input.type);
     }
+    auto& scratch = m_scratch;
+    scratch.m_interpolated_inputs.clear();
+    scratch.m_flat_inputs.clear();
     for (const auto& input : program.fragment_interface().inputs()) {
-        if (!supported_fragment_input(input.type)) {
-            throw std::invalid_argument("software renderer cannot interpolate this fragment input type");
+        if (!supported_fragment_input(input)) {
+            throw std::invalid_argument("software renderer requires float scalar/vector interpolation or flat float/int32/uint32 inputs");
         }
+        (input.interpolation == shader::interpolation_t::flat ? scratch.m_flat_inputs : scratch.m_interpolated_inputs).push_back(input);
     }
 
     preparation_metric.stop();
@@ -180,8 +185,8 @@ void software_renderer_t::draw(
     vertex_metric.update<vertex_metrics_t>([expected = indices.size()](vertex_metrics_t& metric) noexcept {
         metric.m_expected += expected;
     });
-    auto& scratch = m_scratch;
     scratch.m_vertex_results.clear();
+    scratch.m_flat_values.clear();
     scratch.m_vertex_values.clear();
     scratch.m_fragment_inputs.clear();
     scratch.m_vertex_results.reserve(indices.size());
@@ -207,19 +212,40 @@ void software_renderer_t::draw(
         }
 
         const std::size_t output_offset = scratch.m_vertex_values.size();
-        for (const auto& input : program.fragment_interface().inputs()) {
-            scratch.m_vertex_values.emplace_back(input.index, vertex_output(io, input));
+        for (const auto& input : scratch.m_interpolated_inputs) {
+            auto output = vertex_output(io, input);
+            if (input.interpolation == shader::interpolation_t::noperspective) {
+                noperspective_t noperspective;
+                noperspective.count = shader_component_count(input.type);
+                std::visit([&](const auto& typed) {
+                    using type_t = std::remove_cvref_t<decltype(typed)>;
+                    if constexpr (std::is_same_v<type_t, float>) {
+                        noperspective.numerators[0] = double(typed) * double(clip_position[3]);
+                    } else if constexpr (!std::is_same_v<type_t, noperspective_t>) {
+                        for (std::size_t i = 0; i < noperspective.count; ++i) {
+                            noperspective.numerators[i] = double(typed[i]) * double(clip_position[3]);
+                        }
+                    }
+                }, output);
+                output = noperspective;
+            }
+            scratch.m_vertex_values.emplace_back(input.index, output);
+        }
+        const auto flat_offset = scratch.m_flat_values.size();
+        for (const auto& input : scratch.m_flat_inputs) {
+            scratch.m_flat_values.emplace_back(input.index, flat_output(io, input));
         }
         scratch.m_vertex_results.push_back({
             .m_clip_position = clip_position,
-            .m_outputs = {output_offset, program.fragment_interface().inputs().size()}
+            .m_outputs = {output_offset, scratch.m_interpolated_inputs.size()},
+            .m_flat_outputs = {flat_offset, scratch.m_flat_inputs.size()}
         });
     }
 
     vertex_metric.stop();
     auto raster_metric = draw_metric.metric<raster_metrics_t>();
     const auto vertex = [&](std::size_t index) {
-        return view(scratch.m_vertex_results[index], scratch.m_vertex_values);
+        return view(scratch.m_vertex_results[index], scratch.m_vertex_values, scratch.m_flat_values);
     };
     switch (geometry->primitive_topology()) {
         case vertex_primitive_topology_t::point: {
@@ -292,7 +318,8 @@ void software_renderer_t::draw(
                     scratch.m_raster,
                     scratch.m_fragment_inputs,
                     scratch.m_fragment_io,
-                    raster_metric
+                    raster_metric,
+                    vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2).m_flat_outputs
                 );
             }
         } break;
@@ -309,7 +336,8 @@ void software_renderer_t::draw(
                         scratch.m_raster,
                         scratch.m_fragment_inputs,
                         scratch.m_fragment_io,
-                        raster_metric
+                        raster_metric,
+                        vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2).m_flat_outputs
                     );
                 } else {
                     rasterize_triangle(
@@ -322,7 +350,8 @@ void software_renderer_t::draw(
                         scratch.m_raster,
                         scratch.m_fragment_inputs,
                         scratch.m_fragment_io,
-                        raster_metric
+                        raster_metric,
+                        vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2).m_flat_outputs
                     );
                 }
             }
@@ -339,7 +368,8 @@ void software_renderer_t::draw(
                     scratch.m_raster,
                     scratch.m_fragment_inputs,
                     scratch.m_fragment_io,
-                    raster_metric
+                    raster_metric,
+                    vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 1).m_flat_outputs
                 );
             }
         } break;
