@@ -3,6 +3,7 @@
 
 # include "value.h"
 
+# include <algorithm>
 # include <cstddef>
 # include <cstdint>
 # include <format>
@@ -66,8 +67,10 @@ void validate_program_link(const shader::shader_ast_t& vertex, const shader::sha
 void execute_stage(const stage_code_t& code, const bindings_t& bindings, vertex_io_t& io, std::vector<value_t>& slots, std::vector<std::uint8_t>& local_initialized);
 void execute_stage(const stage_code_t& code, const bindings_t& bindings, fragment_io_t& io, std::vector<value_t>& slots, std::vector<std::uint8_t>& local_initialized);
 
-std::size_t find_location(std::span<const std::pair<std::uint32_t, value_t>> values, std::uint32_t location);
-void write_value(std::vector<std::pair<std::uint32_t, value_t>>& values, std::uint32_t location, value_t input);
+template <typename T>
+std::size_t find_location(std::span<T> values, std::uint32_t location);
+template <shader::shader_value T>
+void write_value(std::vector<std::pair<std::uint32_t, value_t>>& values, std::uint32_t location, T input);
 template <shader::shader_value T>
 std::optional<std::remove_cvref_t<T>> read_value(std::span<const std::pair<std::uint32_t, value_t>> values, std::uint32_t location, std::string_view name);
 
@@ -93,6 +96,22 @@ struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::stage_code_t>;
 } // namespace std
 
 namespace m03gt1djvvy5atia5evkbg6rqy_software_shader {
+
+template <typename T>
+std::size_t find_location(std::span<T> values, std::uint32_t location) {
+    const auto found = std::ranges::find(values, location, &std::pair<std::uint32_t, value_t>::first);
+    return static_cast<std::size_t>(found - values.begin());
+}
+
+template <shader::shader_value T>
+void write_value(std::vector<std::pair<std::uint32_t, value_t>>& values, std::uint32_t location, T input) {
+    const auto index = find_location(std::span(values), location);
+    if (index == values.size()) {
+        values.emplace_back(location, value_t(std::move(input)));
+    } else {
+        values[index].second = std::move(input);
+    }
+}
 
 template <shader::shader_value T>
 std::optional<std::remove_cvref_t<T>> read_value(std::span<const std::pair<std::uint32_t, value_t>> values, std::uint32_t location, std::string_view name) {

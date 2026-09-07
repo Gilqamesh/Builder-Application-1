@@ -1671,18 +1671,4 @@ void execute_stage(const stage_code_t& code, const bindings_t& bindings, fragmen
     execute_stage<fragment_io_t>(code, bindings, io, slots, local_initialized);
 }
 
-std::size_t find_location(std::span<const std::pair<std::uint32_t, value_t>> values, std::uint32_t location) {
-    const auto found = std::ranges::find(values, location, &std::pair<std::uint32_t, value_t>::first);
-    return static_cast<std::size_t>(found - values.begin());
-}
-
-void write_value(std::vector<std::pair<std::uint32_t, value_t>>& values, std::uint32_t location, value_t input) {
-    const auto index = find_location(values, location);
-    if (index == values.size()) {
-        values.emplace_back(location, std::move(input));
-    } else {
-        values[index].second = std::move(input);
-    }
-}
-
 } // namespace m03gt1djvvy5atia5evkbg6rqy_software_shader
