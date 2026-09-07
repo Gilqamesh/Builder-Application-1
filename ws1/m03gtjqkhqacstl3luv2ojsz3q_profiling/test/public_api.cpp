@@ -7,13 +7,13 @@
 #include <cstdlib>
 #include <format>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <new>
-#include <ranges>
+#include <source_location>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -22,15 +22,14 @@ namespace profiling = m03gtjqkhqacstl3luv2ojsz3q_profiling;
 namespace m03gtjqkhqacstl3luv2ojsz3q_profiling {
 
 bool allocation_forbidden = false;
+std::ptrdiff_t allocations_before_failure = -1;
+std::size_t allocations = 0;
 std::size_t clock_calls = 0;
 std::int64_t tick = 0;
-std::size_t constructions = 0;
-std::size_t destructions = 0;
+std::size_t live_metrics = 0;
 std::size_t formats = 0;
-std::array<int, 16> destroyed {};
 
 #ifdef PROFILING_TEST_CLOCK
-// Link api.cpp without helpers.cpp for deterministic clock validation.
 std::chrono::nanoseconds clock_now() noexcept {
     ++clock_calls;
     return std::chrono::nanoseconds(tick);
@@ -39,15 +38,11 @@ std::chrono::nanoseconds clock_now() noexcept {
 
 struct timing_t {};
 
-struct nested_t {
-    explicit nested_t(context_t& context) noexcept;
-};
-
-struct retained_t {
-    explicit retained_t(int number) noexcept: m_number(number) { ++constructions; ++tick; }
-    ~retained_t() { destroyed[destructions++ % destroyed.size()] = m_number; }
-    retained_t(const retained_t&) = delete;
-    retained_t(retained_t&&) = delete;
+struct counted_t {
+    explicit counted_t(int number) noexcept: m_number(number) { ++live_metrics; tick += 5; }
+    counted_t(counted_t&& other) noexcept: m_number(other.m_number) { ++live_metrics; tick += 7; }
+    counted_t& operator=(counted_t&& other) noexcept { m_number = other.m_number; tick += 7; return *this; }
+    ~counted_t() { --live_metrics; tick += 3; }
     int m_number;
 };
 
@@ -59,9 +54,31 @@ struct forwarded_t {
 };
 
 struct alignas(256) aligned_t { int m_number = 42; };
-struct oversized_t { std::array<std::byte, 8192> m_bytes {}; };
 struct failing_t {};
 struct missing_t {};
+struct throwing_constructor_t { throwing_constructor_t() noexcept(false) {} };
+struct throwing_move_t {
+    throwing_move_t() = default;
+    throwing_move_t(throwing_move_t&&) noexcept(false) {}
+    throwing_move_t& operator=(throwing_move_t&&) noexcept = default;
+};
+struct throwing_assignment_t {
+    throwing_assignment_t() = default;
+    throwing_assignment_t(throwing_assignment_t&&) noexcept = default;
+    throwing_assignment_t& operator=(throwing_assignment_t&&) noexcept(false) { return *this; }
+};
+struct throwing_destructor_t { ~throwing_destructor_t() noexcept(false) {} };
+
+template <std::size_t N>
+struct numbered_t {};
+
+struct observing_t {
+    explicit observing_t(profiler_t& profiler) noexcept;
+    observing_t(observing_t&& other) noexcept;
+    observing_t& operator=(observing_t&& other) noexcept;
+    ~observing_t();
+    profiler_t* m_profiler;
+};
 
 } // namespace m03gtjqkhqacstl3luv2ojsz3q_profiling
 
@@ -75,15 +92,8 @@ struct formatter<profiling::timing_t> : formatter<string_view> {
 };
 
 template <>
-struct formatter<profiling::nested_t> : formatter<string_view> {
-    auto format(const profiling::nested_t&, auto& ctx) const {
-        return formatter<string_view>::format("nested construction", ctx);
-    }
-};
-
-template <>
-struct formatter<profiling::retained_t> : formatter<int> {
-    auto format(const profiling::retained_t& metrics, auto& ctx) const {
+struct formatter<profiling::counted_t> : formatter<int> {
+    auto format(const profiling::counted_t& metrics, auto& ctx) const {
         ++profiling::formats;
         return formatter<int>::format(metrics.m_number, ctx);
     }
@@ -104,17 +114,52 @@ struct formatter<profiling::aligned_t> : formatter<int> {
 };
 
 template <>
-struct formatter<profiling::oversized_t> : formatter<string_view> {
-    auto format(const profiling::oversized_t&, auto& ctx) const {
-        return formatter<string_view>::format("oversized_metric", ctx);
+struct formatter<profiling::failing_t> : formatter<string_view> {
+    auto format(const profiling::failing_t&, auto& ctx) const {
+        throw std::logic_error("metric formatter failed");
+        return ctx.out();
+    }
+};
+
+template <std::size_t N>
+struct formatter<profiling::numbered_t<N>> : formatter<size_t> {
+    auto format(const profiling::numbered_t<N>&, auto& ctx) const {
+        return formatter<size_t>::format(N, ctx);
     }
 };
 
 template <>
-struct formatter<profiling::failing_t> : formatter<string_view> {
-    auto format(const profiling::failing_t&, auto& ctx) const {
-        throw std::logic_error("payload formatter failed");
-        return ctx.out();
+struct formatter<profiling::observing_t> : formatter<string_view> {
+    auto format(const profiling::observing_t&, auto& ctx) const {
+        return formatter<string_view>::format("observing", ctx);
+    }
+};
+
+template <>
+struct formatter<profiling::throwing_constructor_t> : formatter<string_view> {
+    auto format(const profiling::throwing_constructor_t&, auto& ctx) const {
+        return formatter<string_view>::format("invalid", ctx);
+    }
+};
+
+template <>
+struct formatter<profiling::throwing_move_t> : formatter<string_view> {
+    auto format(const profiling::throwing_move_t&, auto& ctx) const {
+        return formatter<string_view>::format("invalid", ctx);
+    }
+};
+
+template <>
+struct formatter<profiling::throwing_assignment_t> : formatter<string_view> {
+    auto format(const profiling::throwing_assignment_t&, auto& ctx) const {
+        return formatter<string_view>::format("invalid", ctx);
+    }
+};
+
+template <>
+struct formatter<profiling::throwing_destructor_t> : formatter<string_view> {
+    auto format(const profiling::throwing_destructor_t&, auto& ctx) const {
+        return formatter<string_view>::format("invalid", ctx);
     }
 };
 
@@ -122,6 +167,9 @@ struct formatter<profiling::failing_t> : formatter<string_view> {
 
 void* operator new(std::size_t size) {
     if (profiling::allocation_forbidden) { std::abort(); }
+    if (profiling::allocations_before_failure == 0) { throw std::bad_alloc(); }
+    if (0 < profiling::allocations_before_failure) { --profiling::allocations_before_failure; }
+    ++profiling::allocations;
     if (auto* memory = std::malloc(size == 0 ? 1 : size)) { return memory; }
     throw std::bad_alloc();
 }
@@ -129,6 +177,9 @@ void* operator new(std::size_t size) {
 void* operator new[](std::size_t size) { return ::operator new(size); }
 void* operator new(std::size_t size, std::align_val_t alignment) {
     if (profiling::allocation_forbidden) { std::abort(); }
+    if (profiling::allocations_before_failure == 0) { throw std::bad_alloc(); }
+    if (0 < profiling::allocations_before_failure) { --profiling::allocations_before_failure; }
+    ++profiling::allocations;
     void* memory = nullptr;
     if (posix_memalign(&memory, static_cast<std::size_t>(alignment), size == 0 ? 1 : size) == 0) { return memory; }
     throw std::bad_alloc();
@@ -145,12 +196,26 @@ void operator delete[](void* memory, std::size_t, std::align_val_t) noexcept { s
 
 namespace m03gtjqkhqacstl3luv2ojsz3q_profiling {
 
-nested_t::nested_t(context_t& context) noexcept {
-    auto metric = context.metric<retained_t>(31);
+observing_t::observing_t(profiler_t& profiler) noexcept: m_profiler(&profiler) {
+    if (profiler.quiescent()) { std::abort(); }
 }
 
-void require(bool condition) {
-    if (!condition) { throw std::runtime_error("profiling contract check failed"); }
+observing_t::observing_t(observing_t&& other) noexcept: m_profiler(other.m_profiler) {
+    if (m_profiler->quiescent()) { std::abort(); }
+    other.m_profiler = nullptr;
+}
+
+observing_t& observing_t::operator=(observing_t&& other) noexcept {
+    if (other.m_profiler->quiescent()) { std::abort(); }
+    m_profiler = other.m_profiler;
+    other.m_profiler = nullptr;
+    return *this;
+}
+
+observing_t::~observing_t() = default;
+
+void require(bool condition, std::source_location location = std::source_location::current()) {
+    if (!condition) { throw std::runtime_error(std::format("profiling contract check failed at line {}", location.line())); }
 }
 
 template <typename F>
@@ -160,276 +225,216 @@ void rejects(F&& operation) {
     require(failed);
 }
 
-void recurse(context_t& context, int depth) {
-    auto metric = context.metric<retained_t>(depth);
-    if (metric) { require(metric->m_number == depth); }
-    if (depth != 0) { recurse(context, depth - 1); }
-}
-
-void test_capture() {
+void test_replacement() {
     static_assert(!std::is_copy_constructible_v<profiler_t> && !std::is_move_constructible_v<profiler_t>);
-    static_assert(!std::is_copy_constructible_v<metric_t<retained_t>> && !std::is_move_constructible_v<metric_t<retained_t>>);
-    static_assert(std::forward_iterator<records_t::iterator_t>);
-    static_assert(std::ranges::forward_range<records_t>);
-    std::array<std::byte, 4096> storage;
-    profiler_t profiler(storage);
-    auto context = profiler.context();
-    rejects([&] { profiler.reset(); });
-    rejects([&] { (void)profiler.records(); });
-    rejects([&] { (void)profiler.omitted(); });
-    rejects([&] { profiler.report(std::cout); });
-    tick = 0;
-    profiler.start();
-    rejects([&] { profiler.start(); });
-    const retained_t* retained = nullptr;
-    const auto constructed = constructions;
-    const auto destructed = destructions;
-    const auto formatted = formats;
+    static_assert(!std::is_copy_constructible_v<metric_t<counted_t>> && !std::is_move_constructible_v<metric_t<counted_t>>);
+    profiler_t profiler;
+    require(profiler.quiescent() && profiler.size() == 0);
+    require(!profiler.metrics<counted_t>() && !profiler.elapsed<counted_t>() && !profiler.unwinding<counted_t>());
     tick = 10;
+    const auto formatted = formats;
     {
-        auto parent_metric = profiler.metric<timing_t>();
-        require(bool(parent_metric) && !profiler.quiescent());
-        rejects([&] { profiler.reset(); });
-        rejects([&] { (void)profiler.records(); });
+        auto metric = profiler.metric<counted_t>(7);
+        require(!profiler.quiescent() && live_metrics == 1);
+        static_assert(std::same_as<decltype(std::as_const(metric).operator->()), const counted_t*>);
+        rejects([&] { (void)profiler.metrics<counted_t>(); });
+        rejects([&] { (void)profiler.elapsed<counted_t>(); });
+        rejects([&] { (void)profiler.unwinding<counted_t>(); });
+        rejects([&] { (void)profiler.size(); });
         rejects([&] { profiler.report(std::cout); });
-        tick = 20;
-        {
-            allocation_forbidden = true;
-            auto child_metric = context.metric<retained_t>(7);
-            retained = child_metric.operator->();
-            require(child_metric->m_number == 7);
-            const auto& const_child_metric = child_metric;
-            static_assert(std::same_as<decltype(const_child_metric.operator->()), const retained_t*>);
-            tick = 50;
-        }
+        tick = 50;
+        allocation_forbidden = true;
+        metric.stop();
+        require(!metric && profiler.quiescent() && live_metrics == 1 && formats == formatted);
+        const auto calls = clock_calls;
+        metric.stop();
+        require(clock_calls == calls);
         allocation_forbidden = false;
-        require(constructions == constructed + 1 && destructions == destructed && formats == formatted);
-        tick = 100;
+        tick = 500;
     }
-    const auto records = profiler.records();
-    require(records.size() == 2 && !records[0].parent() && records[1].parent() == 0);
-    require(records[0].metrics<timing_t>() && !records[0].metrics<retained_t>());
-    require(records[1].metrics<retained_t>() == retained && retained->m_number == 7);
-    require(records[0].elapsed() == *records[0].self() + records[1].elapsed());
+    require(profiler.size() == 1 && profiler.metrics<counted_t>()->m_number == 7);
+    require(profiler.unwinding<counted_t>() == false);
 #ifdef PROFILING_TEST_CLOCK
-    require(records[0].start().count() == 10 && records[0].elapsed().count() == 90);
-    // Payload construction advances the test clock before timing begins.
-    require(records[1].start().count() == 21);
-    require(records[1].elapsed().count() == 29 && records[0].self()->count() == 61);
+    require(profiler.elapsed<counted_t>()->count() == 35);
+#endif
+    const auto count = allocations;
+    allocation_forbidden = true;
+    tick = 100;
+    {
+        auto metric = profiler.metric<counted_t>(20);
+        require(live_metrics == 2);
+        metric->m_number = 21;
+        tick = 125;
+    }
+    allocation_forbidden = false;
+    require(allocations == count && profiler.size() == 1 && live_metrics == 1);
+    require(profiler.metrics<counted_t>()->m_number == 21);
+#ifdef PROFILING_TEST_CLOCK
+    require(profiler.elapsed<counted_t>()->count() == 20);
 #endif
     std::ostringstream report;
     profiler.report(report);
     require(formats == formatted + 1);
-    require(report.str().find("timing inclusive=") != std::string::npos);
-    require(report.str().find("  7 inclusive=") != std::string::npos);
+    require(report.str().starts_with("21 elapsed=") && report.str().find("7 elapsed=") == std::string::npos);
     profiler.report(report);
-    require(formats == formatted + 2 && destructions == destructed);
-    // Retained pointers and a range snapshot remain usable as later_metric roots append.
-    { auto later_metric = profiler.metric<timing_t>(); }
-    require(retained->m_number == 7 && records.size() == 2);
-    require(std::ranges::distance(records) == 2);
-    profiler.reset();
-    require(destructions == destructed + 1 && profiler.records().empty() && profiler.omitted() == 0);
-    recurse(context, 3);
-    recurse(context, 0);
-    require(profiler.records().size() == 5);
-    require(profiler.records()[3].depth() == 3 && !profiler.records()[4].parent());
-    profiler.reset();
-    try {
-        auto parent_metric = profiler.metric<timing_t>();
-        auto child_metric = context.metric<retained_t>(17);
-        child_metric->m_number = 18;
-        throw std::runtime_error("producer failed");
-    } catch (const std::runtime_error&) {}
-    require(profiler.records()[0].unwinding() && profiler.records()[1].unwinding());
-    require(profiler.records()[1].metrics<retained_t>()->m_number == 18);
-    profiler.reset();
-    {
-        auto closed_metric = profiler.metric<retained_t>(9);
-        closed_metric.close();
-        closed_metric.close();
-        require(!closed_metric && profiler.quiescent());
-        require(profiler.records()[0].metrics<retained_t>()->m_number == 9);
-        profiler.reset(); // Destruction of the already closed_metric handle is a no-op.
-    }
-    {
-        auto caught_metric = profiler.metric<timing_t>();
-        try { throw 1; } catch (int) {}
-    }
-    require(!profiler.records()[0].unwinding());
-    profiler.reset();
-    {
-        auto metric = profiler.metric<nested_t>(context);
-    }
-    require(profiler.records().size() == 2);
-    require(profiler.records()[0].metrics<retained_t>()->m_number == 31);
-    require(profiler.records()[1].metrics<nested_t>());
-    require(!profiler.records()[0].parent() && !profiler.records()[1].parent());
-
+    require(formats == formatted + 2);
+    require(std::format("{}", profiler).find("quiescent: true") != std::string::npos);
 }
 
-void test_lifetimes_and_alignment() {
-    std::array<std::byte, 4097> storage;
-    int number = 3;
-    auto owned = std::make_unique<int>(4);
-    const auto destructed = destructions;
-    {
-        profiler_t profiler(std::span<std::byte>(storage).subspan(1));
-        profiler.start();
-        {
-            allocation_forbidden = true;
-            auto outer_metric = profiler.metric<retained_t>(21);
-            auto inner_metric = profiler.metric<retained_t>(22);
-            auto forwarded_metric = profiler.metric<forwarded_t>(number, std::move(owned));
-            require(forwarded_metric->m_borrowed == &number && *forwarded_metric->m_owned == 4 && !owned);
-            auto aligned_metric = profiler.metric<aligned_t>();
-            require(reinterpret_cast<std::uintptr_t>(aligned_metric.operator->()) % alignof(aligned_t) == 0);
-            allocation_forbidden = false;
-        }
-        require(destructions == destructed);
-        const auto* aligned = profiler.records()[3].metrics<aligned_t>();
-        require(aligned && aligned->m_number == 42);
-        require(profiler.records()[2].metrics<forwarded_t>()->m_borrowed == &number);
-        allocation_forbidden = true;
-    }
-    allocation_forbidden = false;
-    require(destructions == destructed + 2);
-    require(destroyed[destructed % destroyed.size()] == 22 && destroyed[(destructed + 1) % destroyed.size()] == 21);
+void recurse(profiler_t& profiler, int depth) {
+    auto metric = profiler.metric<counted_t>(depth);
+    if (depth != 0) { recurse(profiler, depth - 1); }
 }
 
-void test_overflow() {
-    std::array<std::byte, 2048> storage;
-    profiler_t profiler(storage);
-    auto context = profiler.context();
-    profiler.start();
-    const auto constructed = constructions;
+void test_independent_completion() {
+    profiler_t profiler;
+    recurse(profiler, 4);
+    require(profiler.size() == 1 && profiler.metrics<counted_t>()->m_number == 4);
     {
-        auto parent_metric = profiler.metric<timing_t>();
-        {
-            auto oversized_metric = context.metric<oversized_t>();
-            require(!oversized_metric);
-            const auto calls = clock_calls;
-            recurse(context, 3);
-            require(constructions == constructed && clock_calls == calls);
-            rejects([&] { profiler.reset(); });
-            rejects([&] { (void)profiler.records(); });
-            rejects([&] { context = context_t(); });
-        }
-        auto sibling_metric = context.metric<retained_t>(8);
-        require(bool(sibling_metric));
+        auto first_metric = profiler.metric<counted_t>(11);
+        auto last_metric = profiler.metric<counted_t>(22);
+        first_metric.stop();
+        require(!profiler.quiescent());
+        last_metric.stop();
+        require(profiler.quiescent());
     }
-    require(profiler.records().size() == 2 && profiler.omitted() == 5);
-    require(!profiler.records()[0].self() && profiler.records()[1].self().has_value());
-    require(profiler.records()[1].parent() == 0);
-    std::ostringstream report;
-    profiler.report(report);
-    require(report.str().find("self=unavailable") != std::string::npos);
-    require(report.str().find("5 omitted, incomplete") != std::string::npos);
-    profiler.reset();
-    { auto metric = profiler.metric<timing_t>(); }
-    require(profiler.omitted() == 0 && profiler.records()[0].self().has_value());
-
-    profiler_t empty({});
-    auto empty_context = empty.context();
-    empty.start();
-    const auto calls = clock_calls;
-    recurse(empty_context, 4);
-    require(empty.records().empty() && empty.omitted() == 5 && clock_calls == calls);
+    require(profiler.metrics<counted_t>()->m_number == 22);
     {
-        auto suppressed_metric = empty.metric<timing_t>();
-        require(!suppressed_metric && !empty.quiescent());
-        rejects([&] { empty.reset(); });
-        rejects([&] { empty.report(report); });
+        auto outer_metric = profiler.metric<timing_t>();
+        auto inner_metric = profiler.metric<counted_t>(33);
+        outer_metric.stop();
+        inner_metric.stop();
     }
-    require(empty.quiescent());
-
-    // Exhaustion while unwinding must restore suppression and parent_metric state.
-    profiler.reset();
+    require(profiler.size() == 2 && profiler.metrics<counted_t>()->m_number == 33);
     try {
-        auto parent_metric = profiler.metric<timing_t>();
-        auto suppressed_metric = profiler.metric<oversized_t>();
-        auto descendant_metric = profiler.metric<retained_t>(9);
+        auto metric = profiler.metric<counted_t>(44);
         throw 1;
     } catch (int) {}
-    require(profiler.quiescent() && profiler.omitted() == 2 && profiler.records()[0].unwinding());
-    { auto sibling_metric = profiler.metric<retained_t>(10); require(bool(sibling_metric)); }
-    require(!profiler.records()[1].parent());
+    require(profiler.quiescent() && profiler.unwinding<counted_t>() == true);
+    require(profiler.metrics<counted_t>()->m_number == 44);
+    {
+        auto metric = profiler.metric<counted_t>(55);
+        try { throw 1; } catch (int) {}
+    }
+    require(profiler.unwinding<counted_t>() == false);
+    { auto metric = profiler.metric<observing_t>(profiler); }
+    { auto metric = profiler.metric<observing_t>(profiler); }
 }
 
-void test_contexts() {
-    context_t unattached_context;
+template <std::size_t... N>
+void grow(profiler_t& profiler, std::index_sequence<N...>) {
+    (profiler.metric<numbered_t<N>>().stop(), ...);
+}
+
+void test_storage() {
+    profiler_t profiler;
+    { auto metric = profiler.metric<aligned_t>(); }
+    const auto* aligned = profiler.metrics<aligned_t>();
+    require(reinterpret_cast<std::uintptr_t>(aligned) % alignof(aligned_t) == 0);
+    {
+        auto metric = profiler.metric<counted_t>(3);
+        auto* current = metric.operator->();
+        grow(profiler, std::make_index_sequence<64>());
+        require(metric.operator->() == current && current->m_number == 3);
+    }
+    require(profiler.size() == 66 && profiler.metrics<aligned_t>() == aligned);
+    require(aligned->m_number == 42 && profiler.metrics<counted_t>()->m_number == 3);
+    const auto count = allocations;
+    allocation_forbidden = true;
+    grow(profiler, std::make_index_sequence<64>());
+    allocation_forbidden = false;
+    require(allocations == count);
+    int borrowed = 2;
+    auto owned = std::make_unique<int>(5);
+    {
+        auto metric = profiler.metric<forwarded_t>(borrowed, std::move(owned));
+        require(!owned && metric->m_borrowed == &borrowed && *metric->m_owned == 5);
+    }
+    require(profiler.metrics<forwarded_t>()->m_borrowed == &borrowed);
+    require(*profiler.metrics<forwarded_t>()->m_owned == 5);
+    owned = std::make_unique<int>(6);
+    { auto metric = profiler.metric<forwarded_t>(borrowed, std::move(owned)); }
+    require(*profiler.metrics<forwarded_t>()->m_owned == 6);
+}
+
+void test_allocation_failure() {
+    allocations_before_failure = 0;
+    bool failed = false;
+    try { profiler_t profiler; } catch (const std::bad_alloc&) { failed = true; }
+    allocations_before_failure = -1;
+    require(failed);
+    profiler_t profiler;
+    { auto metric = profiler.metric<counted_t>(8); }
     const auto calls = clock_calls;
-    const auto constructed = constructions;
-    int arguments = 0;
+    allocations_before_failure = 0;
+    failed = false;
+    try { auto metric = profiler.metric<timing_t>(); } catch (const std::bad_alloc&) { failed = true; }
+    allocations_before_failure = -1;
+    require(failed && profiler.quiescent() && profiler.size() == 1 && clock_calls == calls);
+    require(profiler.metrics<counted_t>()->m_number == 8 && !profiler.metrics<timing_t>());
+    { auto metric = profiler.metric<timing_t>(); }
+    require(profiler.size() == 2);
+}
+
+void test_inactive() {
+    const auto calls = clock_calls;
+    const auto count = allocations;
     allocation_forbidden = true;
     {
-        auto metric = unattached_context.metric<retained_t>(++arguments);
-        require(!metric);
-        metric.close();
+        metric_t<counted_t> metric;
+        require(!metric && live_metrics == 0);
+        metric.stop();
+        metric.stop();
     }
     allocation_forbidden = false;
-    require(arguments == 1 && constructions == constructed && clock_calls == calls);
-    std::array<std::byte, 1024> source_storage, destination_storage;
-    profiler_t source_profiler(source_storage), destination_profiler(destination_storage);
-    auto source_context = source_profiler.context();
-    auto destination_context = destination_profiler.context();
-    auto copied_context = source_context;
-    source_profiler.start(); destination_profiler.start();
-    {
-        auto outer_metric = source_context.metric<timing_t>();
-        rejects([&] { (void)source_profiler.context(); });
-        rejects([&] { [[maybe_unused]] auto replacement_context = source_context; });
-        rejects([&] { source_context = destination_context; });
-        rejects([&] { destination_context = source_context; });
-        auto child_metric = copied_context.metric<retained_t>(11);
-        auto independent_metric = destination_context.metric<timing_t>();
-    }
-    require(source_profiler.records()[1].parent() == 0 && !destination_profiler.records()[0].parent());
-    source_context = destination_context;
-    { auto metric = source_context.metric<retained_t>(12); }
-    require(source_profiler.records().size() == 2 && destination_profiler.records().size() == 2);
-    source_context = context_t();
-    { auto metric = source_context.metric<retained_t>(13); require(!metric); }
-    source_profiler.reset();
-    { auto metric = copied_context.metric<retained_t>(14); }
-    require(source_profiler.records().size() == 1);
+    require(clock_calls == calls && allocations == count && live_metrics == 0);
 }
 
-void test_report_failure() {
-    std::array<std::byte, 1024> storage;
-    profiler_t profiler(storage);
-    profiler.start();
+void test_reporting_failure() {
+    profiler_t profiler;
     { auto metric = profiler.metric<failing_t>(); }
-    std::ostringstream out;
-    rejects([&] { profiler.report(out); });
-    require(profiler.records().size() == 1 && profiler.records()[0].metrics<failing_t>());
-    rejects([&] { profiler.report(out); });
-    profiler.reset();
-    { auto metric = profiler.metric<retained_t>(29); }
-    profiler.report(out);
-    require(out.str().find("29 inclusive=") != std::string::npos);
+    std::ostringstream report;
+    rejects([&] { profiler.report(report); });
+    rejects([&] { profiler.report(report); });
+    require(profiler.size() == 1 && profiler.metrics<failing_t>());
+    profiler_t working_profiler;
+    { auto metric = working_profiler.metric<counted_t>(29); }
     std::ostringstream failed;
     failed.setstate(std::ios::badbit);
     try { failed.exceptions(std::ios::badbit); } catch (const std::ios_base::failure&) {}
     bool rejected = false;
-    try { profiler.report(failed); } catch (const std::ios_base::failure&) { rejected = true; }
-    require(rejected && profiler.records()[0].metrics<retained_t>()->m_number == 29);
+    try { working_profiler.report(failed); } catch (const std::ios_base::failure&) { rejected = true; }
+    require(rejected && working_profiler.metrics<counted_t>()->m_number == 29);
 }
 
 } // namespace m03gtjqkhqacstl3luv2ojsz3q_profiling
 
 int main() {
 #ifdef PROFILING_TEST_MISSING_FORMATTER
-    // Must fail compilation even though this context can never record.
-    profiling::context_t unattached;
-    auto metric = unattached.metric<profiling::missing_t>();
+    profiling::metric_t<profiling::missing_t> metric;
+#endif
+#ifdef PROFILING_TEST_THROWING_CONSTRUCTOR
+    profiling::profiler_t profiler;
+    auto metric = profiler.metric<profiling::throwing_constructor_t>();
+#endif
+#ifdef PROFILING_TEST_THROWING_MOVE
+    profiling::metric_t<profiling::throwing_move_t> metric;
+#endif
+#ifdef PROFILING_TEST_THROWING_ASSIGNMENT
+    profiling::metric_t<profiling::throwing_assignment_t> metric;
+#endif
+#ifdef PROFILING_TEST_THROWING_DESTRUCTOR
+    profiling::metric_t<profiling::throwing_destructor_t> metric;
 #endif
     try {
-        profiling::test_capture();
-        profiling::test_lifetimes_and_alignment();
-        profiling::test_overflow();
-        profiling::test_contexts();
-        profiling::test_report_failure();
+        profiling::test_replacement();
+        profiling::require(profiling::live_metrics == 0);
+        profiling::test_independent_completion();
+        profiling::test_storage();
+        profiling::test_allocation_failure();
+        profiling::test_inactive();
+        profiling::test_reporting_failure();
+        profiling::require(profiling::live_metrics == 0);
         std::cout << "profiling public validation passed\n";
         return 0;
     } catch (const std::exception& error) {

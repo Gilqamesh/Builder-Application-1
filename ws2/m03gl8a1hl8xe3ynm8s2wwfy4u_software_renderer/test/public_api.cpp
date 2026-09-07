@@ -2407,8 +2407,7 @@ void test_depth_clears() {
 
 void test_profiling() {
     using profiler_t = profiling::profiler_t;
-    std::array<std::byte, 8192> storage;
-    profiler_t profiler(storage);
+    profiler_t profiler;
     std::vector<api::rgba8_t> measured_pixels(256), normal_pixels(256);
     std::vector<float> measured_depth(256), normal_depth(256);
     api::framebuffer_t measured_framebuffer(measured_pixels, 16, 16), normal_framebuffer(normal_pixels, 16, 16);
@@ -2417,7 +2416,6 @@ void test_profiling() {
     api::software_renderer_t measured(measured_framebuffer);
     measured.profiler(profiler);
     api::software_renderer_t normal(normal_framebuffer);
-    profiler.start();
     const auto camera = make_camera(16, 16);
     for (int mode = 0; mode < 6; ++mode) {
         auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
@@ -2433,7 +2431,6 @@ void test_profiling() {
             renderer.clear_depth(mode == 1 ? 0.0F : 1.0F);
             for (std::size_t i = 0; i < draws; ++i) { renderer.draw(camera, item); }
         };
-        profiler.reset();
         {
             auto metric = profiler.metric<application_metrics_t>();
             render(measured);
@@ -2442,51 +2439,36 @@ void test_profiling() {
         render(normal);
         require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
         require(measured_depth == normal_depth);
-        require(profiler.records().size() == 3 + 4 * draws && profiler.omitted() == 0);
-        require(profiler.records()[0].metrics<application_metrics_t>()->m_items == draws);
-        require(profiler.records()[1].metrics<clear_metrics_t>()->m_color_writes == 256);
-        require(profiler.records()[2].metrics<clear_metrics_t>()->m_depth_writes == 256);
-        std::size_t vertices = 0;
-        raster_metrics_t accumulated_raster_metrics;
-        for (const auto& record : profiler.records()) {
-            if (const auto* vertex_metrics = record.metrics<vertex_metrics_t>()) {
-                vertices += vertex_metrics->m_invocations;
-                require(vertex_metrics->m_expected == 6);
-            }
-            if (const auto* recorded_raster_metrics = record.metrics<raster_metrics_t>()) {
-                accumulated_raster_metrics.m_invocations += recorded_raster_metrics->m_invocations;
-                accumulated_raster_metrics.m_discards += recorded_raster_metrics->m_discards;
-                accumulated_raster_metrics.m_depth_rejections += recorded_raster_metrics->m_depth_rejections;
-                accumulated_raster_metrics.m_color_writes += recorded_raster_metrics->m_color_writes;
-                accumulated_raster_metrics.m_depth_writes += recorded_raster_metrics->m_depth_writes;
-                require(record.parent() && profiler.records()[*record.parent()].metrics<draw_metrics_t>());
-            }
-        }
-        require(vertices == 6 * draws);
-        require(accumulated_raster_metrics.m_invocations == (mode == 4 ? 0 : 256 * draws));
-        require(accumulated_raster_metrics.m_discards == (mode == 2 || mode == 3 ? 128 : 0));
-        require(accumulated_raster_metrics.m_depth_rejections == (mode == 1 || mode == 5 ? 256 : 0));
-        const std::size_t writes = mode == 1 || mode == 4 ? 0 : (mode == 2 || mode == 3 ? 128 : 256);
-        require(accumulated_raster_metrics.m_depth_writes == writes);
-        require(accumulated_raster_metrics.m_color_writes == (mode == 3 ? 0 : writes));
+        require(profiler.size() == 7);
+        require(profiler.metrics<application_metrics_t>()->m_items == draws);
+        require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == 256);
+        require(profiler.metrics<clear_depth_metrics_t>()->m_depth_writes == 256);
+        const auto* vertex_metrics = profiler.metrics<vertex_metrics_t>();
+        require(vertex_metrics->m_invocations == 6 && vertex_metrics->m_expected == 6);
+        const auto* raster_metrics = profiler.metrics<raster_metrics_t>();
+        require(raster_metrics->m_invocations == (mode == 4 ? 0 : 256));
+        require(raster_metrics->m_discards == (mode == 2 || mode == 3 ? 128 : 0));
+        require(raster_metrics->m_depth_rejections == (mode == 1 || mode == 5 ? 256 : 0));
+        const std::size_t writes = mode == 1 || mode == 4 || mode == 5 ? 0 : (mode == 2 || mode == 3 ? 128 : 256);
+        require(raster_metrics->m_depth_writes == writes);
+        require(raster_metrics->m_color_writes == (mode == 3 ? 0 : writes));
     }
     std::ostringstream report;
     profiler.report(report);
     require(report.str().find("application.frame") != std::string::npos && report.str().find("items=2") != std::string::npos);
     require(report.str().find("vertex_invocations=6") != std::string::npos);
 
-    // Attached and unattached renderers reject the same invalid resources; completed scope records survive.
-    profiler.reset();
+    // Invalid resources replace the entered metrics; unentered stages retain their latest data.
     test::expect_throws([&] { measured.draw(camera, api::render_item_t{}); });
     test::expect_throws([&] { normal.draw(camera, api::render_item_t{}); });
-    require(profiler.records().size() == 2 && profiler.records()[0].unwinding() && profiler.records()[1].unwinding());
+    require(profiler.size() == 7 && profiler.unwinding<draw_metrics_t>() == true && profiler.unwinding<preparation_metrics_t>() == true);
+    require(profiler.metrics<vertex_metrics_t>()->m_invocations == 6);
 
     // Empty intersections retain their original validation bypass in both configurations.
-    profiler.reset();
     auto empty_camera = make_camera(0, 0);
     test::expect_no_throw([&] { measured.draw(empty_camera, api::render_item_t{}); });
     test::expect_no_throw([&] { normal.draw(empty_camera, api::render_item_t{}); });
-    require(profiler.records().size() == 2 && !profiler.records()[0].unwinding());
+    require(profiler.size() == 7 && profiler.unwinding<draw_metrics_t>() == false);
 
     // Points, lines, all assembly forms, and clipping use the same instrumented path.
     for (const auto topology : {api::vertex_primitive_topology_t::point, api::vertex_primitive_topology_t::line,
@@ -2497,7 +2479,6 @@ void test_profiling() {
         auto positions = visibility_quad(0);
         positions[0] = {-2, 2, -2, 1};
         auto item = make_visibility_item(positions, indices, topology);
-        profiler.reset();
         measured.clear_color(clear_color); normal.clear_color(clear_color);
         measured.clear_depth(1); normal.clear_depth(1);
         measured.draw(camera, item); normal.draw(camera, item);
@@ -2506,7 +2487,6 @@ void test_profiling() {
     }
 
     // Count a shader invocation before entering it, even when program.run throws.
-    profiler.reset();
     shader::vertex_shader_ast_builder_t throwing_vertex;
     throwing_vertex.branch(throwing_vertex.uniform<bool>(0), [&] {
         throwing_vertex.position(vector4f_t({0, 0, 0, 1}));
@@ -2520,54 +2500,29 @@ void test_profiling() {
     throwing_item.material()->uniform(0, false);
     test::expect_throws<std::runtime_error>([&] { measured.draw(camera, throwing_item); });
     test::expect_throws<std::runtime_error>([&] { normal.draw(camera, throwing_item); });
-    require(profiler.records().size() == 3);
-    require(profiler.records()[2].unwinding());
-    require(profiler.records()[2].metrics<vertex_metrics_t>()->m_invocations == 1);
-    require(profiler.records()[2].metrics<vertex_metrics_t>()->m_expected == 6);
-    require(!profiler.records()[1].unwinding());
+    require(profiler.size() == 7);
+    require(profiler.unwinding<vertex_metrics_t>() == true);
+    require(profiler.metrics<vertex_metrics_t>()->m_invocations == 1);
+    require(profiler.metrics<vertex_metrics_t>()->m_expected == 6);
+    require(profiler.unwinding<preparation_metrics_t>() == false);
 
     // Attachment changes require both collectors to be quiescent and leave
     // the old attachment intact on failure.
-    profiler.reset();
     {
         auto metric = profiler.metric<application_metrics_t>();
         test::expect_throws([&] { measured.profiler(nullptr); });
         test::expect_throws([&] { normal.profiler(profiler); });
     }
-    profiler.reset();
     measured.profiler(nullptr);
-    measured.clear_color(clear_color);
-    require(profiler.records().empty());
+    const auto color_writes = profiler.metrics<clear_color_metrics_t>()->m_color_writes;
+    measured.clear_color(empty_camera, clear_color);
+    require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == color_writes);
     measured.profiler(profiler);
     measured.clear_color(empty_camera, clear_color);
     measured.clear_depth(empty_camera, 1);
-    require(profiler.records()[0].metrics<clear_metrics_t>()->m_target == clear_target_t::color);
-    require(profiler.records()[1].metrics<clear_metrics_t>()->m_target == clear_target_t::depth);
-    require(profiler.records()[0].metrics<clear_metrics_t>()->m_color_writes == 0);
-    require(profiler.records()[1].metrics<clear_metrics_t>()->m_depth_writes == 0);
-
-    // Record exhaustion never changes rendering or prevents future capture resets.
-    // Find the smallest borrowed buffer that retains one timing-only scope;
-    // capacity checks must not depend on the collector's private record layout.
-    std::array<std::byte, 512> tiny_storage;
-    std::size_t capacity = 0;
-    for (; capacity < tiny_storage.size(); ++capacity) {
-        profiler_t probe(std::span<std::byte>(tiny_storage).first(capacity));
-        probe.start();
-        auto metric = probe.metric<draw_metrics_t>();
-        if (metric) { break; }
-    }
-    require(capacity < tiny_storage.size());
-    profiler_t tiny(std::span<std::byte>(tiny_storage).first(capacity));
-    api::software_renderer_t overflowing(measured_framebuffer);
-    overflowing.profiler(tiny);
-    tiny.start();
-    auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
-    std::ranges::fill(measured_depth, 1); std::ranges::fill(normal_depth, 1);
-    overflowing.draw(camera, item); normal.draw(camera, item);
-    require(tiny.omitted() == 3 && !tiny.records()[0].self());
-    require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
-    require(measured_depth == normal_depth);
+    require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == 0);
+    require(profiler.metrics<clear_depth_metrics_t>()->m_depth_writes == 0);
+    require(profiler.size() == 7);
 }
 
 void run_resource_tests() {

@@ -134,10 +134,10 @@ std::vector<render_item_t> make_workload(std::string_view name) {
     throw std::invalid_argument("unknown benchmark workload");
 }
 
-std::int64_t render_frame(software_renderer_t& software_renderer, const profiling::context_t& context, const camera_t& camera, const std::vector<render_item_t>& items) {
+std::int64_t render_frame(software_renderer_t& software_renderer, profiling::profiler_t* profiler, const camera_t& camera, const std::vector<render_item_t>& items) {
     const auto start = std::chrono::steady_clock::now();
     {
-        auto metric = context.metric<frame_metrics_t>();
+        auto metric = profiler ? profiler->metric<frame_metrics_t>() : profiling::metric_t<frame_metrics_t>();
         software_renderer.clear_color({0, 0, 0, 255});
         software_renderer.clear_depth(1);
         for (const auto& item : items) {
@@ -209,31 +209,25 @@ json_t benchmark_t::run_workload() const {
     std::vector<float> normal_depth(count), measured_depth(count);
     framebuffer_t normal_buffer(normal_pixels, m_size, m_size), measured_buffer(measured_pixels, m_size, m_size);
     normal_buffer.depth(normal_depth); measured_buffer.depth(measured_depth);
-    const profiling::context_t normal_context;
     software_renderer_t normal(normal_buffer);
-    // Application-owned capture capacity for the existing fixed workloads.
-    std::array<std::byte, 64 * 1024> storage;
-    profiling::profiler_t profiler(storage);
-    const auto measured_context = profiler.context();
+    profiling::profiler_t profiler;
     software_renderer_t measured(measured_buffer);
     measured.profiler(profiler);
-    profiler.start();
     const camera_t camera({{0, m_size}, {0, m_size}}, orthographic_t({{-1, 1}, {-1, 1}}, 0.1F, 10.0F));
     std::vector<std::array<std::int64_t, 4>> observations;
     observations.reserve(std::size_t(m_samples) * std::size_t(m_runs));
     for (int run = 0; run < m_runs; ++run) {
         for (int sample = -m_warmup; sample < m_samples; ++sample) {
-            profiler.reset();
             std::int64_t normal_ns, measured_ns;
             if ((run % 2 + sample % 2) % 2 == 0) {
-                normal_ns = render_frame(normal, normal_context, camera, items);
-                measured_ns = render_frame(measured, measured_context, camera, items);
+                normal_ns = render_frame(normal, nullptr, camera, items);
+                measured_ns = render_frame(measured, &profiler, camera, items);
             } else {
-                measured_ns = render_frame(measured, measured_context, camera, items);
-                normal_ns = render_frame(normal, normal_context, camera, items);
+                measured_ns = render_frame(measured, &profiler, camera, items);
+                normal_ns = render_frame(normal, nullptr, camera, items);
             }
-            if (!std::equal(normal_pixels.begin(), normal_pixels.end(), measured_pixels.begin(), [](rgba8_t a, rgba8_t b) { return std::bit_cast<std::uint32_t>(a) == std::bit_cast<std::uint32_t>(b); }) || normal_depth != measured_depth || profiler.omitted() != 0) {
-                throw std::runtime_error("benchmark attached/unattached results differ or capture overflowed");
+            if (!std::equal(normal_pixels.begin(), normal_pixels.end(), measured_pixels.begin(), [](rgba8_t a, rgba8_t b) { return std::bit_cast<std::uint32_t>(a) == std::bit_cast<std::uint32_t>(b); }) || normal_depth != measured_depth) {
+                throw std::runtime_error("benchmark attached/unattached results differ");
             }
             if (0 <= sample) { observations.push_back({run, sample, normal_ns, measured_ns}); }
         }
@@ -273,7 +267,7 @@ json_t benchmark_t::run_workload() const {
         {"summary", {{"normal", normal_summary}, {"profiled", profiled_summary}}},
         {"median_overhead_percent", (profiled_median / normal_median - 1) * 100},
         {"peak_rss_bytes", peak_rss_bytes},
-        {"records", profiler.records().size()}
+        {"metrics", profiler.size()}
     };
 }
 
@@ -302,7 +296,7 @@ json_t benchmark_t::metadata(const filesystem::path_t& program) const {
     }
     if (!maps.eof()) { throw std::runtime_error("benchmark could not read loaded artifact mappings"); }
     return {
-        {"schema_version", 2}, {"workload_version", 1},
+        {"schema_version", 3}, {"workload_version", 1},
         {"size", m_size}, {"warmup_per_run", m_warmup}, {"samples_per_run", m_samples}, {"runs", m_runs},
         {"cpu", cpu}, {"platform", std::format("{} {} {}", platform.sysname, platform.release, platform.machine)},
         {"scope", "frame scope, full color/depth clears, fixed draw sequence; reset, setup, comparison, reporting excluded"},

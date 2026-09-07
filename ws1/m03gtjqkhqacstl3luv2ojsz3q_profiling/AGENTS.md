@@ -2,36 +2,37 @@
 
 ## Purpose
 
-Collect synchronous nested timings and producer-defined metrics, then traverse
-retained heterogeneous payloads for deferred reporting.
-
-Applications own capture storage, capture periods, attachments, and report
-destinations. Producers own payload types, constructors, counter meanings,
-formatters, and measurement boundaries. This module owns timing, nesting, retained
-payload lifetimes, and generic reporting. See [the public contract](api.h).
+Measure synchronous code execution and retain the latest completed metric of each
+producer-defined type. Producers own metric data, constructors, counter meanings,
+formatters, and measurement boundaries. The profiler owns timing, replacement,
+storage, and deferred reporting. See [the public contract](api.h).
 
 ## Invariants
 
-- The ordinary collector borrows fixed-capacity application byte storage. Ordinary
-  producer contexts borrow the collector; default contexts are unattached.
-- Each collector records on one thread with synchronous, strictly nested measurements.
-  Collection performs no profiler-owned allocation, formatting, I/O, or locking.
-  Producer payload operations and counter updates preserve the allocation rule.
-- Typed measurements construct payloads directly in aligned, stable storage. Closure
-  retains payloads through reporting; reset and destruction release them.
-- Exhaustion suppresses an omitted measurement and its descendants while preserving
-  retained hierarchy and reporting every omission. False suppressed handles still
-  close their bookkeeping. Exceptional unwinding preserves partial observations.
-- Unattached contexts construct no payloads and read no clock. Formatter and
-  nonthrowing construction/destruction requirements apply at compilation even
-  when recording will be unattached. Caller argument expressions still evaluate.
-- Reads, reports, resets, and attachment changes occur without active measurements.
-  Reset preserves contexts and invalidates retained views. Payload borrowing lasts
-  through deferred use; the collector and storage outlive active handles.
+- A profiler operates on one thread and owns growing storage. Capacity and allocation
+  strategy are private. Creating a profiler or encountering a new metric type may
+  allocate and fail; existing completed metrics survive allocation failure.
+- Each active metric owns its application data and starting timestamp. Its stop()
+  and destructor complete at most once, replacing that type's stored data, duration,
+  and unwinding status together. The last completion wins, including overlapping
+  measurements of the same type. Metrics have independent timing boundaries.
+- Lookup and construction precede timing. Stop reads the clock before replacement;
+  replacement performs no profiler-owned allocation, formatting, I/O, or locking.
+  Metric construction, moves, and destruction are nonthrowing. Producers guarantee
+  allocation-free metric operations and counter updates.
+- Default metrics are inactive: they construct no application data and read no clock.
+  Active metrics cannot be copied or moved. Stopping makes a metric inactive and
+  ends mutable access to its data.
+- Reads, reporting, attachment changes, and profiler destruction require no active
+  metrics, including metrics undergoing construction or replacement. The profiler
+  outlives active metrics and uses of its borrowed attachments. Borrowed data inside
+  metrics remains valid through deferred use; retained pointers expire on replacement
+  of that type or profiler destruction.
 
 ## Validation
 
-Headless validation covers lifecycle, heterogeneous types, deferred formatting and
-payload destruction, alignment, nesting, exhaustion, attachment changes, and
-inactive contexts. Producers validate their counters and unchanged observable
-behavior with attached and unattached instances of the same ordinary class.
+Headless validation covers timing boundaries, replacement, independent completion,
+heterogeneous types, growing storage, alignment, nonthrowing moves and destruction,
+exception unwinding, inactive metrics, and reporting/allocation failures. Producers
+validate their latest counters and identical application behavior with attached and
+unattached instances of the same ordinary class.

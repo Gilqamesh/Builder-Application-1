@@ -1,119 +1,86 @@
 # Renderer profiling and benchmark
 
-The ordinary `software_renderer_t` starts with an unattached profiling context.
-Applications attach a borrowed collector with `renderer.profiler(profiler)` and
-can detach with `renderer.profiler(nullptr)`. Rendering and clearing retain their
-existing behavior in either state. Attachment changes require both collectors to
-have no active measurements; attachment itself may precede `start()`.
+The ordinary `software_renderer_t` starts without an attached profiler.
+Applications attach a borrowed profiler with `renderer.profiler(profiler)` and
+can detach with `renderer.profiler(nullptr)`. Rendering and clearing execute in
+either state. Attachment changes require both profilers to have no active metrics.
 
-## Capture setup
+## Use
 
-Producers own their metrics payload types, constructors, counter meanings, and
-`std::formatter` specializations. Applications add their own metrics to the same
-collector without assembling a payload variant or registering regions. See
-[the complete headless caller](../benchmark.cpp).
+Producers own their metric data types, constructors, counter meanings, and
+`std::formatter` specializations. Applications measure their own work using the
+same profiler. See [the complete headless caller](../benchmark.cpp).
 
 ```cpp
 namespace profiling = m03gtjqkhqacstl3luv2ojsz3q_profiling;
 namespace renderer = m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer;
 
 // frame_metrics_t and its std::formatter are application-owned.
-std::array<std::byte, 64 * 1024> storage;
-profiling::profiler_t profiler(storage);
+profiling::profiler_t profiler;
 renderer::software_renderer_t software_renderer(framebuffer);
 software_renderer.profiler(profiler);
-profiler.start();
-{
-    auto metric = profiler.metric<frame_metrics_t>();
-    software_renderer.clear_color({0, 0, 0, 255});
-    software_renderer.clear_depth(1);
-    software_renderer.draw(camera, item);
-    if (metric) {
-        ++metric->m_draws;
-    }
-}
+
+auto metric = profiler.metric<frame_metrics_t>();
+software_renderer.clear_color({0, 0, 0, 255});
+software_renderer.clear_depth(1);
+software_renderer.draw(camera, item);
+metric->m_draws = 1;
+metric.stop();
+
 profiler.report(std::cout);
-profiler.reset(); // Destroys retained payloads; attachments remain valid.
 ```
 
-The buffer size is this example's application choice, not a collector default.
-The collector borrows byte storage and constructs heterogeneous payloads directly
-in aligned retained storage. Storage outlives the collector, and the collector
-outlives attached operations and active handles. Payloads never move. Measurement closure
-retains them; reset and collector destruction destroy them in reverse opening order.
-Borrowed data inside a payload remains valid through its deferred use in reporting.
-
-`start()` begins the initial capture and may be called only once. Attached measurement
-creation before start is a programming error. `reset()` requires a started,
-quiescent collector and begins another capture. Capture is synchronous and confined
-to one thread. Reading, reporting, resetting, and changing attachments require no
-active measurements, including false handles that own overflow-suppression bookkeeping.
+The profiler owns its growing storage. Each active metric holds its current data
+and starting timestamp; stopping replaces that type's stored data and duration.
+Repeating the example keeps one metric per type. Reporting again without measuring
+a type again preserves its previous observation. The profiler outlives attached
+uses and active metrics. It is ready immediately after construction and requires
+no start or reset operation.
 
 ## Metrics and timing
 
-`metric<T>()` returns a `profiling::metric_t<T>` handle for one measurement.
-The handle closes its timing interval at scope exit or explicit `close()`; `T`
-is the producer's metrics payload, retained after closure. Finalized observations
-are read through `record_t`. See [the profiling public contract](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h).
+`metric<T>()` returns a `profiling::metric_t<T>`. Destruction stops it automatically;
+explicit `stop()` ends the timing interval earlier and is idempotent. After stopping,
+the metric is inactive and its application data can no longer be mutated through it.
+Default metrics are inactive and construct no data or clock observation. Renderer
+operations use them when no profiler is attached; rendering always executes.
 
-Renderer stages distinguish handles by their measurement roles:
+[profiling_metrics.h](../profiling_metrics.h) owns the renderer metric data and
+formatters. Color and depth clears have separate types, preserving the latest
+observation of each even for empty clear regions. Draw and preparation metrics
+have empty data. Vertex metrics retain selected-index count as `m_expected` and
+calls entered as `m_invocations`. Raster metrics retain fragment invocations,
+discards, depth rejections, and actual color/depth writes for the latest raster
+measurement. Repeated draws replace those stage metrics independently.
 
-```cpp
-auto draw_metric = m_context.metric<draw_metrics_t>();
-auto preparation_metric = m_context.metric<preparation_metrics_t>();
-```
+Lookup and application-data construction precede the starting timestamp. `stop()`
+reads the ending timestamp before replacement. Durations are inclusive monotonic
+elapsed nanoseconds, including shader execution within the vertex and raster
+measurements. Timing boundaries are independent; the profiler preserves no
+parent/child relationships. For overlapping uses of the same type, the last
+completion wins. Exception unwinding replaces the metric with partial counters
+and an unwinding flag. Allocation during first use of a nested type can contribute
+to an enclosing measurement's time.
 
-[profiling_metrics.h](../profiling_metrics.h) owns the renderer metrics payloads
-and formatters used by the profiling integration. Draw and
-preparation have empty typed payloads. A clear payload explicitly identifies color
-or depth, including when it writes no samples. Vertex metrics record selected-index
-count as `m_expected` and calls entered as `m_invocations`. Raster metrics preserve
-fragment invocation, discard, depth-rejection, and actual sample-write meanings.
-Shader execution remains inside the vertex and rasterization stages.
+Storage, lifetime, nonthrowing move requirements, and failure guarantees are owned
+by [the profiling public contract](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h).
+Formatting runs during reporting. Reads and reports require no active metrics.
 
-Collection performs no profiler-owned allocation, formatting, I/O, or locking.
-Payload construction from forwarded arguments and destruction must be nonthrowing;
-producers also guarantee allocation-free payload operations and counter updates.
-A usable formatter for the const payload is required at compilation, even for an
-unattached context. Formatting runs only during reporting; formatting or output
-errors propagate without discarding the retained capture.
-
-An unattached context returns false handles without constructing payloads or
-reading the clock. Caller argument expressions still evaluate before `metric()`.
-Runtime pointer checks and conditional counter work replace compile-time policies.
-
-Payload construction precedes measurement timing and record publication. Durations
-are inclusive monotonic elapsed nanoseconds. Self time subtracts direct-child
-elapsed time only when those timings are complete. Exception unwinding retains
-partial counters and an unwinding flag. Explicit `close()` is idempotent and makes
-a handle false; its destructor then does nothing. Payload mutation belongs to the
-active handle, and retained reads use const views.
-
-Exhaustion returns a false handle and suppresses its descendants, counting every
-omission without reading a clock or constructing omitted payloads. A failed large
-reservation consumes no storage, allowing a later sibling to fit. Reports mark the
-capture incomplete and omit self time for parents missing direct-child timings.
-
-## Reading retained records
-
-`profiler.records()` returns a borrowed range in opening order. Each record exposes
-its parent index, depth, start, inclusive duration, optional self time, and unwinding
-status. Repeated and recursive uses of a type produce separate records.
-`record.metrics<T>()` returns a const payload pointer or null for a different type.
-For example:
+## Reading metrics
 
 ```cpp
-for (const auto record : profiler.records()) {
-    if (const auto* vertex_metrics = record.metrics<renderer::vertex_metrics_t>()) {
-        std::cout << vertex_metrics->m_invocations << '\n';
-    }
+if (const auto* vertex_metrics = profiler.metrics<renderer::vertex_metrics_t>()) {
+    std::cout << vertex_metrics->m_invocations << '\n';
+    std::cout << profiler.elapsed<renderer::vertex_metrics_t>()->count() << '\n';
 }
 ```
 
-Views expire on reset or collector destruction. Index lookup is linear; traversal
-visits each record once. A range retains its original extent when later measurements
-append. The collector's ordinary `report(std::ostream&)` uses standard payload
-formatters; the former template report policy and clock policy are removed.
+`metrics<T>()` returns the latest completed data or null. `elapsed<T>()` and
+`unwinding<T>()` return optional observations, and `size()` counts stored types.
+Borrowed pointers expire on replacement of their type or profiler destruction.
+The ordinary `report(std::ostream&)` formats each metric in first-registration
+order. A stage not entered during the most recent draw still describes the last
+draw that entered it.
 
 ## Builder benchmark
 
@@ -144,27 +111,30 @@ remains available with its [unchanged raw data](profiling-baseline.json).
 
 The coordinator starts a fresh copy of its installed binary for each of the four
 workloads: textured fill, depth overdraw, many small draws, and clipping. Each
-worker writes a JSON result and a hierarchical text report. The coordinator writes
+worker writes a JSON result and a flat text report of the latest completed metric of each type. The coordinator writes
 `metadata.json` before the workers run and `results.json` after all workers succeed.
 A failed run retains its completed workload files and does not produce a complete
 aggregate result.
 
+Result schema version 3 reports the number of stored metric types as `metrics`.
 Each workload result includes every timing pair, median, nearest-rank p95, maximum,
 per-run medians, the percentage difference between attachment-configuration medians, peak RSS, and
-retained record count. No outliers are removed. Build metadata records the actual
+stored metric type count (`metrics`). No outliers are removed. Build metadata records the actual
 versioned executable, loaded file paths, benchmark compiler version, and whether
 optimization and assertions were enabled in the benchmark translation unit.
 Dependency compile options are explicitly unknown in this runtime metadata;
 preserve Builder build logs and referenced versioned artifacts when comparing runs.
 No source scanning or alternative build system runs inside the benchmark.
 
-Each sample measures an application frame scope, complete color/depth clears,
-and a fixed draw sequence. Setup, capture reset, correctness comparisons, and
-reporting are outside that interval. Both configurations receive warm-up before each
+Each sample measures an application frame, complete color/depth clears,
+and a fixed draw sequence. Setup, correctness comparisons, and reporting are outside
+that interval. The profiler persists across samples; each completion replaces the
+previous metric of its type. The final report contains the latest frame and the
+latest individual draw stages, rather than sums across draws or samples. Both configurations receive warm-up before each
 run; their execution order alternates. Every pair is checked for identical color
-and depth output and complete capture.
+and depth output.
 
-Peak RSS uses Linux `/proc/self/status` `VmHWM` through workload capture and the
+Peak RSS uses Linux `/proc/self/status` `VmHWM` through workload measurement and the
 text report, including setup, warm-up, and both configurations. Summary construction
 and JSON serialization follow the measurement. This is the process high-water
 mark, not per-draw memory or a difference between configurations. Elapsed render durations

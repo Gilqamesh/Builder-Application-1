@@ -59,11 +59,11 @@ public:
     explicit software_renderer_t(framebuffer_t framebuffer);
 
     /**
-     * @brief Attaches a borrowed collector; both old and new collectors must be quiescent.
+     * @brief Attaches a borrowed profiler; both old and new profilers must be quiescent.
      *
-     * The context defaults to unattached. Start the collector before attached
-     * rendering. Collector and capture storage outlive their use by this renderer.
-     * Reset preserves this attachment; passing nullptr detaches it.
+     * The renderer defaults to unattached. The profiler outlives its use by this
+     * renderer. Passing nullptr detaches it. Each metric type retains the latest
+     * completed measurement; repeated draws replace their previous stage metrics.
      */
     void profiler(profiling::profiler_t& profiler);
     void profiler(std::nullptr_t);
@@ -118,7 +118,7 @@ public:
 private:
     framebuffer_t m_framebuffer;
     scratch_t m_scratch;
-    profiling::context_t m_context;
+    profiling::profiler_t* m_profiler = nullptr;
 };
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

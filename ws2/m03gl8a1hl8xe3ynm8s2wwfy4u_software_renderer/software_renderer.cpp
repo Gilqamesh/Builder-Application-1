@@ -15,11 +15,17 @@ software_renderer_t::software_renderer_t(framebuffer_t framebuffer):
 }
 
 void software_renderer_t::profiler(profiling::profiler_t& profiler) {
-    m_context = profiler.context();
+    if ((m_profiler && !m_profiler->quiescent()) || !profiler.quiescent()) {
+        throw std::logic_error("software_renderer_t::profiler attachment requires no active metrics in either profiler");
+    }
+    m_profiler = &profiler;
 }
 
 void software_renderer_t::profiler(std::nullptr_t) {
-    m_context = profiling::context_t();
+    if (m_profiler && !m_profiler->quiescent()) {
+        throw std::logic_error("software_renderer_t::profiler detachment requires no active metrics");
+    }
+    m_profiler = nullptr;
 }
 
 framebuffer_t& software_renderer_t::framebuffer() noexcept {
@@ -31,7 +37,7 @@ const framebuffer_t& software_renderer_t::framebuffer() const noexcept {
 }
 
 void software_renderer_t::clear_color(rgba8_t color) {
-    auto metric = m_context.metric<clear_metrics_t>(clear_target_t::color);
+    auto metric = m_profiler ? m_profiler->metric<clear_color_metrics_t>() : profiling::metric_t<clear_color_metrics_t>();
     std::ranges::fill(m_framebuffer.pixels(), color);
     if (metric) {
         metric->m_color_writes = m_framebuffer.pixels().size();
@@ -39,7 +45,7 @@ void software_renderer_t::clear_color(rgba8_t color) {
 }
 
 void software_renderer_t::clear_color(const camera_t& camera, rgba8_t color) {
-    auto metric = m_context.metric<clear_metrics_t>(clear_target_t::color);
+    auto metric = m_profiler ? m_profiler->metric<clear_color_metrics_t>() : profiling::metric_t<clear_color_metrics_t>();
     const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
     if (bounds.empty()) {
         return;
@@ -55,7 +61,7 @@ void software_renderer_t::clear_color(const camera_t& camera, rgba8_t color) {
 }
 
 void software_renderer_t::clear_depth(float depth) {
-    auto metric = m_context.metric<clear_metrics_t>(clear_target_t::depth);
+    auto metric = m_profiler ? m_profiler->metric<clear_depth_metrics_t>() : profiling::metric_t<clear_depth_metrics_t>();
     if (m_framebuffer.pixels().empty()) {
         return;
     }
@@ -69,7 +75,7 @@ void software_renderer_t::clear_depth(float depth) {
 }
 
 void software_renderer_t::clear_depth(const camera_t& camera, float depth) {
-    auto metric = m_context.metric<clear_metrics_t>(clear_target_t::depth);
+    auto metric = m_profiler ? m_profiler->metric<clear_depth_metrics_t>() : profiling::metric_t<clear_depth_metrics_t>();
     const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
     if (bounds.empty()) {
         return;
@@ -92,8 +98,8 @@ void software_renderer_t::draw(
     const camera_t& camera,
     const render_item_t& render_item
 ) {
-    auto draw_metric = m_context.metric<draw_metrics_t>();
-    auto preparation_metric = m_context.metric<preparation_metrics_t>();
+    auto draw_metric = m_profiler ? m_profiler->metric<draw_metrics_t>() : profiling::metric_t<draw_metrics_t>();
+    auto preparation_metric = m_profiler ? m_profiler->metric<preparation_metrics_t>() : profiling::metric_t<preparation_metrics_t>();
     const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
     if (bounds.empty()) {
         return;
@@ -137,9 +143,9 @@ void software_renderer_t::draw(
         }
     }
 
-    preparation_metric.close();
+    preparation_metric.stop();
     const auto indices = geometry->indices();
-    auto vertex_metric = m_context.metric<vertex_metrics_t>(indices.size());
+    auto vertex_metric = m_profiler ? m_profiler->metric<vertex_metrics_t>(indices.size()) : profiling::metric_t<vertex_metrics_t>();
     auto& scratch = m_scratch;
     scratch.m_vertex_results.clear();
     scratch.m_vertex_values.clear();
@@ -176,8 +182,8 @@ void software_renderer_t::draw(
         });
     }
 
-    vertex_metric.close();
-    auto raster_metric = m_context.metric<raster_metrics_t>();
+    vertex_metric.stop();
+    auto raster_metric = m_profiler ? m_profiler->metric<raster_metrics_t>() : profiling::metric_t<raster_metrics_t>();
     const auto vertex = [&](std::size_t index) {
         return view(scratch.m_vertex_results[index], scratch.m_vertex_values);
     };

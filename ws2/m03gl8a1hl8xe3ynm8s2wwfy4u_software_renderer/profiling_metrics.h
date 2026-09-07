@@ -6,14 +6,13 @@
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
-enum class clear_target_t { color, depth };
-
-/** @brief Counts attachment samples actually written by one clear operation. */
-struct clear_metrics_t {
-    explicit clear_metrics_t(clear_target_t target) noexcept;
-
-    clear_target_t m_target;
+/** @brief Counts color samples actually written by the latest color clear. */
+struct clear_color_metrics_t {
     std::size_t m_color_writes = 0;
+};
+
+/** @brief Counts depth samples actually written by the latest depth clear. */
+struct clear_depth_metrics_t {
     std::size_t m_depth_writes = 0;
 };
 
@@ -21,7 +20,7 @@ struct draw_metrics_t {};
 struct preparation_metrics_t {};
 
 /**
- * @brief Counts vertex invocations entered, including an invocation that throws.
+ * @brief Counts vertex invocations entered in the latest vertex measurement, including one that throws.
  *
  * Expected counts selected index entries, including repeated indices.
  */
@@ -33,7 +32,7 @@ struct vertex_metrics_t {
 };
 
 /**
- * @brief Counts fragment invocations entered and subsequent results of rasterization.
+ * @brief Counts fragment invocations and rasterization results in the latest raster measurement.
  *
  * Discards count completed invocations reporting discard. Depth rejections count
  * non-discarded samples that fail enabled depth testing. Writes count actual sample
@@ -52,10 +51,10 @@ struct raster_metrics_t {
 
 namespace std {
 template <>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_target_t>;
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_color_metrics_t>;
 
 template <>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_metrics_t>;
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_depth_metrics_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::draw_metrics_t>;
@@ -73,35 +72,35 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_metrics_t>
 
 namespace std {
 template <>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_target_t> {
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_color_metrics_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
         if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid clear_target_t format specifier");
+            throw std::format_error("invalid clear_color_metrics_t format specifier");
         }
         return it;
     }
 
-    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_target_t& clear_target, auto& ctx) const {
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_color_metrics_t& clear_color_metrics, auto& ctx) const {
         auto out = ctx.out();
-        out = std::format_to(out, "{}", clear_target == m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_target_t::color ? "color" : "depth");
+        out = std::format_to(out, "renderer.clear_color color_writes={}", clear_color_metrics.m_color_writes);
         return out;
     }
 };
 
 template <>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_metrics_t> {
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_depth_metrics_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
         if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid clear_metrics_t format specifier");
+            throw std::format_error("invalid clear_depth_metrics_t format specifier");
         }
         return it;
     }
 
-    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_metrics_t& clear_metrics, auto& ctx) const {
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_depth_metrics_t& clear_depth_metrics, auto& ctx) const {
         auto out = ctx.out();
-        out = std::format_to(out, "renderer.clear_{} color_writes={}, depth_writes={}", clear_metrics.m_target, clear_metrics.m_color_writes, clear_metrics.m_depth_writes);
+        out = std::format_to(out, "renderer.clear_depth depth_writes={}", clear_depth_metrics.m_depth_writes);
         return out;
     }
 };
