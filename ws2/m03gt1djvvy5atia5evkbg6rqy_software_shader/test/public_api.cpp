@@ -444,15 +444,14 @@ void expect_io_round_trip(
     std::uint32_t location,
     const T& value
 ) {
-    vertex_io.input(location, value);
-    vertex_io.output(location + 100, value);
-    test::expect(std::equal_to<>(), vertex_io.input<T>(location), value);
-    test::expect(std::equal_to<>(), *vertex_io.output<T>(location + 100), value);
-
-    fragment_io.input(location, value);
-    fragment_io.output(location + 100, value);
-    test::expect(std::equal_to<>(), fragment_io.input<T>(location), value);
-    test::expect(std::equal_to<>(), *fragment_io.output<T>(location + 100), value);
+    const auto check = [&](auto& io) {
+        io.input(location, value);
+        io.output(location + 100, value);
+        test::expect(std::equal_to<>(), io.template input<T>(location), value);
+        test::expect(std::equal_to<>(), *io.template output<T>(location + 100), value);
+    };
+    check(vertex_io);
+    check(fragment_io);
 }
 
 void test_complete_io_value_storage() {
@@ -489,6 +488,26 @@ void test_complete_io_value_storage() {
     check(shader::matrix_t<float, 4, 2>({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F}));
     check(shader::matrix_t<float, 4, 3>({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F, 9.0F, 10.0F, 11.0F, 12.0F}));
     check(shader::matrix_t<float, 4, 4>({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F, 9.0F, 10.0F, 11.0F, 12.0F, 13.0F, 14.0F, 15.0F, 16.0F}));
+
+    const auto check_replacement = [](auto& io) {
+        test::expect_throws<std::invalid_argument>([&] { (void)io.template input<float>(999); });
+        test::expect(std::logical_not<>(), io.template output<float>(999).has_value());
+        io.input(999, 1.0F);
+        io.output(999, 2.0F);
+        test::expect_throws<std::invalid_argument>([&] { (void)io.template input<bool>(999); });
+        test::expect_throws<std::invalid_argument>([&] { (void)io.template output<bool>(999); });
+        io.input(999, false);
+        io.output(999, false);
+        test::expect(std::equal_to<>(), io.template input<bool>(999), false);
+        test::expect(std::equal_to<>(), io.template output<bool>(999).value(), false);
+        test::expect_throws<std::invalid_argument>([&] { (void)io.template input<float>(999); });
+        test::expect_throws<std::invalid_argument>([&] { (void)io.template output<float>(999); });
+        io.clear_results();
+        test::expect(std::equal_to<>(), io.template input<bool>(999), false);
+        test::expect(std::logical_not<>(), io.template output<bool>(999).has_value());
+    };
+    check_replacement(vertex_io);
+    check_replacement(fragment_io);
 }
 
 void test_value_operations_and_builtins() {

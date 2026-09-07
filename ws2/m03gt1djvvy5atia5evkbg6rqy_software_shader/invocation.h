@@ -1,10 +1,10 @@
 #ifndef M03GT1DJVVY5ATIA5EVKBG6RQY_SOFTWARE_SHADER_INVOCATION_H
 # define M03GT1DJVVY5ATIA5EVKBG6RQY_SOFTWARE_SHADER_INVOCATION_H
 
+# include "helpers.h"
 # include "value.h"
 # include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
 
-# include <algorithm>
 # include <any>
 # include <cstddef>
 # include <cstdint>
@@ -191,102 +191,50 @@ std::remove_cvref_t<T> bindings_t::uniform(std::uint32_t binding) const {
 
 template <shader::shader_value T>
 void vertex_io_t::input(std::uint32_t location, T input) {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_inputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_inputs.end()) {
-        m_inputs.emplace_back(location, value_t(type(std::move(input))));
-    } else {
-        iterator->second = type(std::move(input));
-    }
+    write_value(m_inputs, location, std::remove_cvref_t<T>(std::move(input)));
 }
 
 template <shader::shader_value T>
 std::remove_cvref_t<T> vertex_io_t::input(std::uint32_t location) const {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_inputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_inputs.end()) {
-        throw std::invalid_argument(std::format("software shader vertex input location {} is missing", location));
-    }
-    const auto* input = std::get_if<type>(&iterator->second);
+    const auto input = read_value<T>(m_inputs, location, "vertex input");
     if (!input) {
-        throw std::invalid_argument(std::format("software shader vertex input location {} has the wrong type", location));
+        throw std::invalid_argument(std::format("software shader vertex input location {} is missing", location));
     }
     return *input;
 }
 
 template <shader::shader_value T>
 void vertex_io_t::output(std::uint32_t location, T output) {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_outputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_outputs.end()) {
-        m_outputs.emplace_back(location, value_t(type(std::move(output))));
-    } else {
-        iterator->second = type(std::move(output));
-    }
+    write_value(m_outputs, location, std::remove_cvref_t<T>(std::move(output)));
 }
 
 template <shader::shader_value T>
 std::optional<std::remove_cvref_t<T>> vertex_io_t::output(std::uint32_t location) const {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_outputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_outputs.end()) {
-        return std::nullopt;
-    }
-    const auto* output = std::get_if<type>(&iterator->second);
-    if (!output) {
-        throw std::invalid_argument(std::format("software shader vertex output location {} has the wrong type", location));
-    }
-    return *output;
+    return read_value<T>(m_outputs, location, "vertex output");
 }
 
 template <shader::shader_value T>
 void fragment_io_t::input(std::uint32_t location, T input) {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_inputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_inputs.end()) {
-        m_inputs.emplace_back(location, value_t(type(std::move(input))));
-    } else {
-        iterator->second = type(std::move(input));
-    }
+    write_value(m_inputs, location, std::remove_cvref_t<T>(std::move(input)));
 }
 
 template <shader::shader_value T>
 std::remove_cvref_t<T> fragment_io_t::input(std::uint32_t location) const {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_inputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_inputs.end()) {
-        throw std::invalid_argument(std::format("software shader fragment input location {} is missing", location));
-    }
-    const auto* input = std::get_if<type>(&iterator->second);
+    const auto input = read_value<T>(m_inputs, location, "fragment input");
     if (!input) {
-        throw std::invalid_argument(std::format("software shader fragment input location {} has the wrong type", location));
+        throw std::invalid_argument(std::format("software shader fragment input location {} is missing", location));
     }
     return *input;
 }
 
 template <shader::shader_value T>
 void fragment_io_t::output(std::uint32_t location, T output) {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_outputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_outputs.end()) {
-        m_outputs.emplace_back(location, value_t(type(std::move(output))));
-    } else {
-        iterator->second = type(std::move(output));
-    }
+    write_value(m_outputs, location, std::remove_cvref_t<T>(std::move(output)));
 }
 
 template <shader::shader_value T>
 std::optional<std::remove_cvref_t<T>> fragment_io_t::output(std::uint32_t location) const {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_outputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_outputs.end()) {
-        return std::nullopt;
-    }
-    const auto* output = std::get_if<type>(&iterator->second);
-    if (!output) {
-        throw std::invalid_argument(std::format("software shader fragment output location {} has the wrong type", location));
-    }
-    return *output;
+    return read_value<T>(m_outputs, location, "fragment output");
 }
 
 } // namespace m03gt1djvvy5atia5evkbg6rqy_software_shader
