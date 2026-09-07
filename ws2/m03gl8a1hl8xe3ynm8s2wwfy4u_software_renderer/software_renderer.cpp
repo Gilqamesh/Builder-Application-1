@@ -247,6 +247,36 @@ void software_renderer_t::draw(
     const auto vertex = [&](std::size_t index) {
         return view(scratch.m_vertex_results[index], scratch.m_vertex_values, scratch.m_flat_values);
     };
+    const auto submit_line = [&](std::size_t first, std::size_t second) {
+        rasterize_line(
+            *material,
+            bounds,
+            framebuffer,
+            vertex(first),
+            vertex(second),
+            scratch.m_clipping,
+            scratch.m_fragment_inputs,
+            scratch.m_fragment_io,
+            scratch.m_execution_context,
+            raster_metric
+        );
+    };
+    const auto submit_triangle = [&](std::size_t first, std::size_t second, std::size_t third, std::size_t provoking) {
+        rasterize_triangle(
+            *material,
+            bounds,
+            framebuffer,
+            vertex(first),
+            vertex(second),
+            vertex(third),
+            scratch.m_raster,
+            scratch.m_fragment_inputs,
+            scratch.m_fragment_io,
+            scratch.m_execution_context,
+            raster_metric,
+            vertex(provoking).m_flat_outputs
+        );
+    };
     switch (geometry->primitive_topology()) {
         case vertex_primitive_topology_t::point: {
             for (std::size_t index = 0; index < indices.size(); ++index) {
@@ -264,121 +294,39 @@ void software_renderer_t::draw(
         } break;
         case vertex_primitive_topology_t::line: {
             for (std::size_t index = 0; index + 1 < indices.size(); index += 2) {
-                rasterize_line(
-                    *material,
-                    bounds,
-                    framebuffer,
-                    vertex(index),
-                    vertex(index + 1),
-                    scratch.m_clipping,
-                    scratch.m_fragment_inputs,
-                    scratch.m_fragment_io,
-                    scratch.m_execution_context,
-                    raster_metric
-                );
+                submit_line(index, index + 1);
             }
         } break;
         case vertex_primitive_topology_t::line_strip: {
             for (std::size_t index = 0; index + 1 < indices.size(); ++index) {
-                rasterize_line(
-                    *material,
-                    bounds,
-                    framebuffer,
-                    vertex(index),
-                    vertex(index + 1),
-                    scratch.m_clipping,
-                    scratch.m_fragment_inputs,
-                    scratch.m_fragment_io,
-                    scratch.m_execution_context,
-                    raster_metric
-                );
+                submit_line(index, index + 1);
             }
         } break;
         case vertex_primitive_topology_t::line_loop: {
             for (std::size_t index = 0; index < indices.size(); ++index) {
-                rasterize_line(
-                    *material,
-                    bounds,
-                    framebuffer,
-                    vertex(index),
-                    vertex((index + 1) % indices.size()),
-                    scratch.m_clipping,
-                    scratch.m_fragment_inputs,
-                    scratch.m_fragment_io,
-                    scratch.m_execution_context,
-                    raster_metric
-                );
+                submit_line(index, (index + 1) % indices.size());
             }
         } break;
         case vertex_primitive_topology_t::triangle: {
             for (std::size_t index = 0; index + 2 < indices.size(); index += 3) {
-                rasterize_triangle(
-                    *material,
-                    bounds,
-                    framebuffer,
-                    vertex(index),
-                    vertex(index + 1),
-                    vertex(index + 2),
-                    scratch.m_raster,
-                    scratch.m_fragment_inputs,
-                    scratch.m_fragment_io,
-                    scratch.m_execution_context,
-                    raster_metric,
-                    vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2).m_flat_outputs
-                );
+                const auto provoking = material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2;
+                submit_triangle(index, index + 1, index + 2, provoking);
             }
         } break;
         case vertex_primitive_topology_t::triangle_strip: {
             for (std::size_t index = 0; index + 2 < indices.size(); ++index) {
+                const auto provoking = material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2;
                 if (index % 2 == 0) {
-                    rasterize_triangle(
-                        *material,
-                        bounds,
-                        framebuffer,
-                        vertex(index + 1),
-                        vertex(index),
-                        vertex(index + 2),
-                        scratch.m_raster,
-                        scratch.m_fragment_inputs,
-                        scratch.m_fragment_io,
-                        scratch.m_execution_context,
-                        raster_metric,
-                        vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2).m_flat_outputs
-                    );
+                    submit_triangle(index + 1, index, index + 2, provoking);
                 } else {
-                    rasterize_triangle(
-                        *material,
-                        bounds,
-                        framebuffer,
-                        vertex(index),
-                        vertex(index + 1),
-                        vertex(index + 2),
-                        scratch.m_raster,
-                        scratch.m_fragment_inputs,
-                        scratch.m_fragment_io,
-                        scratch.m_execution_context,
-                        raster_metric,
-                        vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2).m_flat_outputs
-                    );
+                    submit_triangle(index, index + 1, index + 2, provoking);
                 }
             }
         } break;
         case vertex_primitive_topology_t::triangle_fan: {
             for (std::size_t index = 1; index + 1 < indices.size(); ++index) {
-                rasterize_triangle(
-                    *material,
-                    bounds,
-                    framebuffer,
-                    vertex(0),
-                    vertex(index),
-                    vertex(index + 1),
-                    scratch.m_raster,
-                    scratch.m_fragment_inputs,
-                    scratch.m_fragment_io,
-                    scratch.m_execution_context,
-                    raster_metric,
-                    vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 1).m_flat_outputs
-                );
+                const auto provoking = material->provoking_vertex() == provoking_vertex_t::first ? index : index + 1;
+                submit_triangle(0, index, index + 1, provoking);
             }
         } break;
     }
