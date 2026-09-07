@@ -147,9 +147,13 @@ public:
     template <shader_type T, shader_expression_structure Node>
     shader_expression_t<T> expression(std::unique_ptr<Node> expression);
 
+    /** @brief Declares an input with perspective interpolation. */
     template <shader_value T>
+    shader_expression_t<T> input(std::uint32_t location);
+
     /** @brief Declares an input; non-default interpolation is available only in fragment shaders. */
-    shader_expression_t<T> input(std::uint32_t location, interpolation_t interpolation = interpolation_t::perspective);
+    template <shader_value T>
+    shader_expression_t<T> input(std::uint32_t location, interpolation_t interpolation);
 
     template <shader_value T>
     void output(std::uint32_t location, shader_expression_t<T> expression);
@@ -294,7 +298,8 @@ private:
 
 class shader_input_node_t final : public shader_expression_node_t {
 public:
-    shader_input_node_t(shader_data_type_t type, std::uint32_t location, interpolation_t interpolation = interpolation_t::perspective);
+    shader_input_node_t(shader_data_type_t type, std::uint32_t location);
+    shader_input_node_t(shader_data_type_t type, std::uint32_t location, interpolation_t interpolation);
     std::uint32_t location() const;
     interpolation_t interpolation() const;
     void accept(shader_ast_visitor_t& visitor) const override;
@@ -521,6 +526,11 @@ shader_expression_t<T> shader_ast_builder_t::expression(std::unique_ptr<Node> ex
         throw std::invalid_argument("shader expression result type does not match its handle");
     }
     return {this, this->expression(std::move(expression))};
+}
+
+template <shader_value T>
+shader_expression_t<T> shader_ast_builder_t::input(std::uint32_t location) {
+    return input<T>(location, interpolation_t::perspective);
 }
 
 template <shader_value T>

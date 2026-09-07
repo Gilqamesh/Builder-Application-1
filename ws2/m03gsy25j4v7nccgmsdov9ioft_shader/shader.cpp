@@ -826,6 +826,11 @@ shader_constant_node_t::shader_constant_node_t(shader_literal_t value):
 const shader_literal_t& shader_constant_node_t::value() const { return m_value; }
 void shader_constant_node_t::accept(shader_ast_visitor_t& visitor) const { visitor.visit(*this); }
 
+shader_input_node_t::shader_input_node_t(shader_data_type_t type, std::uint32_t location):
+    shader_input_node_t(type, location, interpolation_t::perspective)
+{
+}
+
 shader_input_node_t::shader_input_node_t(shader_data_type_t type, std::uint32_t location, interpolation_t interpolation):
     shader_expression_node_t(type),
     m_location(location),
