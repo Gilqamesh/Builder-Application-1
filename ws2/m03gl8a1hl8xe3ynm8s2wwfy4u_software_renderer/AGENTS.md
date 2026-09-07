@@ -31,12 +31,12 @@ assembly within those classes.
 - Planar scenes use the same 3D model with an orthographic camera and explicit
   placement. Maintain one camera model and one public drawing API.
 
-- Profiling is an application-selected template policy. Applications register
-  renderer and application regions before capture and lend the shared profiler
-  to measured renderers. Renderer metrics and boundaries remain owned here;
-  collection and reporting belong to
+- Profiling attaches an application-owned collector to the ordinary renderer at
+  quiescent boundaries. The default context is unattached. Renderer metrics,
+  formatters, counter meanings, and stage boundaries remain owned here; collection,
+  payload lifetimes, and reporting belong to
   [`profiling`](../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md).
-  Disabled policies discard counter work and construct no metric payloads.
+  Only counter updates depend on active handles; rendering always executes.
 
 ## Validation
 

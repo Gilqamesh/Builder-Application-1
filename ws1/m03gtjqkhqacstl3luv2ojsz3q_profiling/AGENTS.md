@@ -2,29 +2,36 @@
 
 ## Purpose
 
-Collect synchronous nested timings and producer-defined performance counters,
-then traverse the captured hierarchy for deferred reporting.
+Collect synchronous nested timings and producer-defined metrics, then traverse
+retained heterogeneous payloads for deferred reporting.
 
-Applications own capture storage, capture periods, and report destinations.
-Producers own regions, payload types, counter meanings, and payload formatters.
-This module owns region registration, timing, nesting, collection, and generic
-report traversal. See [the public contract](api.h).
+Applications own capture storage, capture periods, attachments, and report
+destinations. Producers own payload types, constructors, counter meanings,
+formatters, and measurement boundaries. This module owns timing, nesting, retained
+payload lifetimes, and generic reporting. See [the public contract](api.h).
 
 ## Invariants
 
-- Region setup precedes capture. Enabled profilers own immutable registered
-  metadata through reporting; capture resets preserve registration.
-- Each profiler records on one thread with synchronous, strictly nested scopes.
-  Collection borrows fixed-capacity application storage and performs no allocation,
-  formatting, I/O, or locking. Producer payload operations must preserve this rule.
-- Overflow omits a scope and its descendants while preserving retained hierarchy
-  and reporting omissions. Exceptional unwinding preserves partial observations.
-- A `void` report policy disables profiling at compilation, including payload
-  construction and formatter requirements. Producers discard counter work through
-  dependent compile-time branches.
+- The ordinary collector borrows fixed-capacity application byte storage. Ordinary
+  producer contexts borrow the collector; default contexts are unattached.
+- Each collector records on one thread with synchronous, strictly nested measurements.
+  Collection performs no profiler-owned allocation, formatting, I/O, or locking.
+  Producer payload operations and counter updates preserve the allocation rule.
+- Typed measurements construct payloads directly in aligned, stable storage. Closure
+  retains payloads through reporting; reset and destruction release them.
+- Exhaustion suppresses an omitted measurement and its descendants while preserving
+  retained hierarchy and reporting every omission. False suppressed handles still
+  close their bookkeeping. Exceptional unwinding preserves partial observations.
+- Unattached contexts construct no payloads and read no clock. Formatter and
+  nonthrowing construction/destruction requirements apply at compilation even
+  when recording will be unattached. Caller argument expressions still evaluate.
+- Reads, reports, resets, and attachment changes occur without active measurements.
+  Reset preserves contexts and invalidates retained views. Payload borrowing lasts
+  through deferred use; the collector and storage outlive active handles.
 
 ## Validation
 
-Headless public validation covers lifecycle, nesting, overflow, reporting, and
-disabled policies. Producers validate their own counter meanings and unchanged
-observable behavior with both policies in the same executable.
+Headless validation covers lifecycle, heterogeneous types, deferred formatting and
+payload destruction, alignment, nesting, exhaustion, attachment changes, and
+inactive contexts. Producers validate their counters and unchanged observable
+behavior with attached and unattached instances of the same ordinary class.

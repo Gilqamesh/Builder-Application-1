@@ -121,7 +121,7 @@ int main() {
 
         std::vector<rgba8_t> pixels;
         std::vector<float> depth;
-        software_renderer_api::software_renderer_t<> renderer(software_renderer_api::framebuffer_t(pixels, 0, 0));
+        software_renderer_api::software_renderer_t software_renderer(software_renderer_api::framebuffer_t(pixels, 0, 0));
         opengl_renderer_api::opengl_renderer_t opengl_renderer(window);
         auto material = std::make_shared<software_renderer_api::material_t>(make_program());
         material->texture(0, make_texture());
@@ -154,21 +154,21 @@ int main() {
             glfw_api::poll_events();
 
             const auto size = window->framebuffer_size();
-            auto framebuffer = renderer.framebuffer();
+            auto framebuffer = software_renderer.framebuffer();
             if (framebuffer.width() != size[0] || framebuffer.height() != size[1]) {
                 pixels.resize(software_renderer_api::framebuffer_t::pixel_count(size[0], size[1]));
                 depth.resize(pixels.size());
                 software_renderer_api::framebuffer_t replacement(pixels, size[0], size[1]);
                 replacement.depth(depth);
-                renderer.framebuffer() = replacement;
-                framebuffer = renderer.framebuffer();
+                software_renderer.framebuffer() = replacement;
+                framebuffer = software_renderer.framebuffer();
             }
 
             if (framebuffer.width() == 0 || framebuffer.height() == 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             } else {
-                renderer.clear_color({0, 0, 0, 255});
-                renderer.clear_depth(1.0F);
+                software_renderer.clear_color({0, 0, 0, 255});
+                software_renderer.clear_depth(1.0F);
                 render_item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0.25F, seconds * 0.35F, 0.0F}));
                 render_item.translation() = {-0.15F, 0.0F, -1.1F + 0.25F * std::sin(seconds * 0.4F)};
                 const software_renderer_api::camera_t camera(
@@ -177,11 +177,11 @@ int main() {
                 );
                 // Alternate submission order while the surfaces intersect and cross the near plane.
                 if (static_cast<int>(seconds) % 2 == 0) {
-                    renderer.draw(camera, render_item);
-                    renderer.draw(camera, second_item);
+                    software_renderer.draw(camera, render_item);
+                    software_renderer.draw(camera, second_item);
                 } else {
-                    renderer.draw(camera, second_item);
-                    renderer.draw(camera, render_item);
+                    software_renderer.draw(camera, second_item);
+                    software_renderer.draw(camera, render_item);
                 }
                 opengl_renderer.present_rgba8(
                     std::as_bytes(std::span<const rgba8_t>(pixels)),

@@ -133,7 +133,7 @@ algorithmic optimization is unstarted. See [the measurement path](profiling.md)
 and [baseline evidence](profiling-baseline.md).
 
 - Outcome: each optimization delivery demonstrates its effect through repeatable measurements while preserving rendering correctness.
-- Measurement ownership: [`profiling`](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md) owns nested timing/counter collection and deferred report traversal. The renderer owns its metrics and template-policy integration. Its benchmark driver owns workloads, repeated-run summaries, and comparisons; applications own shared profiler instances and capture storage.
+- Measurement ownership: [`profiling`](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md) owns nested timing/counter collection and deferred report traversal. The renderer owns its metrics and runtime attachment integration. Its benchmark driver owns workloads, repeated-run summaries, and comparisons; applications own shared profiler instances and capture storage.
 - Metrics: track median and high-percentile elapsed render time and process peak RSS across stable headless workloads. The benchmark records precise timing and memory scopes. Keep these scopes consistent across deliveries. Current Builder runs use its default build; dependency-wide optimization and a new optimized baseline remain deferred.
 - Comparisons: record workload, resolution, rendering settings, hardware, build configuration, and source revision. Report absolute results, percentage changes, and run-to-run variation against both the previous delivery and the established baseline. New feature workloads establish their own baselines.
 - Delivery process: use measured results to select each bounded optimization. Every delivery includes the same comparison report and correctness evidence, making improvements, regressions, and tradeoffs visible. Specific optimization techniques remain undecided until measurements justify them.
@@ -404,8 +404,8 @@ was visually checked; performance was not benchmarked.
 
 ### Profiling and initial optimized baseline — 2026-09-06
 
-The `profiling` module and `software_renderer_t<Profiler>` integration implement
-the settled capture, registration, lifetime, overflow, deferred formatting, and
+The initial `profiling` module and `software_renderer_t<Profiler>` integration implemented
+the then-settled capture, registration, lifetime, overflow, deferred formatting, and
 disabled-policy contracts. Application and renderer scopes share one application
 profiler, with explicit region registration before capture. The tower-defense
 consumer and renderer demo select the default disabled template policy.
@@ -431,7 +431,17 @@ Native public validation, independent summary checks, constructor/formatter/comp
 checks, target reuse, and both graphical smoke checks passed. See the
 [migration validation record](profiling-migration.md) for exact commands and limits.
 The original optimized raw baseline is unchanged. General dependency optimization
-and a new optimized baseline remain deferred. These changes are in the working tree.
+and a new optimized baseline remain deferred. These changes were committed as `13888dd`.
+
+### Runtime-attached profiling — 2026-09-07
+
+The ordinary renderer borrows an application-owned collector through an attachment
+setter. Typed nullable scopes replace template policies and region registration.
+Payloads remain in borrowed byte storage through deferred reporting; reset releases
+them while preserving attachments. Renderer stage boundaries and counter meanings
+are preserved, and the benchmark compares attached and unattached instances of the
+same renderer class. See [the current profiling contract and caller](profiling.md).
+
 
 ## Deferred scope
 

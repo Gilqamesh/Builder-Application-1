@@ -810,4 +810,215 @@ bool depth_passes(comparison_t comparison, float incoming, float stored) {
     throw std::invalid_argument(std::format("software_renderer_t::draw has invalid depth comparison {}", comparison));
 }
 
+void shade_sample(
+    const material_t& material,
+    const raster_bounds_t& bounds,
+    const framebuffer_t& framebuffer,
+    std::int64_t x,
+    std::int64_t y,
+    float depth,
+    float reciprocal_w,
+    bool front_facing,
+    std::span<const varying_entry_t> inputs,
+    software_shader::fragment_io_t& io,
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+) {
+    if (x < bounds.m_first_x || y < bounds.m_first_y || bounds.m_end_x <= x || bounds.m_end_y <= y) {
+        return;
+    }
+
+    x += bounds.m_x;
+    y += bounds.m_y;
+    depth = std::clamp(depth, 0.0F, 1.0F);
+    io.reset(
+        vector4f_t({static_cast<float>(x) + 0.5F,
+            static_cast<float>(y) + 0.5F,
+            depth,
+            reciprocal_w}),
+        front_facing
+    );
+    set_fragment_inputs(io, inputs);
+    if (metric) {
+        ++metric->m_invocations;
+    }
+    material.program()->run(material.bindings(), io);
+    if (io.discarded()) {
+        if (metric) {
+            ++metric->m_discards;
+        }
+        return;
+    }
+    const auto index = static_cast<std::size_t>(y) * static_cast<std::size_t>(bounds.m_width) + static_cast<std::size_t>(x);
+    if (material.depth_test()) {
+        const auto comparison = material.depth_compare();
+        const bool passes = comparison == comparison_t::always || (comparison != comparison_t::never && depth_passes(comparison, depth, framebuffer.depth()[index]));
+        if (!passes) {
+            if (metric) {
+                ++metric->m_depth_rejections;
+            }
+            return;
+        }
+        if (material.depth_write()) {
+            framebuffer.depth()[index] = depth;
+            if (metric) {
+                ++metric->m_depth_writes;
+            }
+        }
+    }
+    if (const auto color = io.color()) {
+        framebuffer.pixels()[index] = to_rgba8(*color);
+        if (metric) {
+            ++metric->m_color_writes;
+        }
+    }
+}
+
+void rasterize_point(
+    const material_t& material,
+    const raster_bounds_t& bounds,
+    const framebuffer_t& framebuffer,
+    const pipeline_vertex_view_t& vertex,
+    varying_values_t& fragment_inputs,
+    software_shader::fragment_io_t& fragment_io,
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+) {
+    if (!inside_clip_volume(vertex)) {
+        return;
+    }
+    const auto screen = project(vertex, bounds.m_view_width, bounds.m_view_height);
+    if (!screen) {
+        return;
+    }
+
+    constexpr int radius = 3;
+    constexpr int radius_squared = radius * radius;
+    const auto center_x = static_cast<std::int64_t>(std::floor(screen->m_x));
+    const auto center_y = static_cast<std::int64_t>(std::floor(screen->m_y));
+    const float depth = screen->m_ndc_z * 0.5F + 0.5F;
+    for (auto y = center_y - radius; y <= center_y + radius; ++y) {
+        for (auto x = center_x - radius; x <= center_x + radius; ++x) {
+            const auto dx = x - center_x;
+            const auto dy = y - center_y;
+            if (dx * dx + dy * dy <= radius_squared) {
+                fragment_inputs.assign(screen->m_outputs.begin(), screen->m_outputs.end());
+                shade_sample(
+                    material,
+                    bounds,
+                    framebuffer,
+                    x,
+                    y,
+                    depth,
+                    screen->m_reciprocal_w,
+                    true,
+                    fragment_inputs,
+                    fragment_io,
+                    metric
+                );
+            }
+        }
+    }
+}
+
+void rasterize_line(
+    const material_t& material,
+    const raster_bounds_t& bounds,
+    const framebuffer_t& framebuffer,
+    const pipeline_vertex_view_t& first,
+    const pipeline_vertex_view_t& second,
+    clipping_workspace_t& clipping,
+    varying_values_t& fragment_inputs,
+    software_shader::fragment_io_t& fragment_io,
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+) {
+    const auto clipped_index = clip_line(first, second, clipping);
+    if (!clipped_index) {
+        return;
+    }
+    const auto& clipped = clipping.m_buffers[*clipped_index];
+    const auto clipped_first = view(clipped.m_vertices[0], clipped.m_values);
+    const auto clipped_second = view(clipped.m_vertices[1], clipped.m_values);
+    const auto first_screen = project(clipped_first, bounds.m_view_width, bounds.m_view_height);
+    const auto second_screen = project(clipped_second, bounds.m_view_width, bounds.m_view_height);
+    if (!first_screen || !second_screen) {
+        return;
+    }
+
+    // Direct evaluation of inclusive Bresenham samples lets us skip invisible
+    // major-axis steps without changing endpoint rounding or tie ownership.
+    const auto start_x = std::int64_t(std::floor(first_screen->m_x));
+    const auto start_y = std::int64_t(std::floor(first_screen->m_y));
+    const auto target_x = std::int64_t(std::floor(second_screen->m_x));
+    const auto target_y = std::int64_t(std::floor(second_screen->m_y));
+    const auto dx = std::abs(target_x - start_x), dy = std::abs(target_y - start_y);
+    const std::int64_t step_x = start_x < target_x ? 1 : -1, step_y = start_y < target_y ? 1 : -1;
+    const bool horizontal = dy <= dx;
+    const auto major = horizontal ? dx : dy, minor = horizontal ? dy : dx;
+    const auto start = horizontal ? start_x : start_y, step = horizontal ? step_x : step_y;
+    const auto first_pixel = horizontal ? bounds.m_first_x : bounds.m_first_y;
+    const auto end = horizontal ? bounds.m_end_x : bounds.m_end_y;
+    const auto first_step = std::max<std::int64_t>(0, step == 1 ? first_pixel - start : start - end + 1);
+    const auto last_step = std::min(major, step == 1 ? end - 1 - start : start - first_pixel);
+    const std::array<projected_vertex_t, 2> endpoints {{
+        {{0, 0}, first_screen->m_ndc_z, first_screen->m_reciprocal_w, clipped_first},
+        {{0, 0}, second_screen->m_ndc_z, second_screen->m_reciprocal_w, clipped_second}
+    }};
+    const double line_x = second_screen->m_x - first_screen->m_x;
+    const double line_y = second_screen->m_y - first_screen->m_y;
+    const double length_squared = line_x * line_x + line_y * line_y;
+    for (auto i = first_step; i <= last_step; ++i) {
+        const auto offset = major == 0 ? 0 : std::int64_t((edge_value_t(i) * minor + major / 2) / major);
+        const auto x = start_x + step_x * (horizontal ? i : offset);
+        const auto y = start_y + step_y * (horizontal ? offset : i);
+        double factor = 0.0;
+        if (length_squared != 0.0) {
+            factor = ((double(x) + 0.5 - first_screen->m_x) * line_x + (double(y) + 0.5 - first_screen->m_y) * line_y) / length_squared;
+            factor = std::clamp(factor, 0.0, 1.0);
+        }
+        const sample_t sample {x, y, {0, 1, 0, 0}, {1.0 - factor, factor, 0.0, 0.0}, 2};
+        const auto depth_w = interpolate_sample(endpoints, sample, fragment_inputs);
+        shade_sample(material, bounds, framebuffer, x, y, float(depth_w[0]), float(depth_w[1]), true, fragment_inputs, fragment_io, metric);
+    }
+}
+
+void rasterize_triangle(
+    const material_t& material,
+    const raster_bounds_t& bounds,
+    const framebuffer_t& framebuffer,
+    const pipeline_vertex_view_t& first,
+    const pipeline_vertex_view_t& second,
+    const pipeline_vertex_view_t& third,
+    raster_workspace_t& workspace,
+    varying_values_t& fragment_inputs,
+    software_shader::fragment_io_t& fragment_io,
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t<raster_metrics_t>& metric
+) {
+    prepare_triangle(first, second, third, bounds.m_view_width, bounds.m_view_height, workspace);
+    if (workspace.m_empty) {
+        return;
+    }
+    // Geometric winding also drives triangulation. Derive the material's effective
+    // facing separately so a front-face selection cannot change sample coverage.
+    const bool front_facing = workspace.m_front_facing == (material.front_face() == winding_t::counter_clockwise);
+    const auto cull = material.cull();
+    if (cull == cull_mode_t::both || (cull == cull_mode_t::front && front_facing) || (cull == cull_mode_t::back && !front_facing)) {
+        return;
+    }
+    visit_samples(workspace, bounds.m_end_x, bounds.m_end_y, [&](const sample_t& sample) {
+        const auto depth_w = interpolate_sample(workspace.m_vertices, sample, fragment_inputs);
+        shade_sample(
+            material,
+            bounds,
+            framebuffer,
+            sample.m_x,
+            sample.m_y,
+            float(depth_w[0]),
+            float(depth_w[1]),
+            front_facing,
+            fragment_inputs,
+            fragment_io,
+            metric
+        );
+    }, bounds.m_first_x, bounds.m_first_y);
+}
+
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
