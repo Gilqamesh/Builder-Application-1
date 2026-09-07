@@ -72,8 +72,10 @@ lookup, allocation, construction, clock reads, and update callbacks.
 [profiling_metrics.h](../profiling_metrics.h) owns renderer counters and formatters.
 Counters accumulate per metric path, including partial work before exceptions.
 Vertex counters count entered calls and expected selected indices. Raster counters
-count fragment invocations, discards, depth rejections, and actual color/depth
-writes. Color writes count once per sample when at least one channel is assigned,
+count fragment invocations, discards, stencil/depth rejections, and actual
+color/depth/stencil writes. Stencil keep and a zero write mask count no writes;
+other operations count assignments even when the stored byte is unchanged. Stencil
+clears have a separate metric type. Color writes count once per sample when at least one channel is assigned,
 even if bytes are unchanged; an all-disabled mask counts zero. Both rejection percentages use fragment invocations as the denominator;
 zero invocations reports `n/a`. Draw and preparation contain timing only.
 
@@ -110,7 +112,7 @@ application.frame                 1    1 ms    1 ms    1 ms    1 ms    1 ms    0
 └─ renderer.draw                  2  400 us  300 us  350 us  400 us  700 us   10 us
    ├─ renderer.preparation        2   20 us   10 us   15 us   20 us   30 us  380 us
    ├─ renderer.vertices           2   50 us   30 us   40 us   50 us   80 us  320 us  vertex_invocations=12, expected=12
-   └─ renderer.rasterization      2  300 us  250 us  275 us  300 us  550 us   15 us  fragment_invocations=20, discards=0, depth_rejections=0, color_writes=20, depth_writes=20, discarded=0.0%, depth_rejected=0.0%
+   └─ renderer.rasterization      2  300 us  250 us  275 us  300 us  550 us   15 us  fragment_invocations=20, discards=0, stencil_rejections=0, stencil_writes=0, depth_rejections=0, color_writes=20, depth_writes=20, discarded=0.0%, depth_rejected=0.0%
 ```
 
 Inclusive totals already contain child durations. A skipped stage retains its
@@ -159,9 +161,13 @@ and a new optimized baseline are deferred. The [historical optimized baseline](p
 remains available with its [unchanged raw data](profiling-baseline.json).
 
 The coordinator starts a fresh copy of its installed binary for each workload.
-Workload version 2 preserves textured fill, depth overdraw, many small draws, and
-clipping from version 1. It adds four-layer translucent overdraw with linear and
-sRGB attachments; these feature workloads establish their own baselines. Each
+Workload version 3 preserves the six workloads from versions 1 and 2. It adds
+`stencil_mask` and `two_pass_linear`/`two_pass_srgb`. The mask draw populates stencil
+inside a smaller quad, then scene draws test that mask. Two-pass workloads render
+four translucent layers into a texture-owned target and composite its premultiplied
+result onto a separate output. Allocation, view validation, and bindings occur at
+setup; timed frames include stencil clears/mask draws, target selection, both passes,
+and output clearing. New feature workloads establish their own baselines. Each
 worker writes a JSON result and a text report with current data and timing statistics.
 The coordinator writes `metadata.json` before the workers run and `results.json`
 after all workers succeed.
@@ -185,7 +191,8 @@ cumulative frame and draw counters with timing statistics across all enabled
 measurements, including warm-up. These totals cover more observations than the
 sample-only benchmark summaries. Metadata records that distinction. Both
 configurations receive warm-up before each run; their execution order alternates.
-Every pair is checked for identical color and depth output.
+Every pair is checked for identical color, depth, stencil, and offscreen texture bytes
+where present.
 
 Peak RSS uses Linux `/proc/self/status` `VmHWM` through workload measurement and the
 text report, including setup, warm-up, and both configurations. Summary construction
@@ -201,3 +208,6 @@ regression against that baseline.
 
 Milestone 3 has a [matching before/after comparison](blending-performance.md) with
 [raw data](blending-performance.json), including the new translucent workloads.
+
+Milestone 4 has [matching before/after measurements](milestone-4-performance.md)
+and [raw evidence](milestone-4-performance.json) for stencil and direct two-pass rendering.

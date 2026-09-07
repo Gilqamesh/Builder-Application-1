@@ -20,6 +20,7 @@
 #include <format>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -68,6 +69,7 @@ public:
     void run() const;
 
 private:
+    static render_item_t make_postprocess(const render_item_t& source, const std::shared_ptr<texture::texture_t>& target, int size);
     json_t run_workload() const;
     json_t metadata(const filesystem::path_t& program) const;
     static json_t summarize(const std::vector<std::array<std::int64_t, 4>>& observations, std::size_t column, int runs);
@@ -92,7 +94,7 @@ std::vector<render_item_t> make_workload(std::string_view name) {
     fragment.color(shader::sample(fragment.resource<shader::shader_texture_2d_t>(0), fragment.resource<shader::shader_sampler_t>(0), coordinates));
     const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
     auto material = std::make_shared<material_t>(program);
-    const bool translucent = name == "translucent_linear" || name == "translucent_srgb";
+    const bool translucent = name == "translucent_linear" || name == "translucent_srgb" || name == "two_pass_linear" || name == "two_pass_srgb";
     const std::uint8_t alpha = translucent ? 128 : 255;
     const std::array<rgba8_t, 4> texels {{{255, 72, 72, alpha}, {72, 255, 128, alpha}, {72, 128, 255, alpha}, {255, 232, 72, alpha}}};
     material->texture(0, std::make_shared<texture::texture_t>(texture::format_t::rgba8_unorm, 2, 2, byte_stream::byte_stream_t(std::as_bytes(std::span(texels)))));
@@ -111,6 +113,11 @@ std::vector<render_item_t> make_workload(std::string_view name) {
     item.geometry() = geometry;
     item.material() = material;
     item.translation() = {0, 0, -1};
+    if (name == "stencil_mask" || name == "two_pass_linear" || name == "two_pass_srgb") {
+        material->stencil_test(true);
+        material->stencil_front({.comparison = comparison_t::equal, .reference = 1});
+        material->stencil_back(material->stencil_front());
+    }
     if (translucent) {
         material->blend(true);
         material->blend_color({blend_factor_t::src_alpha, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
@@ -121,7 +128,7 @@ std::vector<render_item_t> make_workload(std::string_view name) {
         for (std::size_t i = 0; i < items.size(); ++i) { items[i].translation()[2] = -1.3F + float(i) * 0.1F; }
         return items;
     }
-    if (name == "textured_fill") { return {item}; }
+    if (name == "textured_fill" || name == "stencil_mask") { return {item}; }
     if (name == "depth_overdraw") {
         std::vector<render_item_t> items(4, item);
         for (std::size_t i = 0; i < items.size(); ++i) { items[i].translation()[2] -= float(i) * 0.1F; }
@@ -146,14 +153,27 @@ std::vector<render_item_t> make_workload(std::string_view name) {
     throw std::invalid_argument("unknown benchmark workload");
 }
 
-std::int64_t render_frame(software_renderer_t& software_renderer, const camera_t& camera, const std::vector<render_item_t>& items, profiling::profiler_t& profiler) {
+std::int64_t render_frame(software_renderer_t& software_renderer, const camera_t& camera, const std::vector<render_item_t>& items, profiling::profiler_t& profiler, const render_item_t* mask = nullptr, const framebuffer_t* offscreen = nullptr, const render_item_t* postprocess = nullptr) {
     const auto start = std::chrono::steady_clock::now();
     {
         auto metric = profiler.metric<frame_metrics_t>();
-        software_renderer.clear_color({0, 0, 0, 255}, metric);
+        const auto output = software_renderer.framebuffer();
+        if (offscreen) { software_renderer.framebuffer() = *offscreen; }
+        software_renderer.clear_color({0, 0, 0, std::uint8_t(offscreen ? 0 : 255)}, metric);
         software_renderer.clear_depth(1, metric);
+        if (mask) {
+            software_renderer.clear_stencil(0, metric);
+            software_renderer.draw(camera, *mask, metric);
+            metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.m_draws; });
+        }
         for (const auto& item : items) {
             software_renderer.draw(camera, item, metric);
+            metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.m_draws; });
+        }
+        if (offscreen) {
+            software_renderer.framebuffer() = output;
+            software_renderer.clear_color({16, 24, 32, 255}, metric);
+            software_renderer.draw(camera, *postprocess, metric);
             metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.m_draws; });
         }
     }
@@ -175,7 +195,7 @@ benchmark_t::benchmark_t(int argc, char** argv) {
     }
     if (m_output.empty() || m_output.front() != '/') { throw std::invalid_argument("benchmark requires --output with an absolute directory path"); }
     if (m_size <= 0 || m_warmup < 0 || m_samples <= 0 || m_runs <= 0) { throw std::invalid_argument("benchmark requires positive size, samples and runs, and nonnegative warmup"); }
-    if (!m_workload.empty() && m_workload != "textured_fill" && m_workload != "depth_overdraw" && m_workload != "many_draws" && m_workload != "clipping" && m_workload != "translucent_linear" && m_workload != "translucent_srgb") {
+    if (!m_workload.empty() && m_workload != "textured_fill" && m_workload != "depth_overdraw" && m_workload != "many_draws" && m_workload != "clipping" && m_workload != "translucent_linear" && m_workload != "translucent_srgb" && m_workload != "stencil_mask" && m_workload != "two_pass_linear" && m_workload != "two_pass_srgb") {
         throw std::invalid_argument(std::format("unknown benchmark workload '{}'", m_workload));
     }
 }
@@ -192,7 +212,7 @@ void benchmark_t::run() const {
     filesystem::create_directories(output);
     json_t results {{"metadata", metadata(program)}, {"workloads", json_t::object()}};
     write_json(output / filesystem::relative_path_t("metadata.json"), results.at("metadata"));
-    for (const std::string workload : {"textured_fill", "depth_overdraw", "many_draws", "clipping", "translucent_linear", "translucent_srgb"}) {
+    for (const std::string workload : {"textured_fill", "depth_overdraw", "many_draws", "clipping", "translucent_linear", "translucent_srgb", "stencil_mask", "two_pass_linear", "two_pass_srgb"}) {
         std::cout.flush(); // Keep buffered summaries out of the child process.
         process::create_and_wait_checked(process::command_t({
             program.string(), "--worker", workload, "--output", output.string(),
@@ -214,6 +234,22 @@ void benchmark_t::run() const {
     std::cout << std::format("Raw samples, summaries, build identity and reports: {}\n", output);
 }
 
+render_item_t benchmark_t::make_postprocess(const render_item_t& source, const std::shared_ptr<texture::texture_t>& target, int size) {
+    shader::vertex_shader_ast_builder_t vertex;
+    vertex.position(vertex.input<vector4f_t>(0));
+    shader::fragment_shader_ast_builder_t fragment;
+    const auto coordinates = shader::swizzle<0, 1>(fragment.fragment_coordinate()) / float(size);
+    fragment.color(shader::sample(fragment.resource<shader::shader_texture_2d_t>(0), fragment.resource<shader::shader_sampler_t>(0), coordinates));
+    auto item = source;
+    item.material() = std::make_shared<material_t>(std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize()));
+    item.material()->texture(0, target);
+    item.material()->sampler(0, std::make_shared<texture::sampler_t>(texture::filter_t::linear, texture::address_mode_t::clamp_to_edge, texture::address_mode_t::clamp_to_edge));
+    item.material()->blend(true);
+    item.material()->blend_color({blend_factor_t::one, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+    item.material()->blend_alpha({blend_factor_t::one, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+    return item;
+}
+
 json_t benchmark_t::run_workload() const {
     const auto items = make_workload(m_workload);
     const auto count = framebuffer_t::pixel_count(m_size, m_size);
@@ -221,9 +257,35 @@ json_t benchmark_t::run_workload() const {
     std::vector<float> normal_depth(count), measured_depth(count);
     framebuffer_t normal_buffer(normal_pixels, m_size, m_size), measured_buffer(measured_pixels, m_size, m_size);
     normal_buffer.depth(normal_depth); measured_buffer.depth(measured_depth);
-    if (m_workload == "translucent_srgb") {
+    if (m_workload == "translucent_srgb" || m_workload == "two_pass_srgb") {
         normal_buffer.encoding(color_encoding_t::srgb);
         measured_buffer.encoding(color_encoding_t::srgb);
+    }
+    const bool two_pass = m_workload == "two_pass_linear" || m_workload == "two_pass_srgb";
+    const bool masked = two_pass || m_workload == "stencil_mask";
+    std::vector<std::uint8_t> normal_stencil(masked ? count : 0), measured_stencil(masked ? count : 0);
+    normal_buffer.stencil(normal_stencil); measured_buffer.stencil(measured_stencil);
+    auto mask = items.front();
+    if (masked) {
+        mask.material() = std::make_shared<material_t>(*mask.material());
+        mask.scale() = {0.75F, 0.75F, 1};
+        mask.material()->color_write(color_mask_t::none);
+        mask.material()->depth_test(false);
+        mask.material()->stencil_front({.reference = 1, .pass = stencil_op_t::replace});
+        mask.material()->stencil_back(mask.material()->stencil_front());
+    }
+    std::shared_ptr<texture::texture_t> normal_target, measured_target;
+    std::optional<framebuffer_t> normal_offscreen, measured_offscreen;
+    std::optional<render_item_t> normal_postprocess, measured_postprocess;
+    if (two_pass) {
+        const auto format = m_workload == "two_pass_srgb" ? texture::format_t::rgba8_srgb : texture::format_t::rgba8_unorm;
+        normal_target = std::make_shared<texture::texture_t>(format, m_size, m_size, byte_stream::byte_stream_t(std::vector<std::byte>(count * 4)));
+        measured_target = std::make_shared<texture::texture_t>(*normal_target);
+        normal_offscreen.emplace(normal_target->view()); measured_offscreen.emplace(measured_target->view());
+        normal_offscreen->depth(normal_depth); measured_offscreen->depth(measured_depth);
+        normal_offscreen->stencil(normal_stencil); measured_offscreen->stencil(measured_stencil);
+        normal_postprocess = make_postprocess(items.front(), normal_target, m_size);
+        measured_postprocess = make_postprocess(items.front(), measured_target, m_size);
     }
     software_renderer_t normal(normal_buffer);
     profiling::profiler_t normal_profiler;
@@ -238,13 +300,13 @@ json_t benchmark_t::run_workload() const {
         for (int sample = -m_warmup; sample < m_samples; ++sample) {
             std::int64_t normal_ns, measured_ns;
             if ((run % 2 + sample % 2) % 2 == 0) {
-                normal_ns = render_frame(normal, camera, items, normal_profiler);
-                measured_ns = render_frame(measured, camera, items, profiler);
+                normal_ns = render_frame(normal, camera, items, normal_profiler, masked ? &mask : nullptr, two_pass ? &*normal_offscreen : nullptr, two_pass ? &*normal_postprocess : nullptr);
+                measured_ns = render_frame(measured, camera, items, profiler, masked ? &mask : nullptr, two_pass ? &*measured_offscreen : nullptr, two_pass ? &*measured_postprocess : nullptr);
             } else {
-                measured_ns = render_frame(measured, camera, items, profiler);
-                normal_ns = render_frame(normal, camera, items, normal_profiler);
+                measured_ns = render_frame(measured, camera, items, profiler, masked ? &mask : nullptr, two_pass ? &*measured_offscreen : nullptr, two_pass ? &*measured_postprocess : nullptr);
+                normal_ns = render_frame(normal, camera, items, normal_profiler, masked ? &mask : nullptr, two_pass ? &*normal_offscreen : nullptr, two_pass ? &*normal_postprocess : nullptr);
             }
-            if (!std::equal(normal_pixels.begin(), normal_pixels.end(), measured_pixels.begin(), [](rgba8_t a, rgba8_t b) { return std::bit_cast<std::uint32_t>(a) == std::bit_cast<std::uint32_t>(b); }) || normal_depth != measured_depth) {
+            if (!std::equal(normal_pixels.begin(), normal_pixels.end(), measured_pixels.begin(), [](rgba8_t a, rgba8_t b) { return std::bit_cast<std::uint32_t>(a) == std::bit_cast<std::uint32_t>(b); }) || normal_depth != measured_depth || normal_stencil != measured_stencil || (two_pass && !std::equal(normal_target->bytes().begin(), normal_target->bytes().end(), measured_target->bytes().begin()))) {
                 throw std::runtime_error("benchmark enabled/disabled profiling results differ");
             }
             if (0 <= sample) { observations.push_back({run, sample, normal_ns, measured_ns}); }
@@ -314,10 +376,10 @@ json_t benchmark_t::metadata(const filesystem::path_t& program) const {
     }
     if (!maps.eof()) { throw std::runtime_error("benchmark could not read loaded artifact mappings"); }
     return {
-        {"schema_version", 4}, {"workload_version", 2},
+        {"schema_version", 4}, {"workload_version", 3},
         {"size", m_size}, {"warmup_per_run", m_warmup}, {"samples_per_run", m_samples}, {"runs", m_runs},
         {"cpu", cpu}, {"platform", std::format("{} {} {}", platform.sysname, platform.release, platform.machine)},
-        {"scope", "frame measurement, full color/depth clears, fixed draw sequence; setup, comparison, reporting excluded"},
+        {"scope", "frame measurement, full color/depth clears, fixed draw sequence; two-pass workloads also include stencil mask, target selection, output clear and sampled composite; setup, comparison, reporting excluded"},
         {"report", "persistent data per metric path; inclusive timing statistics across all enabled completions, including warmup; parents before children in first-use order"},
         {"peak_rss_scope", "Linux VmHWM through workload capture and text report; both profiling configurations, setup and warmup included; summaries and JSON serialization excluded"},
         {"build", {
@@ -383,7 +445,7 @@ int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--help") {
             std::cout << "usage: benchmark --output /absolute/new/run-directory [--size 128] [--warmup 3] [--samples 20] [--runs 5]\n"
-                         "Runs six workloads in separate processes using the current Builder build configuration.\n";
+                         "Runs nine workloads in separate processes using the current Builder build configuration.\n";
             return 0;
         }
         m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_t(argc, argv).run();

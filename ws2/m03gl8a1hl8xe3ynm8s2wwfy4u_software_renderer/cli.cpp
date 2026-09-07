@@ -142,6 +142,8 @@ int main() {
 
         std::vector<rgba8_t> pixels;
         std::vector<float> depth;
+        std::vector<std::uint8_t> stencil;
+        std::shared_ptr<texture::texture_t> target;
         software_renderer_api::software_renderer_t software_renderer(software_renderer_api::framebuffer_t(pixels, 0, 0));
         m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t profiler;
         profiler.enabled() = true;
@@ -156,6 +158,9 @@ int main() {
         ));
         material->uniform(0, vector4f_t({1.0F, 0.6F, 0.6F, 1.0F}));
         material->depth_test(true);
+        material->stencil_test(true);
+        material->stencil_front({.comparison = software_renderer_api::comparison_t::equal, .reference = 1});
+        material->stencil_back(material->stencil_front());
         material->cull(software_renderer_api::cull_mode_t::back);
         auto second_material = std::make_shared<software_renderer_api::material_t>(*material);
         second_material->uniform(0, vector4f_t({0.6F, 0.7F, 1.0F, 1.0F}));
@@ -181,6 +186,36 @@ int main() {
         transparent_item.translation() = {0.0F, -0.15F, -0.95F};
         transparent_item.rotation(vector3f_t({0.2F, 0.35F, 0.1F}));
 
+        const auto make_screen_program = [](bool mask) {
+            shader::vertex_shader_ast_builder_t vertex;
+            const auto position = vertex.input<vector3f_t>(0);
+            vertex.position(vertex.construct<vector4f_t>(position, 1.0F));
+            shader::fragment_shader_ast_builder_t fragment;
+            const auto coordinates = shader::swizzle<0, 1>(fragment.fragment_coordinate()) / fragment.uniform<vector2f_t>(0);
+            if (mask) {
+                const auto centered = coordinates - vector2f_t({0.5F, 0.5F});
+                fragment.branch(0.21F < shader::dot(centered, centered), [&] { fragment.discard(); });
+                fragment.color(vector4f_t({0, 0, 0, 0}));
+            } else {
+                fragment.color(shader::sample(fragment.resource<shader::shader_texture_2d_t>(0), fragment.resource<shader::shader_sampler_t>(0), coordinates));
+            }
+            return std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+        };
+
+        software_renderer_api::render_item_t mask;
+        mask.geometry() = make_geometry();
+        mask.material() = std::make_shared<software_renderer_api::material_t>(make_screen_program(true));
+        mask.material()->color_write(software_renderer_api::color_mask_t::none);
+        mask.material()->stencil_test(true);
+        mask.material()->stencil_front({.reference = 1, .pass = software_renderer_api::stencil_op_t::replace});
+        mask.material()->stencil_back(mask.material()->stencil_front());
+        auto postprocess = mask;
+        postprocess.material() = std::make_shared<software_renderer_api::material_t>(make_screen_program(false));
+        postprocess.material()->sampler(0, std::make_shared<texture::sampler_t>(texture::filter_t::linear, texture::address_mode_t::clamp_to_edge, texture::address_mode_t::clamp_to_edge));
+        postprocess.material()->blend(true);
+        postprocess.material()->blend_color({software_renderer_api::blend_factor_t::one, software_renderer_api::blend_factor_t::one_minus_src_alpha, software_renderer_api::blend_op_t::add});
+        postprocess.material()->blend_alpha({software_renderer_api::blend_factor_t::one, software_renderer_api::blend_factor_t::one_minus_src_alpha, software_renderer_api::blend_op_t::add});
+
         const auto started_at = steady_clock_t::now();
         auto previous_frame_started_at = started_at;
 
@@ -196,6 +231,13 @@ int main() {
             if (framebuffer.width() != size[0] || framebuffer.height() != size[1]) {
                 pixels.resize(software_renderer_api::framebuffer_t::pixel_count(size[0], size[1]));
                 depth.resize(pixels.size());
+                stencil.resize(pixels.size());
+                if (!pixels.empty()) {
+                    target = std::make_shared<texture::texture_t>(texture::format_t::rgba8_srgb, std::size_t(size[0]), std::size_t(size[1]), byte_stream::byte_stream_t(std::vector<std::byte>(pixels.size() * 4)));
+                    postprocess.material()->texture(0, target);
+                    postprocess.material()->uniform(0, vector2f_t({float(size[0]), float(size[1])}));
+                    mask.material()->uniform(0, vector2f_t({float(size[0]), float(size[1])}));
+                }
                 software_renderer_api::framebuffer_t replacement(pixels, size[0], size[1]);
                 replacement.depth(depth);
                 replacement.encoding(software_renderer_api::color_encoding_t::srgb);
@@ -206,7 +248,12 @@ int main() {
             if (framebuffer.width() == 0 || framebuffer.height() == 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             } else {
-                software_renderer.clear_color({0, 0, 0, 255}, frame_metric);
+                software_renderer_api::framebuffer_t offscreen(target->view());
+                offscreen.depth(depth);
+                offscreen.stencil(stencil);
+                software_renderer.framebuffer() = offscreen;
+                software_renderer.clear_color({0, 0, 0, 0}, frame_metric);
+                software_renderer.clear_stencil(0, frame_metric);
                 software_renderer.clear_depth(1.0F, frame_metric);
                 render_item.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0.25F, seconds * 0.35F, 0.0F}));
                 render_item.translation() = {-0.15F, 0.0F, -1.1F + 0.25F * std::sin(seconds * 0.4F)};
@@ -214,6 +261,7 @@ int main() {
                     {{0, framebuffer.width()}, {0, framebuffer.height()}},
                     software_renderer_api::perspective_t(std::numbers::pi_v<float> / 3, 0.5F, 20.0F)
                 );
+                software_renderer.draw(camera, mask, frame_metric);
                 // Alternate submission order while the surfaces intersect and cross the near plane.
                 if (static_cast<int>(seconds) % 2 == 0) {
                     software_renderer.draw(camera, render_item, frame_metric);
@@ -222,8 +270,11 @@ int main() {
                     software_renderer.draw(camera, second_item, frame_metric);
                     software_renderer.draw(camera, render_item, frame_metric);
                 }
-                // Composite after opaque visibility. The opaque clear keeps output alpha one.
+                // Source-over into transparent storage produces premultiplied intermediate RGBA.
                 software_renderer.draw(camera, transparent_item, frame_metric);
+                software_renderer.framebuffer() = framebuffer;
+                software_renderer.clear_color({28, 36, 48, 255}, frame_metric);
+                software_renderer.draw(camera, postprocess, frame_metric);
                 opengl_renderer.present_rgba8(
                     std::as_bytes(std::span<const rgba8_t>(pixels)),
                     framebuffer.width(),

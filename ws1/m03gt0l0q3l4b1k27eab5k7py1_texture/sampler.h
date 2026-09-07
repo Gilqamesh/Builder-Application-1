@@ -55,9 +55,9 @@ private:
 };
 
 /**
- * @brief Samples a texture at normalized `(u, v)` coordinates and returns linear, unassociated RGBA.
+ * @brief Samples a texture at normalized `(u, v)` coordinates and returns linear RGBA without changing alpha association.
  *
- * `coordinates[0]` is `u`/`x` and `coordinates[1]` is `v`/`y`. Nearest-neighbor filtering addresses `floor(c * dimension)`. Bilinear filtering uses `p = c * dimension - 0.5` and addresses `floor(p)` and `floor(p) + 1` independently in each dimension. Stored sRGB color channels are decoded before filtering; RGBA components are filtered independently without premultiplication.
+ * `coordinates[0]` is `u`/`x` and `coordinates[1]` is `v`/`y`. Nearest-neighbor filtering addresses `floor(c * dimension)`. Bilinear filtering uses `p = c * dimension - 0.5` and addresses `floor(p)` and `floor(p) + 1` independently in each dimension. Stored sRGB color channels are decoded before filtering; RGBA components are filtered independently without premultiplication or division by alpha. Storage and sampling prescribe no alpha association; shaders and blend equations determine its interpretation.
  *
  * Fails if texture is empty.
  * Fails if either coordinate is not finite.

@@ -354,7 +354,7 @@ void test_framebuffer() {
     static_assert(!std::is_move_assignable_v<api::software_renderer_t>);
     static_assert(std::is_same_v<decltype(std::declval<api::framebuffer_t&>().width()), int>);
     static_assert(std::is_same_v<decltype(std::declval<api::framebuffer_t&>().height()), int>);
-    static_assert(std::is_same_v<decltype(std::declval<const api::framebuffer_t&>().pixels()), std::span<api::rgba8_t>>);
+    static_assert(std::is_same_v<decltype(std::declval<const api::framebuffer_t&>().pixels()), texture::pixel_view_t>);
     static_assert(std::is_same_v<decltype(std::declval<api::software_renderer_t&>().framebuffer()), api::framebuffer_t&>);
     static_assert(std::is_same_v<decltype(std::declval<const api::software_renderer_t&>().framebuffer()), const api::framebuffer_t&>);
 
@@ -402,14 +402,17 @@ void test_framebuffer() {
     }));
 
     const auto& framebuffer = std::as_const(renderer).framebuffer();
-    test::expect(std::identity(), framebuffer.pixels().data() == pixels.data());
+    test::expect(std::identity(), framebuffer.pixels().bytes().data() == std::as_writable_bytes(std::span(pixels)).data());
     test::expect(std::equal_to<>(), framebuffer.width(), 3);
     test::expect(std::equal_to<>(), framebuffer.height(), 2);
-    framebuffer.pixels()[0] = red;
+    framebuffer.pixels().bytes()[0] = std::byte(red.red);
+    framebuffer.pixels().bytes()[1] = std::byte(red.green);
+    framebuffer.pixels().bytes()[2] = std::byte(red.blue);
+    framebuffer.pixels().bytes()[3] = std::byte(red.alpha);
     expect_color(pixels[0], red);
     auto borrowed_pixels = framebuffer.pixels();
-    borrowed_pixels = borrowed_pixels.first(1);
-    test::expect(std::equal_to<>(), framebuffer.pixels().size(), std::size_t(6));
+    borrowed_pixels = texture::pixel_view_t(borrowed_pixels.format(), 1, 1, borrowed_pixels.bytes().first(4));
+    test::expect(std::equal_to<>(), framebuffer.pixels().bytes().size(), std::size_t(24));
 
     test::expect_throws<std::invalid_argument>([&] {
         renderer.framebuffer() = api::framebuffer_t(pixels, -1, 6);
@@ -417,11 +420,11 @@ void test_framebuffer() {
     test::expect_throws<std::invalid_argument>([&] {
         renderer.framebuffer() = api::framebuffer_t(pixels, 2, 2);
     });
-    test::expect(std::identity(), renderer.framebuffer().pixels().data() == pixels.data());
+    test::expect(std::identity(), renderer.framebuffer().pixels().bytes().data() == std::as_writable_bytes(std::span(pixels)).data());
 
     std::vector<api::rgba8_t> replacement(4);
     renderer.framebuffer() = api::framebuffer_t(replacement, 2, 2);
-    test::expect(std::identity(), framebuffer.pixels().data() == replacement.data());
+    test::expect(std::identity(), framebuffer.pixels().bytes().data() == std::as_writable_bytes(std::span(replacement)).data());
     test::expect(std::equal_to<>(), framebuffer.width(), 2);
     test::expect(std::equal_to<>(), framebuffer.height(), 2);
     renderer.clear_color(texture_color, inactive_metric);
@@ -2915,6 +2918,468 @@ void test_blended_coverage() {
     }
 }
 
+void test_stencil_state_and_attachments() {
+    material_t material(make_visibility_program());
+    require(!material.stencil_test());
+    for (const auto state : {material.stencil_front(), material.stencil_back()}) {
+        require(state.comparison == comparison_t::always && state.reference == 0);
+        require(state.compare_mask == 255 && state.write_mask == 255);
+        require(state.fail == stencil_op_t::keep && state.depth_fail == stencil_op_t::keep && state.pass == stencil_op_t::keep);
+    }
+    const stencil_state_t state {.comparison = comparison_t::equal, .reference = 7, .pass = stencil_op_t::replace};
+    material.stencil_front(state);
+    auto copied = material;
+    copied.stencil_test(true);
+    copied.stencil_front({.reference = 12});
+    require(!material.stencil_test() && material.stencil_front().reference == 7);
+    require(copied.stencil_front().reference == 12 && copied.stencil_back().reference == 0);
+    for (int member = 0; member < 4; ++member) {
+        auto invalid = state;
+        if (member == 0) { invalid.comparison = static_cast<comparison_t>(99); }
+        if (member == 1) { invalid.fail = static_cast<stencil_op_t>(99); }
+        if (member == 2) { invalid.depth_fail = static_cast<stencil_op_t>(99); }
+        if (member == 3) { invalid.pass = static_cast<stencil_op_t>(99); }
+        test::expect_throws([&] { material.stencil_front(invalid); });
+        test::expect_throws([&] { material.stencil_back(invalid); });
+        require(material.stencil_front().reference == 7 && material.stencil_back().reference == 0);
+    }
+    std::vector<rgba8_t> pixels(256, clear_color);
+    std::vector<float> depth(256, 0.75F);
+    std::vector<std::uint8_t> stencil(256, 42), replacement(256, 99), wrong(255);
+    framebuffer_t framebuffer(pixels, 16, 16);
+    require(framebuffer.stencil().empty());
+    framebuffer.stencil(stencil);
+    framebuffer.depth(depth);
+    const auto previous = framebuffer;
+    framebuffer.stencil(replacement);
+    test::expect_throws([&] { framebuffer.stencil(wrong); });
+    require(framebuffer.stencil().data() == replacement.data() && previous.stencil().data() == stencil.data());
+    software_renderer_t renderer(framebuffer);
+    framebuffer.stencil({});
+    require(renderer.framebuffer().stencil().data() == replacement.data());
+    renderer.clear_stencil(3, inactive_metric);
+    const camera_t camera({{3, 10}, {-2, 5}}, orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
+    renderer.clear_stencil(camera, 255, inactive_metric);
+    for (int y = 0; y < 16; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            const auto index = pixel_index(x, y, 16);
+            require(replacement[index] == (3 <= x && x < 10 && y < 5 ? 255 : 3));
+            expect_color(pixels[index], clear_color);
+            require(depth[index] == 0.75F && stencil[index] == 42);
+        }
+    }
+    auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle);
+    item.material()->stencil_test(true);
+    auto shared = item;
+    require(shared.material()->stencil_test());
+    renderer.framebuffer().stencil({});
+    test::expect_throws([&] { renderer.draw(make_camera(16, 16), item, inactive_metric); });
+    test::expect_throws([&] { renderer.clear_stencil(0, inactive_metric); });
+    test::expect_throws([&] { renderer.clear_stencil(make_camera(16, 16), 0, inactive_metric); });
+    const camera_t outside({{20, 30}, {20, 30}}, orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
+    renderer.clear_stencil(outside, 0, inactive_metric);
+    renderer.draw(outside, item, inactive_metric);
+    renderer.framebuffer() = framebuffer_t({}, 0, 16);
+    renderer.clear_stencil(0, inactive_metric);
+    renderer.clear_stencil(make_camera(16, 16), 0, inactive_metric);
+    renderer.draw(make_camera(16, 16), item, inactive_metric);
+    require(std::format("{} {}", state, stencil_op_t::invert).find("invert") != std::string::npos);
+}
+
+void test_stencil_operations_and_comparisons() {
+    std::vector<rgba8_t> pixels(256);
+    std::vector<float> depth(256);
+    std::vector<std::uint8_t> stencil(256);
+    software_renderer_t renderer(framebuffer_t(pixels, 16, 16));
+    renderer.framebuffer().depth(depth);
+    renderer.framebuffer().stencil(stencil);
+    auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle);
+    auto& material = *item.material();
+    material.stencil_test(true);
+    material.depth_test(false);
+    const auto camera = make_camera(16, 16);
+    // Columns are all eight operations; literals cover zero, carry, saturation and wrap.
+    const std::array<unsigned, 5> initial {0, 15, 127, 254, 255};
+    const std::array<std::array<unsigned, 8>, 5> expected {{
+        {{0, 0, 165, 1, 0, 1, 255, 255}},
+        {{15, 0, 165, 16, 14, 16, 14, 240}},
+        {{127, 0, 165, 128, 126, 128, 126, 128}},
+        {{254, 0, 165, 255, 253, 255, 253, 1}},
+        {{255, 0, 165, 255, 254, 0, 254, 0}}
+    }};
+    const std::array operations {stencil_op_t::keep, stencil_op_t::zero, stencil_op_t::replace, stencil_op_t::increment_clamp, stencil_op_t::decrement_clamp, stencil_op_t::increment_wrap, stencil_op_t::decrement_wrap, stencil_op_t::invert};
+    for (std::size_t row = 0; row < initial.size(); ++row) {
+        for (std::size_t column = 0; column < operations.size(); ++column) {
+            for (unsigned mask : {0U, 15U, 240U, 255U}) {
+                renderer.clear_stencil(static_cast<std::uint8_t>(initial[row]), inactive_metric);
+                const stencil_state_t state {.reference = 165, .compare_mask = 0, .write_mask = static_cast<std::uint8_t>(mask), .pass = operations[column]};
+                material.stencil_front(state); material.stencil_back(state);
+                renderer.draw(camera, item, inactive_metric);
+                const auto result = (initial[row] & (255U ^ mask)) | (expected[row][column] & mask);
+                for (const auto stored : stencil) { require(stored == result); }
+            }
+        }
+    }
+    const std::array comparisons {comparison_t::never, comparison_t::less, comparison_t::equal, comparison_t::less_equal, comparison_t::greater, comparison_t::not_equal, comparison_t::greater_equal, comparison_t::always};
+    const std::array<std::array<bool, 8>, 3> passes {{
+        {{false, true, false, true, false, true, false, true}},
+        {{false, false, true, true, false, false, true, true}},
+        {{false, false, false, false, true, true, true, true}}
+    }};
+    for (std::size_t row = 0; row < passes.size(); ++row) {
+        for (std::size_t column = 0; column < comparisons.size(); ++column) {
+            renderer.clear_stencil(0xA5, inactive_metric);
+            renderer.clear_color(clear_color, inactive_metric);
+            const stencil_state_t state {.comparison = comparisons[column], .reference = static_cast<std::uint8_t>(0xE4 + row), .compare_mask = 15};
+            material.stencil_front(state); material.stencil_back(state);
+            renderer.draw(camera, item, inactive_metric);
+            for (const auto pixel : pixels) { expect_color(pixel, passes[row][column] ? red : clear_color); }
+            for (auto stored : stencil) { require(stored == 0xA5); }
+        }
+    }
+}
+
+void test_stencil_pipeline_and_metrics() {
+    const auto camera = make_camera(16, 16);
+    // Modes: pass, stencil fail, depth fail, depth disabled, discard, absent color,
+    // masked color, stencil disabled, depth writes disabled, all faces culled.
+    for (int mode = 0; mode < 10; ++mode) {
+        std::vector<rgba8_t> pixels(256), normal_pixels(256);
+        std::vector<float> depth(256), normal_depth(256);
+        std::vector<std::uint8_t> stencil(256), normal_stencil(256);
+        auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle, {1, 0, 0, 1}, make_visibility_program(mode != 5, mode == 4));
+        auto& material = *item.material();
+        material.stencil_test(mode != 7);
+        material.depth_test(mode != 3);
+        material.depth_write(mode != 8);
+        material.color_write(mode == 6 ? color_mask_t::none : color_mask_t::all);
+        material.cull(mode == 9 ? cull_mode_t::both : cull_mode_t::none);
+        const stencil_state_t state {.comparison = mode == 1 ? comparison_t::never : comparison_t::always, .reference = 12, .fail = stencil_op_t::zero, .depth_fail = stencil_op_t::increment_wrap, .pass = stencil_op_t::replace};
+        material.stencil_front(state); material.stencil_back(state);
+        profiling::profiler_t profiler;
+        const auto render = [&](auto& colors, auto& depths, auto& stencils, profiling::metric_t& metric) {
+            framebuffer_t framebuffer(colors, 16, 16);
+            framebuffer.depth(depths); framebuffer.stencil(stencils);
+            software_renderer_t renderer(framebuffer);
+            renderer.clear_color(clear_color, metric);
+            renderer.clear_depth(mode == 2 ? 0.0F : 1.0F, metric);
+            renderer.clear_stencil(7, metric);
+            renderer.draw(camera, item, metric);
+        };
+        {
+            auto metric = profiler.metric<application_metrics_t>();
+            render(pixels, depth, stencil, metric);
+        }
+        render(normal_pixels, normal_depth, normal_stencil, inactive_metric);
+        require(std::equal(pixels.begin(), pixels.end(), normal_pixels.begin(), same_color));
+        require(depth == normal_depth && stencil == normal_stencil);
+        const auto* metrics = profiler.metrics<application_metrics_t, draw_metrics_t, raster_metrics_t>();
+        const std::size_t survivors = mode == 9 ? 0 : (mode == 4 ? 128 : 256);
+        require(metrics->m_invocations == (mode == 9 ? 0U : 256U));
+        require(metrics->m_discards == (mode == 4 ? 128U : 0U));
+        require(metrics->m_stencil_rejections == (mode == 1 ? 256U : 0U));
+        require(metrics->m_depth_rejections == (mode == 2 ? 256U : 0U));
+        require(metrics->m_stencil_writes == (mode == 7 ? 0 : survivors));
+        require(metrics->m_depth_writes == (mode == 1 || mode == 2 || mode == 3 || mode == 8 ? 0 : survivors));
+        require(metrics->m_color_writes == (mode == 1 || mode == 2 || mode == 5 || mode == 6 ? 0 : survivors));
+        require(profiler.metrics<application_metrics_t, clear_stencil_metrics_t>()->m_stencil_writes == 256);
+        for (int y = 0; y < 16; ++y) {
+            for (int x = 0; x < 16; ++x) {
+                const auto index = pixel_index(x, y, 16);
+                const bool omitted = mode == 9 || (mode == 4 && x < 8);
+                const bool passed = !omitted && mode != 1 && mode != 2;
+                require(stencil[index] == (omitted || mode == 7 ? 7 : (mode == 1 ? 0 : (mode == 2 ? 8 : 12))));
+                require(depth[index] == (passed && mode != 3 && mode != 8 ? 0.5F : (mode == 2 ? 0.0F : 1.0F)));
+                expect_color(pixels[index], passed && mode != 5 && mode != 6 ? red : clear_color);
+            }
+        }
+    }
+}
+
+void test_stencil_coverage() {
+    std::vector<rgba8_t> pixels(1024);
+    software_renderer_t renderer(framebuffer_t(pixels, 32, 32));
+    std::vector<std::uint8_t> stencil(1024);
+    renderer.framebuffer().stencil(stencil);
+    for (const auto bounds : {fractional, clipped}) {
+        const auto [xmin, xmax, ymin, ymax] = bounds;
+        const std::vector<clip_position_fixture_t> positions {{xmin, ymax, 0, 1}, {xmax, ymin, 0, 1}, {xmax, ymax, 0, 1}, {xmin, ymin, 0, 1}};
+        for (const auto topology : {vertex_primitive_topology_t::triangle, vertex_primitive_topology_t::triangle_strip, vertex_primitive_topology_t::triangle_fan}) {
+            index_buffer_t::indices_t indices = topology == vertex_primitive_topology_t::triangle ? index_buffer_t::indices_t{0, 1, 2, 1, 0, 3} : (topology == vertex_primitive_topology_t::triangle_strip ? index_buffer_t::indices_t{2, 0, 1, 3} : index_buffer_t::indices_t{0, 2, 1, 3});
+            for (bool reverse : {false, true}) {
+                if (reverse) { std::reverse(indices.begin(), indices.end()); }
+                auto item = make_visibility_item(positions, indices, topology, {1, 0, 0, 0.5F});
+                item.material()->depth_test(false);
+                item.material()->stencil_test(true);
+                item.material()->stencil_front({.pass = stencil_op_t::increment_wrap});
+                item.material()->stencil_back({.pass = stencil_op_t::increment_wrap});
+                renderer.clear_stencil(0, inactive_metric);
+                const camera_t camera({{2, 30}, {2, 30}}, orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
+                // Full viewport has independent literal expected coverage; bounded camera
+                // is checked separately below using a full-screen clipped primitive.
+                renderer.draw(make_camera(32, 32), item, inactive_metric);
+                for (int y = 0; y < 32; ++y) {
+                    for (int x = 0; x < 32; ++x) {
+                        const bool inside = bounds == clipped || (4 <= x && x <= 28 && 8 <= y && y <= 24);
+                        require(stencil[pixel_index(x, y, 32)] == (inside ? 1 : 0));
+                    }
+                }
+                if (bounds == clipped) {
+                    renderer.clear_stencil(0, inactive_metric);
+                    renderer.draw(camera, item, inactive_metric);
+                    for (int y = 0; y < 32; ++y) {
+                        for (int x = 0; x < 32; ++x) {
+                            const bool inside = 2 <= x && x < 30 && 2 <= y && y < 30;
+                            require(stencil[pixel_index(x, y, 32)] == (inside ? 1 : 0));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (const auto& triangle : {crossing, concave}) {
+        for (bool reverse : {false, true}) {
+            auto item = make_visibility_item({triangle.begin(), triangle.end()}, reverse ? index_buffer_t::indices_t{2, 1, 0} : index_buffer_t::indices_t{0, 1, 2}, vertex_primitive_topology_t::triangle, {1, 0, 0, 0.5F});
+            item.material()->depth_test(false);
+            item.material()->stencil_test(true);
+            item.material()->stencil_front({.pass = stencil_op_t::increment_wrap});
+            item.material()->stencil_back({.pass = stencil_op_t::increment_wrap});
+            renderer.clear_stencil(0, inactive_metric);
+            renderer.draw(make_camera(32, 32), item, inactive_metric);
+            require(stencil[0] == 1);
+            for (std::size_t i = 1; i < pixels.size(); ++i) { require(stencil[i] == 0); }
+        }
+    }
+    // Existing point disks and inclusive line endpoints retain separate primitive hits.
+    for (const auto topology : {vertex_primitive_topology_t::point, vertex_primitive_topology_t::line, vertex_primitive_topology_t::line_strip, vertex_primitive_topology_t::line_loop}) {
+        const bool points = topology == vertex_primitive_topology_t::point;
+        const std::vector<clip_position_fixture_t> positions = points ? std::vector<clip_position_fixture_t>{{0, 0, 0, 1}, {0, 0, 0, 1}} : std::vector<clip_position_fixture_t>{{-0.5F, 0, 0, 1}, {0, 0, 0, 1}, {0.5F, 0, 0, 1}};
+        const index_buffer_t::indices_t indices = points ? index_buffer_t::indices_t{0, 1} : (topology == vertex_primitive_topology_t::line ? index_buffer_t::indices_t{0, 1, 1, 2} : index_buffer_t::indices_t{0, 1, 2});
+        auto item = make_visibility_item(positions, indices, topology, {1, 0, 0, 0.5F});
+        item.material()->depth_test(false);
+        item.material()->stencil_test(true);
+        item.material()->stencil_front({.pass = stencil_op_t::increment_wrap});
+        item.material()->stencil_back({.pass = stencil_op_t::increment_wrap});
+        renderer.clear_stencil(0, inactive_metric);
+        renderer.draw(make_camera(32, 32), item, inactive_metric);
+        require(stencil[pixel_index(16, 16, 32)] == (topology == vertex_primitive_topology_t::line_loop ? 3 : 2));
+    }
+}
+
+program_ptr_t make_target_program(bool vertex_sampling = false) {
+    shader::vertex_shader_ast_builder_t vertex;
+    const auto position = vertex.input<vector4f_t>(0);
+    if (vertex_sampling) {
+        const auto sampled = shader::sample(vertex.resource<shader::shader_texture_2d_t>(0), vertex.resource<shader::shader_sampler_t>(0), vector2f_t({0.5F, 0.5F}));
+        vertex.position(position + sampled * 0.0F);
+    } else {
+        vertex.position(position);
+    }
+    shader::fragment_shader_ast_builder_t fragment;
+    if (vertex_sampling) {
+        fragment.color(vector4f_t({1, 0, 0, 1}));
+    } else {
+        const auto coordinates = shader::swizzle<0, 1>(fragment.fragment_coordinate()) / fragment.uniform<vector2f_t>(0);
+        fragment.color(shader::sample(fragment.resource<shader::shader_texture_2d_t>(0), fragment.resource<shader::shader_sampler_t>(0), coordinates));
+    }
+    return std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+}
+
+void test_target_views_and_feedback() {
+    auto target = std::make_shared<texture::texture_t>(texture::format_t::rgba8_srgb, 4, 4, byte_stream::byte_stream_t(std::vector<std::byte>(64)));
+    framebuffer_t framebuffer(target->view());
+    require(framebuffer.width() == 4 && framebuffer.height() == 4 && framebuffer.encoding() == color_encoding_t::srgb);
+    require(framebuffer.pixels().bytes().data() == target->bytes().data());
+    const auto original = framebuffer;
+    framebuffer.encoding(color_encoding_t::linear);
+    require(framebuffer.pixels().format() == texture::format_t::rgba8_unorm);
+    require(target->format() == texture::format_t::rgba8_srgb && original.encoding() == color_encoding_t::srgb);
+    test::expect_throws([&] { framebuffer.encoding(static_cast<color_encoding_t>(99)); });
+    require(framebuffer.pixels().format() == texture::format_t::rgba8_unorm);
+    const auto borrowed = framebuffer.pixels();
+    borrowed.bytes()[0] = std::byte{123};
+    require(target->bytes()[0] == std::byte{123});
+    test::expect_throws([&] { (void)framebuffer_t(texture::pixel_view_t(texture::format_t::rgba16_float, 0, 0, {})); });
+    test::expect_throws([&] { (void)framebuffer_t(texture::pixel_view_t(texture::format_t::rgba8_unorm, std::size_t(std::numeric_limits<int>::max()) + 1, 0, {})); });
+    for (const auto dimensions : {std::array<std::size_t, 2>{0, 4}, {4, 0}, {0, 0}}) {
+        software_renderer_t empty(framebuffer_t(texture::pixel_view_t(texture::format_t::rgba8_srgb, dimensions[0], dimensions[1], {})));
+        empty.clear_color(clear_color, inactive_metric);
+        empty.clear_depth(std::numeric_limits<float>::quiet_NaN(), inactive_metric);
+        empty.clear_stencil(255, inactive_metric);
+        empty.draw(make_camera(4, 4), render_item_t{}, inactive_metric);
+    }
+    std::vector<rgba8_t> output(16, clear_color);
+    const auto camera = make_camera(4, 4);
+    for (bool vertex_sampling : {false, true}) {
+        auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle);
+        item.material() = make_material(target, make_sampler(), make_target_program(vertex_sampling));
+        item.material()->uniform(0, vector2f_t({4, 4}));
+        item.material()->color_write(color_mask_t::none);
+        software_renderer_t renderer(framebuffer);
+        const std::vector<std::byte> before(target->bytes().begin(), target->bytes().end());
+        for (bool partial : {false, true}) {
+            renderer.framebuffer() = partial ? framebuffer_t(texture::pixel_view_t(texture::format_t::rgba8_unorm, 1, 1, target->view().bytes().subspan(4, 4))) : framebuffer;
+            profiling::profiler_t profiler;
+            {
+                auto metric = profiler.metric<application_metrics_t>();
+                test::expect_throws([&] { renderer.draw(camera, item, metric); });
+            }
+            require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>() == nullptr);
+            require(std::equal(before.begin(), before.end(), target->bytes().begin()));
+        }
+        // Stencil aliases byte storage legally through its unsigned-character representation.
+        static_assert(std::is_same_v<std::uint8_t, unsigned char>);
+        renderer.framebuffer() = framebuffer_t(output, 4, 4);
+        renderer.framebuffer().stencil({reinterpret_cast<unsigned char*>(target->view().bytes().data()) + 1, 16});
+        test::expect_throws([&] { renderer.draw(camera, item, inactive_metric); });
+        renderer.framebuffer().stencil({});
+        renderer.draw(camera, item, inactive_metric);
+        renderer.framebuffer() = framebuffer;
+        const camera_t outside({{10, 20}, {10, 20}}, orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
+        renderer.draw(outside, item, inactive_metric);
+        // A reflected binding is rejected even when every primitive clips away.
+        item.geometry() = make_typed_geometry(std::vector<clip_position_fixture_t>{{5, 5, 0, 1}, {6, 5, 0, 1}, {5, 6, 0, 1}}, vertex_attribute_t(vertex_attribute_type_t::R32, 4), {0, 1, 2}, vertex_primitive_topology_t::triangle);
+        test::expect_throws([&] { renderer.draw(camera, item, inactive_metric); });
+    }
+    auto unused = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle);
+    unused.material()->depth_test(false);
+    unused.material()->texture(99, target);
+    software_renderer_t renderer(framebuffer);
+    renderer.draw(camera, unused, inactive_metric);
+    // Replacing texture storage requires rebinding; framebuffers never acquire ownership.
+    *target = texture::texture_t(texture::format_t::rgba8_unorm, 2, 2, byte_stream::byte_stream_t(std::vector<std::byte>(16)));
+    renderer.framebuffer() = framebuffer_t(target->view());
+    renderer.clear_color(red, inactive_metric);
+    require(target->bytes()[0] == std::byte{255} && renderer.framebuffer().width() == 2);
+    const std::weak_ptr<texture::texture_t> weak = target;
+    target.reset();
+    require(!weak.expired());
+    unused.material()->texture(99, nullptr);
+    require(weak.expired());
+}
+
+void test_direct_two_pass() {
+    const auto camera = make_camera(4, 4);
+    for (const auto encoding : {color_encoding_t::linear, color_encoding_t::srgb}) {
+        const auto format = encoding == color_encoding_t::linear ? texture::format_t::rgba8_unorm : texture::format_t::rgba8_srgb;
+        auto target = std::make_shared<texture::texture_t>(format, 4, 4, byte_stream::byte_stream_t(std::vector<std::byte>(64)));
+        framebuffer_t offscreen(target->view());
+        software_renderer_t renderer(offscreen);
+        auto scene = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle, {1, 0, 0, 0.5F});
+        scene.material()->depth_test(false);
+        configure_source_over(*scene.material());
+        auto postprocess = scene;
+        postprocess.material() = make_material(target, make_sampler(), make_target_program());
+        postprocess.material()->uniform(0, vector2f_t({4, 4}));
+        postprocess.material()->blend(true);
+        postprocess.material()->blend_color({blend_factor_t::one, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+        postprocess.material()->blend_alpha({blend_factor_t::one, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+        std::vector<rgba8_t> pixels(16);
+        framebuffer_t output(pixels, 4, 4);
+        output.encoding(encoding);
+        std::vector<std::uint8_t> stencil(16);
+        offscreen.stencil(stencil);
+        // Render and sample again after editing the same allocation; no texture rebinding.
+        const auto allocation = target->bytes().data();
+        for (bool blue : {false, true}) {
+            for (const auto filter : {texture::filter_t::nearest, texture::filter_t::linear}) {
+                renderer.framebuffer() = offscreen;
+                renderer.clear_color({0, 0, 0, 0}, inactive_metric);
+                renderer.clear_stencil(0, inactive_metric);
+                scene.material()->stencil_test(true);
+                scene.material()->color_write(color_mask_t::none);
+                scene.material()->stencil_front({.reference = 1, .pass = stencil_op_t::replace});
+                scene.material()->stencil_back(scene.material()->stencil_front());
+                const camera_t mask_camera({{0, 2}, {0, 4}}, orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
+                renderer.draw(mask_camera, scene, inactive_metric);
+                scene.material()->color_write(color_mask_t::all);
+                scene.material()->stencil_front({.comparison = comparison_t::equal, .reference = 1});
+                scene.material()->stencil_back(scene.material()->stencil_front());
+                scene.material()->uniform(0, blue ? vector4f_t({0, 0, 1, 0.5F}) : vector4f_t({1, 0, 0, 0.5F}));
+                renderer.draw(camera, scene, inactive_metric);
+                require(allocation == target->bytes().data());
+                renderer.framebuffer() = output;
+                renderer.clear_color({0, 255, 0, 255}, inactive_metric);
+                postprocess.material()->sampler(0, std::make_shared<texture::sampler_t>(filter, texture::address_mode_t::clamp_to_edge, texture::address_mode_t::clamp_to_edge));
+                renderer.draw(camera, postprocess, inactive_metric);
+                for (int y = 0; y < 4; ++y) {
+                    for (int x = 0; x < 4; ++x) {
+                        const auto channel = std::uint8_t(encoding == color_encoding_t::linear ? 128 : 188);
+                        const auto green_channel = std::uint8_t(encoding == color_encoding_t::linear ? 127 : 187);
+                        expect_color(pixels[pixel_index(x, y, 4)], x < 2 ? rgba8_t{std::uint8_t(blue ? 0 : channel), green_channel, std::uint8_t(blue ? channel : 0), 255} : rgba8_t{0, 255, 0, 255});
+                    }
+                }
+            }
+        }
+        // Asymmetric corner pattern proves row orientation in the complete pass sequence.
+        renderer.framebuffer() = offscreen;
+        renderer.clear_color({0, 0, 0, 255}, inactive_metric);
+        renderer.clear_color(camera_t({{0, 2}, {0, 2}}, orthographic_t({{-1, 1}, {-1, 1}}, 0, 2)), red, inactive_metric);
+        renderer.clear_color(camera_t({{2, 4}, {0, 2}}, orthographic_t({{-1, 1}, {-1, 1}}, 0, 2)), green, inactive_metric);
+        renderer.clear_color(camera_t({{0, 2}, {2, 4}}, orthographic_t({{-1, 1}, {-1, 1}}, 0, 2)), blue, inactive_metric);
+        renderer.framebuffer() = output;
+        postprocess.material()->blend(false);
+        renderer.draw(camera, postprocess, inactive_metric);
+        expect_color(pixels[0], red); expect_color(pixels[3], green); expect_color(pixels[12], blue); expect_color(pixels[15], {0, 0, 0, 255});
+        // The existing owning copy provides an independent snapshot when requested.
+        const auto snapshot = *target;
+        renderer.framebuffer() = offscreen;
+        renderer.clear_color(white, inactive_metric);
+        require(snapshot.bytes()[1] == std::byte{0} && target->bytes()[1] == std::byte{255});
+    }
+}
+
+void test_stencil_facing_and_filtering() {
+    std::vector<rgba8_t> pixels(256);
+    std::vector<std::uint8_t> stencil(256);
+    software_renderer_t renderer(framebuffer_t(pixels, 16, 16));
+    renderer.framebuffer().stencil(stencil);
+    for (bool reversed : {false, true}) {
+        for (const auto winding : {winding_t::counter_clockwise, winding_t::clockwise}) {
+            auto item = make_visibility_item(visibility_quad(0), reversed ? index_buffer_t::indices_t{2, 1, 0, 3, 1, 2} : index_buffer_t::indices_t{0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle);
+            item.material()->depth_test(false);
+            item.material()->stencil_test(true);
+            item.material()->front_face(winding);
+            item.material()->stencil_front({.reference = 2, .pass = stencil_op_t::replace});
+            item.material()->stencil_back({.reference = 7, .pass = stencil_op_t::replace});
+            renderer.clear_stencil(0, inactive_metric);
+            renderer.draw(make_camera(16, 16), item, inactive_metric);
+            for (const auto stored : stencil) { require(stored == (reversed == (winding == winding_t::clockwise) ? 2 : 7)); }
+        }
+    }
+    for (const auto topology : {vertex_primitive_topology_t::point, vertex_primitive_topology_t::line, vertex_primitive_topology_t::line_strip, vertex_primitive_topology_t::line_loop}) {
+        auto item = make_visibility_item({{-0.5F, 0, 0, 1}, {0.5F, 0, 0, 1}}, {0, 1}, topology);
+        item.material()->depth_test(false);
+        item.material()->stencil_test(true);
+        item.material()->front_face(winding_t::clockwise);
+        item.material()->cull(cull_mode_t::both);
+        item.material()->stencil_front({.reference = 2, .pass = stencil_op_t::replace});
+        item.material()->stencil_back({.reference = 7, .pass = stencil_op_t::replace});
+        renderer.clear_stencil(0, inactive_metric);
+        renderer.draw(make_camera(16, 16), item, inactive_metric);
+        require(std::find(stencil.begin(), stencil.end(), 2) != stencil.end());
+        for (const auto stored : stencil) { require(stored == 0 || stored == 2); }
+    }
+    // Bilinear interpolation of a premultiplied edge, then source-over composition.
+    auto target = std::make_shared<texture::texture_t>(texture::format_t::rgba8_unorm, 2, 1, byte_stream::byte_stream_t(std::vector<std::byte>(8)));
+    renderer.framebuffer() = framebuffer_t(target->view());
+    renderer.clear_color({0, 0, 0, 0}, inactive_metric);
+    renderer.clear_color(make_camera(1, 1), {128, 0, 0, 128}, inactive_metric);
+    auto postprocess = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle);
+    postprocess.material() = make_material(target, std::make_shared<texture::sampler_t>(texture::filter_t::linear, texture::address_mode_t::clamp_to_edge, texture::address_mode_t::clamp_to_edge), make_target_program());
+    postprocess.material()->uniform(0, vector2f_t({4, 1}));
+    postprocess.material()->blend(true);
+    postprocess.material()->blend_color({blend_factor_t::one, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+    postprocess.material()->blend_alpha({blend_factor_t::one, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+    renderer.framebuffer() = framebuffer_t(std::span(pixels).first(4), 4, 1);
+    renderer.clear_color({0, 255, 0, 255}, inactive_metric);
+    renderer.draw(make_camera(4, 1), postprocess, inactive_metric);
+    expect_color(pixels[0], {128, 127, 0, 255});
+    expect_color(pixels[1], {96, 159, 0, 255});
+    expect_color(pixels[2], {32, 223, 0, 255});
+    expect_color(pixels[3], {0, 255, 0, 255});
+}
+
 void run_resource_tests() {
     test_rotation_and_item_transform();
     test_resource_model();
@@ -2930,6 +3395,13 @@ void run_framebuffer_tests() {
 }
 
 void run_pipeline_tests() {
+    test_stencil_facing_and_filtering();
+    test_target_views_and_feedback();
+    test_direct_two_pass();
+    test_stencil_state_and_attachments();
+    test_stencil_operations_and_comparisons();
+    test_stencil_pipeline_and_metrics();
+    test_stencil_coverage();
     test_blend_state();
     test_blend_equations();
     test_color_encoding_and_masks();

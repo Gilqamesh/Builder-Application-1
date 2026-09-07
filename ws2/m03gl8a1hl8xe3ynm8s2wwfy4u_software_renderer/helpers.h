@@ -273,11 +273,19 @@ float encode_srgb(float component);
 
 float blend_factor_component(blend_factor_t factor, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component);
 float blend_component(const blend_equation_t& blend_equation, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component);
-void write_color(const material_t& material, color_encoding_t encoding, const vector4f_t& source, rgba8_t& pixel);
+void write_color(const material_t& material, color_encoding_t encoding, const vector4f_t& source, std::byte* pixel);
 
 float depth_clear_value(float depth);
 
 bool depth_passes(comparison_t comparison, float incoming, float stored);
+
+bool stencil_passes(const stencil_state_t& stencil_state, std::uint8_t stored);
+
+void write_stencil(const stencil_state_t& stencil_state, stencil_op_t operation, std::uint8_t& stored, m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric);
+
+bool storage_overlaps(std::span<const std::byte> left, std::span<const std::byte> right);
+
+void validate_feedback(const material_t& material, const framebuffer_t& framebuffer);
 
 void shade_sample(
     const material_t& material,

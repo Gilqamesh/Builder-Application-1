@@ -391,8 +391,71 @@ void test_formatting() {
     test::expect(std::equal_to<>(), std::format("{}", sampler), std::string("{ filter: linear, address_u: repeat, address_v: clamp_to_edge }"));
 }
 
+template <typename T>
+concept exposes_view = requires(T&& texture) { std::forward<T>(texture).view(); };
+
+void test_pixel_views() {
+    using texture_api::pixel_view_t;
+    using texture_api::const_pixel_view_t;
+    using texture_api::format_t;
+    static_assert(exposes_view<texture_api::texture_t&> && exposes_view<const texture_api::texture_t&>);
+    static_assert(!exposes_view<texture_api::texture_t> && !exposes_view<const texture_api::texture_t>);
+    static_assert(std::is_same_v<decltype(std::declval<texture_api::texture_t&>().view()), pixel_view_t>);
+    static_assert(std::is_same_v<decltype(std::declval<const texture_api::texture_t&>().view()), const_pixel_view_t>);
+    static_assert(std::is_convertible_v<pixel_view_t, const_pixel_view_t>);
+    static_assert(!std::is_convertible_v<const_pixel_view_t, pixel_view_t>);
+    static_assert(std::is_same_v<decltype(std::declval<const pixel_view_t&>().bytes()), std::span<std::byte>>);
+    std::vector<std::byte> storage(24);
+    const pixel_view_t writable(format_t::rgba8_unorm, 3, 2, storage);
+    const_pixel_view_t readonly = writable;
+    test::expect(std::identity(), readonly.bytes().data() == storage.data());
+    writable.bytes()[7] = std::byte{73};
+    test::expect(std::identity(), readonly.bytes()[7] == std::byte{73});
+    auto copied = writable;
+    copied = pixel_view_t(format_t::rgba8_srgb, 1, 1, writable.bytes().first(4));
+    test::expect(std::identity(), writable.format() == format_t::rgba8_unorm && writable.width() == 3);
+    test::expect(std::identity(), copied.format() == format_t::rgba8_srgb && copied.width() == 1);
+    test::expect(std::identity(), std::format("{} {}", writable, readonly).find("bytes: 24") != std::string::npos);
+    const auto maximum = std::numeric_limits<std::size_t>::max();
+    for (const auto format : {format_t::rgba8_unorm, format_t::rgba8_srgb, format_t::rgba16_float, format_t::rgba32_float}) {
+        pixel_view_t zero_width(format, 0, maximum, {}), zero_height(format, maximum, 0, {});
+        test::expect(std::identity(), zero_width.bytes().empty() && zero_height.bytes().empty());
+        test::expect_throws([&] { (void)pixel_view_t(format, 0, 1, storage); });
+        test::expect_throws([&] { (void)const_pixel_view_t(format, 1, 1, {}); });
+        test::expect_throws([&] { (void)pixel_view_t(format, maximum, 2, {}); });
+        test::expect_throws([&] { (void)const_pixel_view_t(format, maximum, 1, {}); });
+        std::vector<std::byte> texel(texture_api::bytes_per_texel(format));
+        test::expect_no_throw([&] { (void)pixel_view_t(format, 1, 1, texel); });
+    }
+    test::expect_throws([&] { (void)pixel_view_t(static_cast<format_t>(99), 0, 0, {}); });
+    test::expect_throws([&] { (void)const_pixel_view_t(format_t::rgba8_unorm, 2, 3, std::span(storage).first(23)); });
+    auto texture = rgba8_texture(1, 1, {1, 2, 3, 4});
+    const auto borrowed = texture.view();
+    borrowed.bytes()[0] = std::byte{255};
+    test::expect(std::identity(), texture.bytes().data() == borrowed.bytes().data());
+    auto independent = texture;
+    independent.view().bytes()[0] = std::byte{0};
+    test::expect(std::identity(), texture.bytes()[0] == std::byte{255});
+    texture = rgba8_texture(2, 1, {128, 0, 0, 128, 0, 0, 0, 0});
+    const auto rebound = texture.view();
+    test::expect(std::identity(), rebound.width() == 2 && rebound.bytes().data() == texture.bytes().data());
+    const texture_api::sampler_t linear(texture_api::filter_t::linear, texture_api::address_mode_t::clamp_to_edge, texture_api::address_mode_t::clamp_to_edge);
+    expect_color(texture_api::sample(texture, linear, {0.5F, 0.5F}), {64.0F / 255, 0, 0, 64.0F / 255});
+    texture.view().bytes()[0] = std::byte{64};
+    expect_color(texture_api::sample(texture, linear, {0.25F, 0.5F}), {64.0F / 255, 0, 0, 128.0F / 255});
+    auto moved = std::move(texture);
+    test::expect(std::identity(), texture.view().bytes().empty() && texture.view().width() == 0);
+    test::expect(std::identity(), moved.view().bytes().data() == moved.bytes().data());
+    auto assigned = rgba8_texture(1, 1, {0, 0, 0, 0});
+    assigned = std::move(moved);
+    test::expect(std::identity(), moved.view().bytes().empty() && assigned.view().width() == 2);
+    auto empty_copy = moved;
+    test::expect(std::identity(), empty_copy.view().bytes().empty());
+}
+
 int main() {
     return test::run([] {
+        test_pixel_views();
         test_texture_construction();
         test_texture_move_semantics();
         test_sampler_construction();

@@ -1,6 +1,6 @@
 # Software renderer milestones
 
-Status: milestones 0–3 are implemented and validated. Milestone 6 has profiling and an initial optimized baseline; algorithmic optimization remains unstarted. Milestones 4–5 remain proposed and unstarted. Public behavior is owned by the module headers.
+Status: milestones 0–4 are implemented and validated. Milestone 6 has profiling and an initial optimized baseline; algorithmic optimization remains unstarted. Milestone 5 remains proposed and unstarted. Public behavior is owned by the module headers.
 
 Baseline: [Builder-Modules at 540bbede71740d24292cc3b7cd9c8ed126eca0c3](https://github.com/Gilqamesh/Builder-Modules/tree/540bbede71740d24292cc3b7cd9c8ed126eca0c3).
 
@@ -145,11 +145,16 @@ initializes attachments before the pass and supplies transparent draw ordering.
 
 ## 4. Stencil and render-to-texture
 
-Status: unstarted.
+Status: implemented; headless, native consumer, visible integration, and benchmark validation passed.
 
-- Outcome: stencil masking and a clear path from rendering a pass to sampling its result. Basic offscreen color rendering already exists.
-- Open decisions: stencil attachment views and lifetimes, stencil comparisons/operations/masks, colorless framebuffer support, stencil clear semantics, and render-target/texture interoperability. Define or reject simultaneous sampling and writing of the same storage.
-- Acceptance criteria: a stencil mask limits a draw correctly and one rendered pass is sampled by a later pass with matching orientation and color semantics.
+- Outcome: per-face stencil masking and direct rendering into texture-owned color storage, sampled by a later pass without an image copy.
+- [Materials](../material.h) own stencil enablement and validated face descriptions. [Framebuffers](../framebuffer.h) borrow independent eight-bit stencil storage; [clears and drawing](../software_renderer.h) define late operation ordering and bounded writes.
+- The texture module owns [validated mutable/read-only views](../../../ws1/m03gt0l0q3l4b1k27eab5k7py1_texture/pixel_view.h). Framebuffers borrow writable views and materials retain sampled textures; applications maintain lifetimes and order passes.
+- `pixels()` now returns a writable pixel view. Its format is the framebuffer's encoding source of truth. Explicit reinterpretation changes that view without changing owner metadata or bytes. See the [caller and migration guide](render-targets.md).
+- [Sampling](../../../ws1/m03gt0l0q3l4b1k27eab5k7py1_texture/sampler.h) returns linear RGBA without changing alpha association. Premultiplied intermediate results compose through the selected blend equations.
+- Draw preparation rejects reflected texture storage overlapping any attached color/depth/stencil bytes, including partial overlap and disabled writes. Both shader stages are checked; unused extra bindings and empty-region returns retain their contracts.
+- Acceptance evidence covers stencil operation/comparison tables, masks, discard/depth outcomes, face selection, shared/clipped edges, direct two-pass color/orientation, premultiplied composition, storage reuse, feedback rejection and profiling equivalence.
+- Colorless framebuffers, floating-point color attachments, and early testing remain deferred. No milestone 4 semantic decision remains open.
 
 ## 5. Interpolation modes and mipmapped sampling
 
@@ -538,6 +543,71 @@ Logs, staged sources and helpers remain in `/tmp/renderer-m3-implementation`.
 Only the active tower-defense software path was visually checked. Dual-source
 blending, advanced operations, logic operations, extra attachments, stencil, and
 later feature milestones remain deferred.
+
+### Milestone 4 implementation record — 2026-09-07
+
+Reviewed base: `e5daeb1`. Changes are in the working tree; no commit was created.
+The settled public contracts are in [material.h](../material.h),
+[framebuffer.h](../framebuffer.h), [software_renderer.h](../software_renderer.h),
+the texture module's [pixel_view.h](../../../ws1/m03gt0l0q3l4b1k27eab5k7py1_texture/pixel_view.h)
+and [sampler.h](../../../ws1/m03gt0l0q3l4b1k27eab5k7py1_texture/sampler.h).
+The [migration and caller guide](render-targets.md) records the explicit `pixels()`
+return-type change, mutable/read-only view access, encoding reinterpretation and
+application-owned pass sequencing. No milestone 4 semantic decision remains open.
+
+Changed texture files: `pixel_view.h/.cpp`, `texture.h/.cpp`, `sampler.h/.cpp`,
+`test/public_api.cpp`, and `AGENTS.md`. Changed renderer files:
+`framebuffer.h/.cpp`, `material.h/.cpp`, `helpers.h/.cpp`, `software_renderer.h/.cpp`,
+`profiling_metrics.h`, `test/public_api.cpp`, `cli.cpp`, `benchmark.cpp`, `AGENTS.md`,
+`docs/milestones.md`, `docs/profiling.md`, `docs/render-targets.md`, and
+`docs/milestone-4-performance.md/.json`.
+
+Checks obtained from changed source (exit 0):
+
+```sh
+python3 /tmp/renderer-m4-implementation/build_stencil.py
+python3 /tmp/renderer-m4-implementation/build.py texture public_api
+/tmp/renderer-m1-implementation/install_binary m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
+/tmp/renderer-m1-implementation/install_binary m03gilsfsv3k34ej14ytz8a29k_tower_defense_game
+python3 /tmp/renderer-m4-implementation/smoke.py m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer 'Software Renderer' renderer-retry
+python3 /tmp/renderer-m4-implementation/smoke.py m03gilsfsv3k34ej14ytz8a29k_tower_defense_game 'Tower Defense Game' tower-defense
+artifacts/m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer/latest/binary/benchmark/install/benchmark --help
+git -C /home/gilqamesh/Projects/Builder-Modules diff --check
+```
+
+Staged validation used GNU C++23 with `-O0 -g -Wall -Wextra -ftrapv`; stencil
+validation passed before the pixel-access migration. The native Builder build used
+Clang C++23 and automatically rebuilt and passed the texture, software-shader and
+renderer public suites. The renderer demo, benchmark and all tower-defense source
+paths rebuilt successfully. GNU syntax checks also passed for the demo and benchmark.
+Source comparison verified installed texture/renderer C++ files against the working
+source; measured hashes are preserved with the performance report.
+
+Focused tests cover every stencil operation/comparison, masks and boundaries,
+front/back selection, point/line behavior, discard, absent/masked color, depth outcomes,
+clear bounds, attachment/state replacement and profiling equivalence. Shared and
+clipped edges, including crossed/concave fixtures, preserve one increment per covered
+original primitive. View tests cover zero extents, overflow, format eligibility,
+constness, copying, movement, rebinding, shared storage identity and owner lifetime.
+Two-pass tests cover orientation, linear/sRGB storage, premultiplied composition and
+bilinear edges, reused allocation, explicit snapshots and conservative feedback
+rejection before vertex execution in both stages, including partial overlap,
+disabled writes, clipped geometry and unused extra bindings.
+
+The final desktop checks displayed content and closed normally. Inspected captures
+are `/tmp/renderer-m4-implementation/renderer-retry-smoke-0.png` (960×540, stencil
+mask and sampled composite) and `tower-defense-smoke-0.png` (1600×1200, retaining
+the consumer's 400×200 rendering region). The sandboxed renderer launch could not
+open X11; desktop validation succeeded. The first desktop helper timed out waiting
+30 seconds for closure after capturing a frame. The demo's unoptimized frames took
+roughly 21–25 seconds; a repeated check with a longer close timeout passed.
+
+[Performance results and exact commands](milestone-4-performance.md), with
+[raw evidence](milestone-4-performance.json), compare the six existing workloads
+and establish three feature baselines. This is a feature delivery without an
+algorithmic optimization claim. Colorless framebuffers, floating-point color
+attachments, early testing and milestone 5 remain deferred. Only the active
+tower-defense presentation path was visually checked.
 
 ## Deferred scope
 

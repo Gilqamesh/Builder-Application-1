@@ -107,6 +107,32 @@ comparison_t material_t::depth_compare() const {
     return m_depth_compare;
 }
 
+void material_t::stencil_test(bool enabled) {
+    m_stencil_test = enabled;
+}
+
+bool material_t::stencil_test() const {
+    return m_stencil_test;
+}
+
+void material_t::stencil_front(stencil_state_t stencil_state) {
+    validate_stencil_state(stencil_state);
+    m_stencil_front = stencil_state;
+}
+
+stencil_state_t material_t::stencil_front() const {
+    return m_stencil_front;
+}
+
+void material_t::stencil_back(stencil_state_t stencil_state) {
+    validate_stencil_state(stencil_state);
+    m_stencil_back = stencil_state;
+}
+
+stencil_state_t material_t::stencil_back() const {
+    return m_stencil_back;
+}
+
 void material_t::front_face(winding_t winding) {
     switch (winding) {
         case winding_t::counter_clockwise:
@@ -186,6 +212,39 @@ void material_t::color_write(color_mask_t color_mask) {
 
 color_mask_t material_t::color_write() const {
     return m_color_write;
+}
+
+void material_t::validate_stencil_state(const stencil_state_t& stencil_state) {
+    switch (stencil_state.comparison) {
+        case comparison_t::never:
+        case comparison_t::less:
+        case comparison_t::equal:
+        case comparison_t::less_equal:
+        case comparison_t::greater:
+        case comparison_t::not_equal:
+        case comparison_t::greater_equal:
+        case comparison_t::always:
+            break;
+        default: {
+            throw std::invalid_argument(std::format("material_t rejects invalid stencil comparison in {}", stencil_state));
+        }
+    }
+    for (const auto operation : {stencil_state.fail, stencil_state.depth_fail, stencil_state.pass}) {
+        switch (operation) {
+            case stencil_op_t::keep:
+            case stencil_op_t::zero:
+            case stencil_op_t::replace:
+            case stencil_op_t::increment_clamp:
+            case stencil_op_t::decrement_clamp:
+            case stencil_op_t::increment_wrap:
+            case stencil_op_t::decrement_wrap:
+            case stencil_op_t::invert:
+                break;
+            default: {
+                throw std::invalid_argument(std::format("material_t rejects invalid stencil operation in {}", stencil_state));
+            }
+        }
+    }
 }
 
 void material_t::validate_blend_equation(const blend_equation_t& blend_equation) {

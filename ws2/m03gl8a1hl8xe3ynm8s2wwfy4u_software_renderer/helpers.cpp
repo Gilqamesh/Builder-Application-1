@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -842,7 +843,7 @@ float blend_component(const blend_equation_t& blend_equation, const vector4f_t& 
     }
 }
 
-void write_color(const material_t& material, color_encoding_t encoding, const vector4f_t& source, rgba8_t& pixel) {
+void write_color(const material_t& material, color_encoding_t encoding, const vector4f_t& source, std::byte* pixel) {
     const auto color_mask = material.color_write();
     if (color_mask == color_mask_t::none) {
         return;
@@ -852,7 +853,9 @@ void write_color(const material_t& material, color_encoding_t encoding, const ve
     };
     const bool replacement = !material.blend() || (replaces(material.blend_color()) && replaces(material.blend_alpha()));
     if (replacement && encoding == color_encoding_t::linear && color_mask == color_mask_t::all) {
-        pixel = to_rgba8(source);
+        const auto stored = to_rgba8(source);
+        pixel[0] = std::byte(stored.red); pixel[1] = std::byte(stored.green);
+        pixel[2] = std::byte(stored.blue); pixel[3] = std::byte(stored.alpha);
         return;
     }
     const vector4f_t sanitized_source {
@@ -861,7 +864,7 @@ void write_color(const material_t& material, color_encoding_t encoding, const ve
     };
     vector4f_t result = sanitized_source;
     if (!replacement) {
-        vector4f_t destination {pixel.red / 255.0F, pixel.green / 255.0F, pixel.blue / 255.0F, pixel.alpha / 255.0F};
+        vector4f_t destination {std::to_integer<unsigned>(pixel[0]) / 255.0F, std::to_integer<unsigned>(pixel[1]) / 255.0F, std::to_integer<unsigned>(pixel[2]) / 255.0F, std::to_integer<unsigned>(pixel[3]) / 255.0F};
         if (encoding == color_encoding_t::srgb) {
             for (std::size_t component = 0; component < 3; ++component) {
                 destination[component] = decode_srgb(destination[component]);
@@ -882,13 +885,14 @@ void write_color(const material_t& material, color_encoding_t encoding, const ve
     }
     const auto stored = to_rgba8(result);
     if (color_mask == color_mask_t::all) {
-        pixel = stored;
+        pixel[0] = std::byte(stored.red); pixel[1] = std::byte(stored.green);
+        pixel[2] = std::byte(stored.blue); pixel[3] = std::byte(stored.alpha);
     } else {
         // Masking affects storage only; disabled bytes never round-trip through float.
-        if ((color_mask & color_mask_t::red) != color_mask_t::none) { pixel.red = stored.red; }
-        if ((color_mask & color_mask_t::green) != color_mask_t::none) { pixel.green = stored.green; }
-        if ((color_mask & color_mask_t::blue) != color_mask_t::none) { pixel.blue = stored.blue; }
-        if ((color_mask & color_mask_t::alpha) != color_mask_t::none) { pixel.alpha = stored.alpha; }
+        if ((color_mask & color_mask_t::red) != color_mask_t::none) { pixel[0] = std::byte(stored.red); }
+        if ((color_mask & color_mask_t::green) != color_mask_t::none) { pixel[1] = std::byte(stored.green); }
+        if ((color_mask & color_mask_t::blue) != color_mask_t::none) { pixel[2] = std::byte(stored.blue); }
+        if ((color_mask & color_mask_t::alpha) != color_mask_t::none) { pixel[3] = std::byte(stored.alpha); }
     }
 }
 
@@ -911,6 +915,67 @@ bool depth_passes(comparison_t comparison, float incoming, float stored) {
         case comparison_t::always: return true;
     }
     throw std::invalid_argument(std::format("software_renderer_t::draw has invalid depth comparison {}", comparison));
+}
+
+bool stencil_passes(const stencil_state_t& stencil_state, std::uint8_t stored) {
+    const auto reference = stencil_state.reference & stencil_state.compare_mask;
+    const auto masked = stored & stencil_state.compare_mask;
+    switch (stencil_state.comparison) {
+        case comparison_t::never: return false;
+        case comparison_t::less: return reference < masked;
+        case comparison_t::equal: return reference == masked;
+        case comparison_t::less_equal: return reference <= masked;
+        case comparison_t::greater: return masked < reference;
+        case comparison_t::not_equal: return reference != masked;
+        case comparison_t::greater_equal: return masked <= reference;
+        case comparison_t::always: return true;
+    }
+    throw std::invalid_argument(std::format("stencil_passes rejects invalid comparison {}", stencil_state.comparison));
+}
+
+void write_stencil(const stencil_state_t& stencil_state, stencil_op_t operation, std::uint8_t& stored, m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric) {
+    if (operation == stencil_op_t::keep || stencil_state.write_mask == 0) {
+        return;
+    }
+    unsigned candidate = stored;
+    switch (operation) {
+        case stencil_op_t::keep: { } break;
+        case stencil_op_t::zero: { candidate = 0; } break;
+        case stencil_op_t::replace: { candidate = stencil_state.reference; } break;
+        case stencil_op_t::increment_clamp: { candidate = std::min(candidate + 1, 255U); } break;
+        case stencil_op_t::decrement_clamp: { candidate = candidate == 0 ? 0 : candidate - 1; } break;
+        case stencil_op_t::increment_wrap: { candidate = (candidate + 1) & 255U; } break;
+        case stencil_op_t::decrement_wrap: { candidate = (candidate + 255) & 255U; } break;
+        case stencil_op_t::invert: { candidate ^= 255U; } break;
+        default: { throw std::invalid_argument(std::format("write_stencil rejects invalid operation {}", operation)); }
+    }
+    stored = static_cast<std::uint8_t>((stored & ~stencil_state.write_mask) | (candidate & stencil_state.write_mask));
+    metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept { ++metric.m_stencil_writes; });
+}
+
+bool storage_overlaps(std::span<const std::byte> left, std::span<const std::byte> right) {
+    if (left.empty() || right.empty()) {
+        return false;
+    }
+    const std::less<const std::byte*> before;
+    return before(left.data(), right.data() + right.size()) && before(right.data(), left.data() + left.size());
+}
+
+void validate_feedback(const material_t& material, const framebuffer_t& framebuffer) {
+    const auto& program = *material.program();
+    for (const auto* interface : {&program.vertex_interface(), &program.fragment_interface()}) {
+        for (const auto& binding : interface->bindings()) {
+            if (binding.type.category() != software_shader::shader::shader_data_category_t::texture_2d) {
+                continue;
+            }
+            const auto sampled = material.bindings().texture(binding.index).bytes();
+            if (storage_overlaps(sampled, framebuffer.pixels().bytes()) ||
+                storage_overlaps(sampled, std::as_bytes(framebuffer.depth())) ||
+                storage_overlaps(sampled, std::as_bytes(framebuffer.stencil()))) {
+                throw std::invalid_argument(std::format("software_renderer_t::draw texture binding {} overlaps writable attachment storage", binding.index));
+            }
+        }
+    }
 }
 
 void shade_sample(
@@ -952,24 +1017,35 @@ void shade_sample(
         return;
     }
     const auto index = static_cast<std::size_t>(y) * static_cast<std::size_t>(bounds.m_width) + static_cast<std::size_t>(x);
+    const bool stencil_test = material.stencil_test();
+    const auto stencil_state = stencil_test ? (front_facing ? material.stencil_front() : material.stencil_back()) : stencil_state_t{};
+    if (stencil_test && !stencil_passes(stencil_state, framebuffer.stencil()[index])) {
+        write_stencil(stencil_state, stencil_state.fail, framebuffer.stencil()[index], metric);
+        metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept { ++metric.m_stencil_rejections; });
+        return;
+    }
     if (material.depth_test()) {
         const auto comparison = material.depth_compare();
         const bool passes = comparison == comparison_t::always || (comparison != comparison_t::never && depth_passes(comparison, depth, framebuffer.depth()[index]));
         if (!passes) {
+            if (stencil_test) {
+                write_stencil(stencil_state, stencil_state.depth_fail, framebuffer.stencil()[index], metric);
+            }
             metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
                 ++metric.m_depth_rejections;
             });
             return;
         }
-        if (material.depth_write()) {
-            framebuffer.depth()[index] = depth;
-            metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
-                ++metric.m_depth_writes;
-            });
-        }
+    }
+    if (stencil_test) {
+        write_stencil(stencil_state, stencil_state.pass, framebuffer.stencil()[index], metric);
+    }
+    if (material.depth_test() && material.depth_write()) {
+        framebuffer.depth()[index] = depth;
+        metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept { ++metric.m_depth_writes; });
     }
     if (const auto color = io.color(); color && material.color_write() != color_mask_t::none) {
-        write_color(material, framebuffer.encoding(), *color, framebuffer.pixels()[index]);
+        write_color(material, framebuffer.encoding(), *color, framebuffer.pixels().bytes().data() + index * 4);
         metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
             ++metric.m_color_writes;
         });

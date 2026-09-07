@@ -95,19 +95,19 @@ float decode_srgb(float encoded) {
     return std::pow((encoded + 0.055f) / 1.055f, 2.4f);
 }
 
-color_t decode_texel(const texture_api::texture_t& texture, std::size_t x, std::size_t y) {
-    const auto texel_size = texture_api::bytes_per_texel(texture.format());
-    const auto offset = (y * texture.width() + x) * texel_size;
-    const auto bytes = texture.bytes();
+color_t decode_texel(const texture_api::const_pixel_view_t& pixels, std::size_t x, std::size_t y) {
+    const auto texel_size = texture_api::bytes_per_texel(pixels.format());
+    const auto offset = (y * pixels.width() + x) * texel_size;
+    const auto bytes = pixels.bytes();
     color_t result;
 
-    switch (texture.format()) {
+    switch (pixels.format()) {
         case texture_api::format_t::rgba8_unorm:
         case texture_api::format_t::rgba8_srgb: {
             for (std::size_t component = 0; component < 4; ++component) {
                 result[component] = static_cast<float>(read_u8(bytes, offset + component)) / 255.0f;
             }
-            if (texture.format() == texture_api::format_t::rgba8_srgb) {
+            if (pixels.format() == texture_api::format_t::rgba8_srgb) {
                 for (std::size_t component = 0; component < 3; ++component) {
                     result[component] = decode_srgb(result[component]);
                 }
@@ -258,10 +258,11 @@ m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 4> sample(
         throw std::domain_error("sample: coordinates must be finite");
     }
 
+    const auto pixels = texture.view();
     switch (sampler.filter()) {
         case filter_t::nearest: {
             return decode_texel(
-                texture,
+                pixels,
                 nearest_tap(coordinates[0], texture.width(), sampler.address_u()),
                 nearest_tap(coordinates[1], texture.height(), sampler.address_v())
             );
@@ -270,13 +271,13 @@ m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 4> sample(
             const auto horizontal = linear_taps(coordinates[0], texture.width(), sampler.address_u());
             const auto vertical = linear_taps(coordinates[1], texture.height(), sampler.address_v());
             const auto first_row = interpolate(
-                decode_texel(texture, horizontal.first, vertical.first),
-                decode_texel(texture, horizontal.second, vertical.first),
+                decode_texel(pixels, horizontal.first, vertical.first),
+                decode_texel(pixels, horizontal.second, vertical.first),
                 horizontal.weight
             );
             const auto second_row = interpolate(
-                decode_texel(texture, horizontal.first, vertical.second),
-                decode_texel(texture, horizontal.second, vertical.second),
+                decode_texel(pixels, horizontal.first, vertical.second),
+                decode_texel(pixels, horizontal.second, vertical.second),
                 horizontal.weight
             );
             return interpolate(first_row, second_row, vertical.weight);

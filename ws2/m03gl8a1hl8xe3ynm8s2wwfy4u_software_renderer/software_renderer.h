@@ -10,6 +10,7 @@
 # include <m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h>
 
 # include <cstddef>
+# include <cstdint>
 # include <format>
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
@@ -45,13 +46,16 @@ namespace profiling = m03gtjqkhqacstl3luv2ojsz3q_profiling;
  * Lines include both floored projected endpoints. Points and lines are front-facing.
  * Fragment coordinates use framebuffer X/Y = (x+0.5,y+0.5),
  * Z = (interpolated Z/W+1)/2 clamped to [0,1], and W = interpolated reciprocal W.
- * The material supplies depth and culling state. Effective facing follows its
+ * The material supplies depth, stencil and culling state. Effective facing follows its
  * front-face selection without changing coverage; points and lines stay front-facing.
- * Covered, unculled samples execute the fragment shader before depth testing.
- * Discard prevents color and depth writes. A failed depth test also prevents both.
+ * Covered, unculled samples execute the fragment shader before stencil and depth testing.
+ * Discard preserves all attachments. Non-discarded samples test stencil before depth:
+ * stencil failure applies fail and stops; depth failure applies depth_fail and stops;
+ * otherwise pass applies, including when depth testing is disabled. Stencil failure
+ * prevents depth/color writes, and depth failure prevents depth/color writes.
  * Passing samples write depth when enabled. Supplied color is processed using
  * the material's independent RGB/alpha blend equations and channel-write mask.
- * Absent color or a disabled color mask preserves color while permitting depth writes.
+ * Absent color or a disabled color mask preserves color while permitting stencil/depth processing.
  *
  * Source components are sanitized and clamped to [0,1]: NaN and negative infinity
  * become zero, positive infinity becomes one. Fragment RGB and blend constants are
@@ -109,14 +113,30 @@ public:
     void clear_depth(const camera_t& camera, float depth, profiling::metric_t& parent_metric);
 
     /**
+     * @brief Fills stencil bytes independently of material state, preserving color and depth.
+     *
+     * Requires stencil for a nonempty framebuffer. Empty framebuffers do no work,
+     * including validation. Every byte is replaced, ignoring material write masks.
+     */
+    void clear_stencil(std::uint8_t stencil, profiling::metric_t& parent_metric);
+
+    /** @brief Applies clear_stencil's rules within the camera intersection; empty intersections do no work. */
+    void clear_stencil(const camera_t& camera, std::uint8_t stencil, profiling::metric_t& parent_metric);
+
+    /**
      * @brief Draws a render item using its material's program and the camera.
      *
      * Empty framebuffers, empty camera rectangles, and empty intersections return
      * before validating draw resources or deriving matrices. Otherwise requires
      * geometry, material, finite transforms, and framebuffer dimensions in [1, 2^23].
-     * Enabled depth testing requires an attached depth buffer.
+     * Enabled depth/stencil testing requires the corresponding attachment.
      * Validates current geometry, material bindings, and shader interfaces before
-     * vertex execution. Camera rectangles support the full signed-int endpoint range.
+     * vertex execution. Textures reflected in either stage must not overlap any
+     * attached color, depth or stencil storage, even when writes are disabled.
+     * This conservative resource restriction uses entire byte ranges, including
+     * partial overlap; unused extra bindings are accepted. Sequential draws may
+     * render and sample the same texture after selecting a different framebuffer.
+     * Camera rectangles support the full signed-int endpoint range.
      */
     void draw(const camera_t& camera, const render_item_t& render_item, profiling::metric_t& parent_metric);
 

@@ -16,7 +16,7 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 namespace software_shader = m03gt1djvvy5atia5evkbg6rqy_software_shader;
 namespace texture = m03gt0l0q3l4b1k27eab5k7py1_texture;
 
-/** @brief Compares the incoming window depth against the stored float sample. */
+/** @brief Selects a comparison; each use defines its left and right operands. */
 enum class comparison_t {
     never,
     less,
@@ -26,6 +26,36 @@ enum class comparison_t {
     not_equal,
     greater_equal,
     always
+};
+
+/** @brief Selects the operation on the full stored stencil byte before write masking. */
+enum class stencil_op_t {
+    keep,
+    zero,
+    replace,
+    increment_clamp,
+    decrement_clamp,
+    increment_wrap,
+    decrement_wrap,
+    invert
+};
+
+/**
+ * @brief Describes stencil testing for one face, validated by material setters.
+ *
+ * Compares (reference & compare_mask) against (stored & compare_mask).
+ * Replace uses the full reference. Operations use the full stored byte and then
+ * merge through write_mask, preserving every masked-off bit. Increment/decrement
+ * clamp at 0/255 or wrap modulo 256. Points and lines use the front settings.
+ */
+struct stencil_state_t {
+    comparison_t comparison = comparison_t::always;
+    std::uint8_t reference = 0;
+    std::uint8_t compare_mask = 255;
+    std::uint8_t write_mask = 255;
+    stencil_op_t fail = stencil_op_t::keep;
+    stencil_op_t depth_fail = stencil_op_t::keep;
+    stencil_op_t pass = stencil_op_t::keep;
 };
 
 /** @brief Selects front-facing triangle winding in NDC, before the framebuffer Y inversion. */
@@ -163,6 +193,22 @@ public:
     void depth_compare(comparison_t comparison);
     comparison_t depth_compare() const;
 
+    /**
+     * @brief Enables late stencil testing and operations; requires an attachment when drawing.
+     *
+     * Disabled testing bypasses comparisons and writes. Stencil starts disabled;
+     * both faces start with stencil_state_t's defaults. Setters validate even when
+     * testing is disabled and preserve the previous state on failure.
+     */
+    void stencil_test(bool enabled);
+    bool stencil_test() const;
+
+    void stencil_front(stencil_state_t stencil_state);
+    stencil_state_t stencil_front() const;
+
+    void stencil_back(stencil_state_t stencil_state);
+    stencil_state_t stencil_back() const;
+
     void front_face(winding_t winding);
     winding_t front_face() const;
 
@@ -194,6 +240,7 @@ public:
     color_mask_t color_write() const;
 
 private:
+    static void validate_stencil_state(const stencil_state_t& stencil_state);
     static void validate_blend_equation(const blend_equation_t& blend_equation);
 
     const std::shared_ptr<const software_shader::program_t> m_program;
@@ -201,6 +248,9 @@ private:
     bool m_depth_test = false;
     bool m_depth_write = true;
     comparison_t m_depth_compare = comparison_t::less;
+    bool m_stencil_test = false;
+    stencil_state_t m_stencil_front;
+    stencil_state_t m_stencil_back;
     winding_t m_front_face = winding_t::counter_clockwise;
     cull_mode_t m_cull = cull_mode_t::none;
     bool m_blend = false;
@@ -218,6 +268,12 @@ namespace std {
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::comparison_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_op_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_state_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::winding_t>;
@@ -294,6 +350,51 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::comparison_t> {
                 out = std::format_to(out, "invalid({})", static_cast<int>(option));
             } break;
         }
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_op_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') { throw std::format_error("invalid stencil_op_t format specifier"); }
+        return it;
+    }
+    auto format(m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_op_t operation, auto& ctx) const {
+        auto out = ctx.out();
+        switch (operation) {
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_op_t::keep: { out = std::format_to(out, "keep"); } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_op_t::zero: { out = std::format_to(out, "zero"); } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_op_t::replace: { out = std::format_to(out, "replace"); } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_op_t::increment_clamp: { out = std::format_to(out, "increment_clamp"); } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_op_t::decrement_clamp: { out = std::format_to(out, "decrement_clamp"); } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_op_t::increment_wrap: { out = std::format_to(out, "increment_wrap"); } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_op_t::decrement_wrap: { out = std::format_to(out, "decrement_wrap"); } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_op_t::invert: { out = std::format_to(out, "invert"); } break;
+            default: { out = std::format_to(out, "invalid({})", std::to_underlying(operation)); } break;
+        }
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_state_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') { throw std::format_error("invalid stencil_state_t format specifier"); }
+        return it;
+    }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::stencil_state_t& stencil_state, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ comparison: {}", stencil_state.comparison);
+        out = std::format_to(out, ", reference: {}", stencil_state.reference);
+        out = std::format_to(out, ", compare_mask: {}", stencil_state.compare_mask);
+        out = std::format_to(out, ", write_mask: {}", stencil_state.write_mask);
+        out = std::format_to(out, ", fail: {}", stencil_state.fail);
+        out = std::format_to(out, ", depth_fail: {}", stencil_state.depth_fail);
+        out = std::format_to(out, ", pass: {}", stencil_state.pass);
+        out = std::format_to(out, " }}");
         return out;
     }
 };
@@ -520,6 +621,9 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::material_t> {
         out = std::format_to(out, ", depth_test: {}", material.depth_test());
         out = std::format_to(out, ", depth_write: {}", material.depth_write());
         out = std::format_to(out, ", depth_compare: {}", material.depth_compare());
+        out = std::format_to(out, ", stencil_test: {}", material.stencil_test());
+        out = std::format_to(out, ", stencil_front: {}", material.stencil_front());
+        out = std::format_to(out, ", stencil_back: {}", material.stencil_back());
         out = std::format_to(out, ", front_face: {}", material.front_face());
         out = std::format_to(out, ", cull: {}", material.cull());
         out = std::format_to(out, ", blend: {}", material.blend());

@@ -19,6 +19,11 @@ struct clear_depth_metrics_t {
     std::size_t m_depth_writes = 0;
 };
 
+/** @brief Counts stencil byte assignments across all measured stencil clears. */
+struct clear_stencil_metrics_t {
+    std::size_t m_stencil_writes = 0;
+};
+
 struct draw_metrics_t {};
 struct preparation_metrics_t {};
 
@@ -38,10 +43,12 @@ struct vertex_metrics_t {
  * @brief Counts fragment invocations and rasterization results across all measurements.
  *
  * Discards count completed invocations reporting discard. Depth rejections count
- * non-discarded samples that fail enabled depth testing. Writes count actual sample
+ * samples reaching depth testing that fail it. Stencil rejections count stencil failures. Writes count actual sample
  * assignments, including repeated assignments to overlapping framebuffer locations.
  * A color sample counts once when at least one channel is assigned, even if its bytes
  * are unchanged; a fully disabled color mask counts zero.
+ * Stencil keep and a zero write mask perform no assignment; other operations count
+ * an assignment even when the stored byte is unchanged.
  * Unwinding preserves counts up to the failed operation. Clear writes are separate.
  * Reported discard/depth-rejection percentages use invocations as the denominator;
  * no invocations is reported as n/a.
@@ -49,6 +56,8 @@ struct vertex_metrics_t {
 struct raster_metrics_t {
     std::size_t m_invocations = 0;
     std::size_t m_discards = 0;
+    std::size_t m_stencil_rejections = 0;
+    std::size_t m_stencil_writes = 0;
     std::size_t m_depth_rejections = 0;
     std::size_t m_color_writes = 0;
     std::size_t m_depth_writes = 0;
@@ -62,6 +71,9 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_color_metri
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_depth_metrics_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_stencil_metrics_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::draw_metrics_t>;
@@ -102,6 +114,20 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_depth_metri
         auto out = ctx.out();
         out = std::format_to(out, "renderer.clear_depth");
         out = std::format_to(out, " depth_writes={}", clear_depth_metrics.m_depth_writes);
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_stencil_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        return ctx.begin();
+    }
+
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clear_stencil_metrics_t& clear_stencil_metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "renderer.clear_stencil");
+        out = std::format_to(out, " stencil_writes={}", clear_stencil_metrics.m_stencil_writes);
         return out;
     }
 };
@@ -158,6 +184,8 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_metrics_t>
         out = std::format_to(out, "renderer.rasterization");
         out = std::format_to(out, " fragment_invocations={}", raster_metrics.m_invocations);
         out = std::format_to(out, ", discards={}", raster_metrics.m_discards);
+        out = std::format_to(out, ", stencil_rejections={}", raster_metrics.m_stencil_rejections);
+        out = std::format_to(out, ", stencil_writes={}", raster_metrics.m_stencil_writes);
         out = std::format_to(out, ", depth_rejections={}", raster_metrics.m_depth_rejections);
         out = std::format_to(out, ", color_writes={}", raster_metrics.m_color_writes);
         out = std::format_to(out, ", depth_writes={}", raster_metrics.m_depth_writes);

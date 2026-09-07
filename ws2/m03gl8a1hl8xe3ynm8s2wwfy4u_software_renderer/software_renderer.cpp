@@ -24,9 +24,13 @@ const framebuffer_t& software_renderer_t::framebuffer() const noexcept {
 
 void software_renderer_t::clear_color(rgba8_t color, profiling::metric_t& parent_metric) {
     auto metric = parent_metric.metric<clear_color_metrics_t>();
-    std::ranges::fill(m_framebuffer.pixels(), color);
+    const auto bytes = m_framebuffer.pixels().bytes();
+    for (std::size_t offset = 0; offset < bytes.size(); offset += 4) {
+        bytes[offset] = std::byte(color.red); bytes[offset + 1] = std::byte(color.green);
+        bytes[offset + 2] = std::byte(color.blue); bytes[offset + 3] = std::byte(color.alpha);
+    }
     metric.update<clear_color_metrics_t>([this](clear_color_metrics_t& metric) {
-        metric.m_color_writes += m_framebuffer.pixels().size();
+        metric.m_color_writes += m_framebuffer.pixels().bytes().size() / 4;
     });
 }
 
@@ -36,10 +40,13 @@ void software_renderer_t::clear_color(const camera_t& camera, rgba8_t color, pro
     if (bounds.empty()) {
         return;
     }
-    const auto pixels = m_framebuffer.pixels();
+    const auto pixels = m_framebuffer.pixels().bytes();
     for (auto y = bounds.m_first_y; y < bounds.m_end_y; ++y) {
         const auto offset = std::size_t(y + bounds.m_y) * std::size_t(bounds.m_width) + std::size_t(bounds.m_first_x + bounds.m_x);
-        std::ranges::fill(pixels.subspan(offset, std::size_t(bounds.m_end_x - bounds.m_first_x)), color);
+        for (std::size_t index = offset; index < offset + std::size_t(bounds.m_end_x - bounds.m_first_x); ++index) {
+            pixels[index * 4] = std::byte(color.red); pixels[index * 4 + 1] = std::byte(color.green);
+            pixels[index * 4 + 2] = std::byte(color.blue); pixels[index * 4 + 3] = std::byte(color.alpha);
+        }
         metric.update<clear_color_metrics_t>([&bounds](clear_color_metrics_t& metric) noexcept {
             metric.m_color_writes += std::size_t(bounds.m_end_x - bounds.m_first_x);
         });
@@ -48,7 +55,7 @@ void software_renderer_t::clear_color(const camera_t& camera, rgba8_t color, pro
 
 void software_renderer_t::clear_depth(float depth, profiling::metric_t& parent_metric) {
     auto metric = parent_metric.metric<clear_depth_metrics_t>();
-    if (m_framebuffer.pixels().empty()) {
+    if (m_framebuffer.pixels().bytes().empty()) {
         return;
     }
     if (m_framebuffer.depth().empty()) {
@@ -76,6 +83,39 @@ void software_renderer_t::clear_depth(const camera_t& camera, float depth, profi
         std::ranges::fill(samples.subspan(offset, std::size_t(bounds.m_end_x - bounds.m_first_x)), depth);
         metric.update<clear_depth_metrics_t>([&bounds](clear_depth_metrics_t& metric) noexcept {
             metric.m_depth_writes += std::size_t(bounds.m_end_x - bounds.m_first_x);
+        });
+    }
+}
+
+void software_renderer_t::clear_stencil(std::uint8_t stencil, profiling::metric_t& parent_metric) {
+    auto metric = parent_metric.metric<clear_stencil_metrics_t>();
+    if (m_framebuffer.pixels().bytes().empty()) {
+        return;
+    }
+    if (m_framebuffer.stencil().empty()) {
+        throw std::invalid_argument("software_renderer_t::clear_stencil requires a stencil attachment");
+    }
+    std::ranges::fill(m_framebuffer.stencil(), stencil);
+    metric.update<clear_stencil_metrics_t>([this](clear_stencil_metrics_t& metric) {
+        metric.m_stencil_writes += m_framebuffer.stencil().size();
+    });
+}
+
+void software_renderer_t::clear_stencil(const camera_t& camera, std::uint8_t stencil, profiling::metric_t& parent_metric) {
+    auto metric = parent_metric.metric<clear_stencil_metrics_t>();
+    const raster_bounds_t bounds(m_framebuffer.width(), m_framebuffer.height(), camera.view_rect());
+    if (bounds.empty()) {
+        return;
+    }
+    const auto samples = m_framebuffer.stencil();
+    if (samples.empty()) {
+        throw std::invalid_argument("software_renderer_t::clear_stencil requires a stencil attachment");
+    }
+    for (auto y = bounds.m_first_y; y < bounds.m_end_y; ++y) {
+        const auto offset = std::size_t(y + bounds.m_y) * std::size_t(bounds.m_width) + std::size_t(bounds.m_first_x + bounds.m_x);
+        std::ranges::fill(samples.subspan(offset, std::size_t(bounds.m_end_x - bounds.m_first_x)), stencil);
+        metric.update<clear_stencil_metrics_t>([&bounds](clear_stencil_metrics_t& metric) noexcept {
+            metric.m_stencil_writes += std::size_t(bounds.m_end_x - bounds.m_first_x);
         });
     }
 }
@@ -108,9 +148,13 @@ void software_renderer_t::draw(
     if (material->depth_test() && m_framebuffer.depth().empty()) {
         throw std::invalid_argument("software_renderer_t::draw requires a depth attachment when depth testing is enabled");
     }
+    if (material->stencil_test() && m_framebuffer.stencil().empty()) {
+        throw std::invalid_argument("software_renderer_t::draw requires a stencil attachment when stencil testing is enabled");
+    }
     const auto& program = *material->program();
     const auto& bindings = material->bindings();
     program.validate_bindings(bindings);
+    validate_feedback(*material, m_framebuffer);
 
     const auto object_to_world = render_item.object_to_world();
     const auto world_to_clip = camera.world_to_clip();

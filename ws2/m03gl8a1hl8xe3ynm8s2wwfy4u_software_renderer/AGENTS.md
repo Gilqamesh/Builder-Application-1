@@ -25,6 +25,10 @@ assembly within those classes.
   association; shader output and blend equations determine it. Texture sampling
   retains its own contract. See [materials](material.h), [attachments](framebuffer.h),
   and [fragment processing](software_renderer.h).
+- Texture-owned render targets use the texture module's pixel views. Framebuffers
+  borrow writable storage and materials retain sampled owners; applications sequence
+  passes and maintain borrowed lifetimes. Feedback eligibility belongs to the
+  renderer's [draw contract](software_renderer.h). See [render targets](docs/render-targets.md).
 - Render items own object placement; cameras own pose, projection, and the
   destination rectangle. The renderer consumes these through their public
   interfaces. See [render items](render_item.h), [cameras](camera.h), and
@@ -44,7 +48,7 @@ assembly within those classes.
   [`profiling`](../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md).
   Counter updates run through metric.update<T>(); rendering executes outside
   those callbacks. Counters accumulate per metric path, including partial work
-  before an exception. Color and depth clears have distinct counter types.
+  before an exception. Color, depth and stencil clears have distinct counter types.
 
 ## Validation
 
@@ -52,8 +56,8 @@ Deterministic CPU pipeline behavior is validated headlessly within this module. 
 
 ## Intended direction
 
-Extend the existing 3D CPU rasterizer and planar rendering with stencil
-testing and mipmapped texture sampling.
+Extend the existing 3D CPU rasterizer and planar rendering with interpolation modes
+and mipmapped texture sampling.
 
 Shader construction, shader execution, texture storage/sampling, and
 application-owned scene organization and presentation retain their
@@ -65,6 +69,5 @@ See the [feature milestones](docs/milestones.md) for scope and completion eviden
 
 ## Open decisions
 
-- Stencil attachment representation and its ordering relative to depth and color.
 - Completion scope: interpolation modes, instancing, multiple color
   targets, multisampling, and advanced texture sampling.
