@@ -26,8 +26,6 @@ namespace profiling = m03gtjqkhqacstl3luv2ojsz3q_profiling;
  * mode. Fragment declarations own interpolation. Flat values come from the material's
  * original-topology provoking vertex and survive its removal by clipping.
  * Noperspective values interpolate linearly in screen space, including clipped edges.
- * Clipping carries W times those values until projection, avoiding intermediate zero-W
- * division; the existing surviving-zero-W and snapping rules still apply.
  *
  * Vertex invocations receive render_item_t's object-to-world transform and a
  * world-to-clip matrix derived from camera_t's pose and projection. The camera's

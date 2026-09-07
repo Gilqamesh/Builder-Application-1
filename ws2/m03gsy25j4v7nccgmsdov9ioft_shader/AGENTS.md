@@ -2,18 +2,14 @@
 
 ## Purpose
 
-Define and validate immutable, backend-independent shader ASTs and their reflected interfaces.
+Define and validate immutable, backend-independent shader ASTs and reflection.
+Execution belongs to backends; primitive processing, framebuffer behavior, and
+resource ownership belong to renderers.
 
-Shader execution belongs to backend modules. Primitive processing, framebuffer behavior, and resource ownership belong to renderers.
+## Stage interfaces
 
-## Invariants
-
-- Vertex position and fragment color are stage-specific special outputs and do not appear among reflected numbered outputs.
-- Vertex position and fragment color have type `vector<float, 4>`.
-- Generic numbered outputs remain available independently of special outputs.
-- Reflection records the typed inputs, numbered outputs, and bindings required by an AST.
-- Vertex shaders can read backend-supplied `object_to_world` and `world_to_clip` semantics as homogeneous `matrix<float, 4, 4>` values.
-
-- Fragment inputs own perspective, noperspective, or flat interpolation metadata.
-  Numbered vertex outputs retain location/type compatibility; standalone invocation
-  value support remains independent of renderer interpolation eligibility.
+Vertex position and fragment color are `vector<float, 4>` special outputs,
+separate from numbered outputs. Vertex transforms use homogeneous
+`matrix<float, 4, 4>` built-ins. Fragment inputs own interpolation metadata;
+numbered vertex outputs retain location/type compatibility. Standalone invocation
+value support is independent of renderer interpolation eligibility.
