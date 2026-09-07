@@ -36,10 +36,14 @@ From Builder-Layout:
 ```sh
 ./cli m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer:benchmark \
     --output "$PWD/artifacts/renderer-runs/run-001" \
-    --size 128 --warmup 3 --samples 20 --runs 5
+    --size 128 --warmup 3 --samples 20 --runs 5 --report
 ```
 
 Use a new absolute output directory outside installed build artifacts.
+All workloads run sequentially and write one `results.json`; `--report` adds a text
+stage report for each workload. Schema version 5 retains raw timing pairs, summaries,
+profiling overhead, and metric-node counts. Workload version 4 is unchanged.
+Peak RSS is not measured.
 [benchmark.cpp](../benchmark.cpp) defines workloads and timing boundaries. Samples
 include clears and draws; two-pass samples include mask drawing and composition,
 and `mipmapped_two_pass` includes mip generation. Setup, result comparisons, and

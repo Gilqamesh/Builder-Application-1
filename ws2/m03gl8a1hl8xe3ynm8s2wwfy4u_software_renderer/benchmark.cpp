@@ -2,7 +2,6 @@
 #include <m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h>
 #include <m03gagbhsqfsqblhwvelrou7nc_json/api.h>
 #include <m03gagbhsnusi43zogoacgj2ez_filesystem/filesystem.h>
-#include <m03gagbhsvr0m5w15urj0o291m_process/process.h>
 #include <m03gagbht2l61mj6qitacwbmea_byte_stream/byte_stream.h>
 #include <m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays/api.h>
 #include <m03gsy25j4v7nccgmsdov9ioft_shader/api.h>
@@ -22,14 +21,12 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
-#include <sys/utsname.h>
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
@@ -59,10 +56,8 @@ namespace soa = m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays;
 namespace byte_stream = m03gagbht2l61mj6qitacwbmea_byte_stream;
 
 namespace filesystem = m03gagbhsnusi43zogoacgj2ez_filesystem;
-namespace process = m03gagbhsvr0m5w15urj0o291m_process;
 using json_t = nlohmann::json;
 
-// This executable owns workload execution and summaries. Builder owns its build.
 class benchmark_t {
 public:
     benchmark_t(int argc, char** argv);
@@ -70,14 +65,14 @@ public:
 
 private:
     static render_item_t make_postprocess(const render_item_t& source, const std::shared_ptr<texture::texture_t>& target, int size, bool mipmaps = false);
-    json_t run_workload() const;
+    json_t run_workload(std::string_view workload) const;
     json_t metadata(const filesystem::path_t& program) const;
     static json_t summarize(const std::vector<std::array<std::int64_t, 4>>& observations, std::size_t column, int runs);
     static int number(std::string_view argument);
     static void write_json(const filesystem::path_t& path, const json_t& document);
 
     std::string m_output;
-    std::string m_workload;
+    bool m_report = false;
     int m_size = 128;
     int m_warmup = 3;
     int m_samples = 20;
@@ -192,12 +187,12 @@ std::int64_t render_frame(software_renderer_t& software_renderer, const camera_t
 }
 
 benchmark_t::benchmark_t(int argc, char** argv) {
-    for (int i = 1; i < argc; i += 2) {
-        if (argc <= i + 1) { throw std::invalid_argument(std::format("benchmark option '{}' requires a value", argv[i])); }
+    for (int i = 1; i < argc; ++i) {
         const std::string_view option = argv[i];
-        const std::string_view argument = argv[i + 1];
+        if (option == "--report") { m_report = true; continue; }
+        if (argc <= i + 1) { throw std::invalid_argument(std::format("benchmark option '{}' requires a value", argv[i])); }
+        const std::string_view argument = argv[++i];
         if (option == "--output") { m_output = argument; }
-        else if (option == "--worker") { m_workload = argument; }
         else if (option == "--size") { m_size = number(argument); }
         else if (option == "--warmup") { m_warmup = number(argument); }
         else if (option == "--samples") { m_samples = number(argument); }
@@ -206,34 +201,18 @@ benchmark_t::benchmark_t(int argc, char** argv) {
     }
     if (m_output.empty() || m_output.front() != '/') { throw std::invalid_argument("benchmark requires --output with an absolute directory path"); }
     if (m_size <= 0 || m_warmup < 0 || m_samples <= 0 || m_runs <= 0) { throw std::invalid_argument("benchmark requires positive size, samples and runs, and nonnegative warmup"); }
-    if (!m_workload.empty() && m_workload != "textured_fill" && m_workload != "depth_overdraw" && m_workload != "many_draws" && m_workload != "clipping" && m_workload != "translucent_linear" && m_workload != "translucent_srgb" && m_workload != "stencil_mask" && m_workload != "two_pass_linear" && m_workload != "two_pass_srgb" && m_workload != "flat_fill" && m_workload != "noperspective_fill" && m_workload != "mipmapped_fill" && m_workload != "mipmapped_two_pass") {
-        throw std::invalid_argument(std::format("unknown benchmark workload '{}'", m_workload));
-    }
+
 }
 
 void benchmark_t::run() const {
     const filesystem::path_t output(m_output);
-    if (!m_workload.empty()) {
-        write_json(output / filesystem::relative_path_t(m_workload + ".json"), run_workload());
-        return;
-    }
     const auto program = filesystem::canonical(filesystem::path_t("/proc/self/exe"));
     if (filesystem::exists(output)) { throw std::invalid_argument(std::format("benchmark output directory already exists: {}", output)); }
     if (program.parent().parent().is_child(output)) { throw std::invalid_argument("benchmark output must be outside the installed binary artifact"); }
     filesystem::create_directories(output);
     json_t results {{"metadata", metadata(program)}, {"workloads", json_t::object()}};
-    write_json(output / filesystem::relative_path_t("metadata.json"), results.at("metadata"));
     for (const std::string workload : {"textured_fill", "depth_overdraw", "many_draws", "clipping", "translucent_linear", "translucent_srgb", "stencil_mask", "two_pass_linear", "two_pass_srgb", "flat_fill", "noperspective_fill", "mipmapped_fill", "mipmapped_two_pass"}) {
-        std::cout.flush(); // Keep buffered summaries out of the child process.
-        process::create_and_wait_checked(process::command_t({
-            program.string(), "--worker", workload, "--output", output.string(),
-            "--size", std::to_string(m_size), "--warmup", std::to_string(m_warmup),
-            "--samples", std::to_string(m_samples), "--runs", std::to_string(m_runs)
-        }));
-        const auto path = output / filesystem::relative_path_t(workload + ".json");
-        std::ifstream input(path.c_str());
-        if (!input) { throw std::runtime_error(std::format("could not read benchmark result {}", path)); }
-        auto captured = json_t::parse(input);
+        auto captured = run_workload(workload);
         const auto& summary = captured.at("summary");
         std::cout << std::format("{}: normal {:.3f} ms, profiled {:.3f} ms, difference {:+.2f}%\n",
             workload, summary.at("normal").at("median_ns").get<double>() / 1e6,
@@ -242,7 +221,7 @@ void benchmark_t::run() const {
         results["workloads"][workload] = std::move(captured);
     }
     write_json(output / filesystem::relative_path_t("results.json"), results);
-    std::cout << std::format("Raw samples, summaries, build identity and reports: {}\n", output);
+    std::cout << std::format("Benchmark results: {}\n", output);
 }
 
 render_item_t benchmark_t::make_postprocess(const render_item_t& source, const std::shared_ptr<texture::texture_t>& target, int size, bool mipmaps) {
@@ -266,20 +245,20 @@ render_item_t benchmark_t::make_postprocess(const render_item_t& source, const s
     return item;
 }
 
-json_t benchmark_t::run_workload() const {
-    const auto items = make_workload(m_workload);
+json_t benchmark_t::run_workload(std::string_view workload) const {
+    const auto items = make_workload(workload);
     const auto count = framebuffer_t::pixel_count(m_size, m_size);
     std::vector<rgba8_t> normal_pixels(count), measured_pixels(count);
     std::vector<float> normal_depth(count), measured_depth(count);
     framebuffer_t normal_buffer(normal_pixels, m_size, m_size), measured_buffer(measured_pixels, m_size, m_size);
     normal_buffer.depth(normal_depth); measured_buffer.depth(measured_depth);
-    if (m_workload == "translucent_srgb" || m_workload == "two_pass_srgb") {
+    if (workload == "translucent_srgb" || workload == "two_pass_srgb") {
         normal_buffer.encoding(color_encoding_t::srgb);
         measured_buffer.encoding(color_encoding_t::srgb);
     }
-    const bool mipmaps = m_workload == "mipmapped_two_pass";
-    const bool two_pass = m_workload == "two_pass_linear" || m_workload == "two_pass_srgb" || mipmaps;
-    const bool masked = two_pass || m_workload == "stencil_mask";
+    const bool mipmaps = workload == "mipmapped_two_pass";
+    const bool two_pass = workload == "two_pass_linear" || workload == "two_pass_srgb" || mipmaps;
+    const bool masked = two_pass || workload == "stencil_mask";
     std::vector<std::uint8_t> normal_stencil(masked ? count : 0), measured_stencil(masked ? count : 0);
     normal_buffer.stencil(normal_stencil); measured_buffer.stencil(measured_stencil);
     auto mask = items.front();
@@ -295,7 +274,7 @@ json_t benchmark_t::run_workload() const {
     std::optional<framebuffer_t> normal_offscreen, measured_offscreen;
     std::optional<render_item_t> normal_postprocess, measured_postprocess;
     if (two_pass) {
-        const auto format = m_workload == "two_pass_srgb" ? texture::format_t::rgba8_srgb : texture::format_t::rgba8_unorm;
+        const auto format = workload == "two_pass_srgb" ? texture::format_t::rgba8_srgb : texture::format_t::rgba8_unorm;
         normal_target = std::make_shared<texture::texture_t>(texture::texture_description_t {format, std::size_t(m_size), std::size_t(m_size), mipmaps ? std::size_t(std::bit_width(unsigned(m_size))) : 1}, byte_stream::byte_stream_t(std::vector<std::byte>(count * 4)));
         measured_target = std::make_shared<texture::texture_t>(*normal_target);
         normal_offscreen.emplace(normal_target->view()); measured_offscreen.emplace(measured_target->view());
@@ -336,28 +315,15 @@ json_t benchmark_t::run_workload() const {
             if (0 <= sample) { observations.push_back({run, sample, normal_ns, measured_ns}); }
         }
     }
-    const filesystem::path_t output(m_output);
-    std::ofstream report((output / filesystem::relative_path_t(m_workload + ".txt")).c_str());
-    if (!report) { throw std::runtime_error("could not open benchmark report"); }
-    profiler.report(report);
-    report.close();
-    if (!report) { throw std::runtime_error("could not write benchmark report"); }
-    // VmHWM belongs to this executable's address space. Linux getrusage's
-    // maximum can retain the launching process's pre-exec RSS high-water mark.
-    std::ifstream status("/proc/self/status");
-    std::string line;
-    std::size_t peak_rss_bytes = 0;
-    while (std::getline(status, line)) {
-        if (line.starts_with("VmHWM:")) {
-            std::istringstream fields(line.substr(6));
-            std::size_t peak_rss_kib;
-            std::string units;
-            if (!(fields >> peak_rss_kib >> units) || units != "kB") { throw std::runtime_error("invalid VmHWM in /proc/self/status"); }
-            peak_rss_bytes = peak_rss_kib * 1024;
-            break;
-        }
+    if (m_report) {
+        const filesystem::path_t output(m_output);
+        const auto path = output / filesystem::relative_path_t(std::string(workload) + ".txt");
+        std::ofstream report(path.c_str());
+        if (!report) { throw std::runtime_error(std::format("could not open benchmark report {}", path)); }
+        profiler.report(report);
+        report.close();
+        if (!report) { throw std::runtime_error(std::format("could not write benchmark report {}", path)); }
     }
-    if (peak_rss_bytes == 0) { throw std::runtime_error("missing VmHWM in /proc/self/status"); }
     const auto normal_summary = summarize(observations, 2, m_runs);
     const auto profiled_summary = summarize(observations, 3, m_runs);
     const auto normal_median = normal_summary.at("median_ns").get<double>();
@@ -370,44 +336,17 @@ json_t benchmark_t::run_workload() const {
         {"samples", std::move(samples)},
         {"summary", {{"normal", normal_summary}, {"profiled", profiled_summary}}},
         {"median_overhead_percent", (profiled_median / normal_median - 1) * 100},
-        {"peak_rss_bytes", peak_rss_bytes},
         {"metric_nodes", profiler.size()}
     };
 }
 
 json_t benchmark_t::metadata(const filesystem::path_t& program) const {
-    std::ifstream cpuinfo("/proc/cpuinfo");
-    std::string line;
-    std::string cpu = "unknown";
-    while (std::getline(cpuinfo, line)) {
-        if (line.starts_with("model name")) {
-            const auto colon = line.find(':');
-            if (colon != std::string::npos) { cpu = line.substr(colon + 1); }
-            break;
-        }
-    }
-    utsname platform {};
-    if (uname(&platform) != 0) { throw std::runtime_error("benchmark could not read platform information"); }
-    // Capture the actual loaded artifact paths, rather than rediscovering sources
-    // or inferring dependency compiler settings from this translation unit.
-    std::ifstream maps("/proc/self/maps");
-    json_t loaded_files = json_t::array();
-    while (std::getline(maps, line)) {
-        const auto path_start = line.find('/');
-        if (path_start == std::string::npos) { continue; }
-        const auto path = line.substr(path_start);
-        if (std::find(loaded_files.begin(), loaded_files.end(), path) == loaded_files.end()) { loaded_files.push_back(path); }
-    }
-    if (!maps.eof()) { throw std::runtime_error("benchmark could not read loaded artifact mappings"); }
     return {
-        {"schema_version", 4}, {"workload_version", 4},
+        {"schema_version", 5}, {"workload_version", 4},
         {"size", m_size}, {"warmup_per_run", m_warmup}, {"samples_per_run", m_samples}, {"runs", m_runs},
-        {"cpu", cpu}, {"platform", std::format("{} {} {}", platform.sysname, platform.release, platform.machine)},
         {"scope", "frame measurement, full color/depth clears, fixed draw sequence; two-pass workloads also include stencil mask, target selection, output clear and sampled composite; mipmapped_two_pass also regenerates all lower levels; setup, comparison, reporting excluded"},
-        {"report", "persistent data per metric path; inclusive timing statistics across all enabled completions, including warmup; parents before children in first-use order"},
-        {"peak_rss_scope", "Linux VmHWM through workload capture and text report; both profiling configurations, setup and warmup included; summaries and JSON serialization excluded"},
         {"build", {
-            {"system", "Builder"}, {"binary", program.string()}, {"loaded_files", std::move(loaded_files)},
+            {"binary", program.string()},
             {"benchmark_compiler", __VERSION__},
 #ifdef __OPTIMIZE__
             {"benchmark_optimized", true},
@@ -419,8 +358,7 @@ json_t benchmark_t::metadata(const filesystem::path_t& program) const {
 #else
             {"benchmark_assertions", true},
 #endif
-            {"dependency_compile_options", nullptr},
-            {"configuration_note", "Compiler and feature macros describe the benchmark translation unit. Dependency options are not inferred; retain Builder build logs and versioned artifacts."}
+            {"dependency_compile_options", nullptr}
         }}
     };
 }
@@ -468,8 +406,8 @@ void benchmark_t::write_json(const filesystem::path_t& path, const json_t& docum
 int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--help") {
-            std::cout << "usage: benchmark --output /absolute/new/run-directory [--size 128] [--warmup 3] [--samples 20] [--runs 5]\n"
-                         "Runs thirteen workloads in separate processes using the current Builder build configuration.\n";
+            std::cout << "usage: benchmark --output /absolute/new/run-directory [--size 128] [--warmup 3] [--samples 20] [--runs 5] [--report]\n"
+                         "Runs thirteen workloads; --report writes per-workload stage reports.\n";
             return 0;
         }
         m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_t(argc, argv).run();
