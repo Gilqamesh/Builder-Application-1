@@ -73,7 +73,8 @@ lookup, allocation, construction, clock reads, and update callbacks.
 Counters accumulate per metric path, including partial work before exceptions.
 Vertex counters count entered calls and expected selected indices. Raster counters
 count fragment invocations, discards, depth rejections, and actual color/depth
-writes. Both rejection percentages use fragment invocations as the denominator;
+writes. Color writes count once per sample when at least one channel is assigned,
+even if bytes are unchanged; an all-disabled mask counts zero. Both rejection percentages use fragment invocations as the denominator;
 zero invocations reports `n/a`. Draw and preparation contain timing only.
 
 Durations include nested work. Lookup and first data construction precede that
@@ -147,8 +148,7 @@ runs outside completed build installations. Use a different directory for each
 run. `--help` prints the options; omitting the numeric options uses the values above.
 
 The module registers `cli` for the existing demo and `benchmark` for the headless
-measurement executable. `benchmark.cpp` is excluded from the default library
-sources. Builder owns source publication, dependency discovery, compilation,
+measurement executable. Builder owns source publication, dependency discovery, compilation,
 linking, public validation, and versioned artifacts. The C++ benchmark owns workload
 execution, measurement, summaries, and reports.
 
@@ -158,8 +158,10 @@ a target does not optimize its dependency libraries. General optimization suppor
 and a new optimized baseline are deferred. The [historical optimized baseline](profiling-baseline.md)
 remains available with its [unchanged raw data](profiling-baseline.json).
 
-The coordinator starts a fresh copy of its installed binary for each of the four
-workloads: textured fill, depth overdraw, many small draws, and clipping. Each
+The coordinator starts a fresh copy of its installed binary for each workload.
+Workload version 2 preserves textured fill, depth overdraw, many small draws, and
+clipping from version 1. It adds four-layer translucent overdraw with linear and
+sRGB attachments; these feature workloads establish their own baselines. Each
 worker writes a JSON result and a text report with current data and timing statistics.
 The coordinator writes `metadata.json` before the workers run and `results.json`
 after all workers succeed.
@@ -196,3 +198,6 @@ used GNU `-O2 -DNDEBUG` and direct object linking; the Builder target uses its
 configured compiler and shared dependency libraries. These are different build
 conditions, so a migration measurement does not establish a renderer speedup or
 regression against that baseline.
+
+Milestone 3 has a [matching before/after comparison](blending-performance.md) with
+[raw data](blending-performance.json), including the new translucent workloads.

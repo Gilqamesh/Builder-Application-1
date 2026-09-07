@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <format>
 #include <limits>
+#include <utility>
 #include <span>
 #include <stdexcept>
 
@@ -65,6 +66,22 @@ void framebuffer_t::depth(std::span<float> samples) {
 
 std::span<float> framebuffer_t::depth() const noexcept {
     return m_depth;
+}
+
+void framebuffer_t::encoding(color_encoding_t encoding) {
+    switch (encoding) {
+        case color_encoding_t::linear:
+        case color_encoding_t::srgb: {
+            m_encoding = encoding;
+        } break;
+        default: {
+            throw std::invalid_argument(std::format("framebuffer_t::encoding rejects invalid encoding {}", encoding));
+        }
+    }
+}
+
+color_encoding_t framebuffer_t::encoding() const {
+    return m_encoding;
 }
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

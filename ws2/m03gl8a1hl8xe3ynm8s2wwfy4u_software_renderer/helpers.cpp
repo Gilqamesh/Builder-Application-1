@@ -769,6 +769,10 @@ void set_fragment_inputs(
     }
 }
 
+float sanitize_unorm(float component) {
+    return std::isnan(component) ? 0.0F : std::clamp(component, 0.0F, 1.0F);
+}
+
 std::uint8_t to_unorm8(float component) {
     if (std::isnan(component) || component == -std::numeric_limits<float>::infinity()) {
         return 0;
@@ -787,6 +791,105 @@ rgba8_t to_rgba8(const vector4f_t& color) {
         .blue = to_unorm8(color[2]),
         .alpha = to_unorm8(color[3])
     };
+}
+
+float decode_srgb(float component) {
+    return component <= 0.04045F ? component / 12.92F : std::pow((component + 0.055F) / 1.055F, 2.4F);
+}
+
+float encode_srgb(float component) {
+    return component <= 0.0031308F ? component * 12.92F : 1.055F * std::pow(component, 1.0F / 2.4F) - 0.055F;
+}
+
+float blend_factor_component(blend_factor_t factor, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component) {
+    switch (factor) {
+        case blend_factor_t::zero: return 0;
+        case blend_factor_t::one: return 1;
+        case blend_factor_t::src_color: return source[component];
+        case blend_factor_t::one_minus_src_color: return 1 - source[component];
+        case blend_factor_t::dst_color: return destination[component];
+        case blend_factor_t::one_minus_dst_color: return 1 - destination[component];
+        case blend_factor_t::src_alpha: return source[3];
+        case blend_factor_t::one_minus_src_alpha: return 1 - source[3];
+        case blend_factor_t::dst_alpha: return destination[3];
+        case blend_factor_t::one_minus_dst_alpha: return 1 - destination[3];
+        case blend_factor_t::constant_color: return constant[component];
+        case blend_factor_t::one_minus_constant_color: return 1 - constant[component];
+        case blend_factor_t::constant_alpha: return constant[3];
+        case blend_factor_t::one_minus_constant_alpha: return 1 - constant[3];
+        case blend_factor_t::src_alpha_saturate: return component == 3 ? 1.0F : std::min(source[3], 1 - destination[3]);
+    }
+    throw std::invalid_argument(std::format("blend_factor_component rejects invalid factor {}", factor));
+}
+
+float blend_component(const blend_equation_t& blend_equation, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component) {
+    // Min/max ignore factors. Material setters validate even ignored fields.
+    if (blend_equation.operation == blend_op_t::min) {
+        return std::min(source[component], destination[component]);
+    }
+    if (blend_equation.operation == blend_op_t::max) {
+        return std::max(source[component], destination[component]);
+    }
+    const float source_term = source[component] * blend_factor_component(blend_equation.source, source, destination, constant, component);
+    const float destination_term = destination[component] * blend_factor_component(blend_equation.destination, source, destination, constant, component);
+    switch (blend_equation.operation) {
+        case blend_op_t::add: return source_term + destination_term;
+        case blend_op_t::subtract: return source_term - destination_term;
+        case blend_op_t::reverse_subtract: return destination_term - source_term;
+        default: {
+            throw std::invalid_argument(std::format("blend_component rejects invalid operation {}", blend_equation.operation));
+        }
+    }
+}
+
+void write_color(const material_t& material, color_encoding_t encoding, const vector4f_t& source, rgba8_t& pixel) {
+    const auto color_mask = material.color_write();
+    if (color_mask == color_mask_t::none) {
+        return;
+    }
+    const auto replaces = [](const blend_equation_t& equation) {
+        return equation.source == blend_factor_t::one && equation.destination == blend_factor_t::zero && equation.operation == blend_op_t::add;
+    };
+    const bool replacement = !material.blend() || (replaces(material.blend_color()) && replaces(material.blend_alpha()));
+    if (replacement && encoding == color_encoding_t::linear && color_mask == color_mask_t::all) {
+        pixel = to_rgba8(source);
+        return;
+    }
+    const vector4f_t sanitized_source {
+        sanitize_unorm(source[0]), sanitize_unorm(source[1]),
+        sanitize_unorm(source[2]), sanitize_unorm(source[3])
+    };
+    vector4f_t result = sanitized_source;
+    if (!replacement) {
+        vector4f_t destination {pixel.red / 255.0F, pixel.green / 255.0F, pixel.blue / 255.0F, pixel.alpha / 255.0F};
+        if (encoding == color_encoding_t::srgb) {
+            for (std::size_t component = 0; component < 3; ++component) {
+                destination[component] = decode_srgb(destination[component]);
+            }
+        }
+        const auto color_equation = material.blend_color();
+        const auto alpha_equation = material.blend_alpha();
+        const auto& constant = material.blend_constant();
+        // Both equations read the original inputs, before any channel is stored.
+        for (std::size_t component = 0; component < 4; ++component) {
+            result[component] = sanitize_unorm(blend_component(component == 3 ? alpha_equation : color_equation, sanitized_source, destination, constant, component));
+        }
+    }
+    if (encoding == color_encoding_t::srgb) {
+        for (std::size_t component = 0; component < 3; ++component) {
+            result[component] = encode_srgb(result[component]);
+        }
+    }
+    const auto stored = to_rgba8(result);
+    if (color_mask == color_mask_t::all) {
+        pixel = stored;
+    } else {
+        // Masking affects storage only; disabled bytes never round-trip through float.
+        if ((color_mask & color_mask_t::red) != color_mask_t::none) { pixel.red = stored.red; }
+        if ((color_mask & color_mask_t::green) != color_mask_t::none) { pixel.green = stored.green; }
+        if ((color_mask & color_mask_t::blue) != color_mask_t::none) { pixel.blue = stored.blue; }
+        if ((color_mask & color_mask_t::alpha) != color_mask_t::none) { pixel.alpha = stored.alpha; }
+    }
 }
 
 float depth_clear_value(float depth) {
@@ -865,8 +968,8 @@ void shade_sample(
             });
         }
     }
-    if (const auto color = io.color()) {
-        framebuffer.pixels()[index] = to_rgba8(*color);
+    if (const auto color = io.color(); color && material.color_write() != color_mask_t::none) {
+        write_color(material, framebuffer.encoding(), *color, framebuffer.pixels()[index]);
         metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
             ++metric.m_color_writes;
         });

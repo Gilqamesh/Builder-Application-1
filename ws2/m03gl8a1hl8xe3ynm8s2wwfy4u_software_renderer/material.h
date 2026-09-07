@@ -1,6 +1,7 @@
 #ifndef M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_MATERIAL_H
 # define M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_MATERIAL_H
 
+# include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
 # include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
 # include <m03gt1djvvy5atia5evkbg6rqy_software_shader/software_shader.h>
 
@@ -42,15 +43,76 @@ enum class cull_mode_t {
 };
 
 /**
+ * @brief Selects a component multiplier from the original source, destination, or constant.
+ *
+ * Color factors select the corresponding component, including alpha. Alpha factors
+ * replicate alpha across RGB. Complements subtract from one.
+ */
+enum class blend_factor_t {
+    zero,
+    one,
+    src_color,
+    one_minus_src_color,
+    dst_color,
+    one_minus_dst_color,
+    src_alpha,
+    one_minus_src_alpha,
+    dst_alpha,
+    one_minus_dst_alpha,
+    constant_color,
+    one_minus_constant_color,
+    constant_alpha,
+    one_minus_constant_alpha,
+    /** RGB uses min(source alpha, 1 - destination alpha); alpha uses one. */
+    src_alpha_saturate
+};
+
+/** @brief Combines weighted source/destination components; min/max ignore factors. */
+enum class blend_op_t {
+    add,
+    subtract,
+    reverse_subtract,
+    min,
+    max
+};
+
+/**
+ * @brief Describes one RGB or alpha equation, validated by the material setter.
+ *
+ * Add computes source * source factor + destination * destination factor;
+ * subtract subtracts the destination term, reverse_subtract subtracts the source
+ * term from the destination term. Min/max use the unweighted components.
+ */
+struct blend_equation_t {
+    blend_factor_t source = blend_factor_t::one;
+    blend_factor_t destination = blend_factor_t::zero;
+    blend_op_t operation = blend_op_t::add;
+};
+
+/** @brief Selects stored channels; combine channels with operator|. */
+enum class color_mask_t : unsigned {
+    none = 0,
+    red = 1,
+    green = 2,
+    blue = 4,
+    alpha = 8,
+    all = 15
+};
+
+color_mask_t operator|(color_mask_t left, color_mask_t right);
+color_mask_t operator&(color_mask_t left, color_mask_t right);
+
+/**
  * @brief Owns an immutable shader program, bindings, and mutable draw state.
  *
  * Uniform, texture, and sampler locations occupy independent namespaces. Extra
  * bindings not used by the program are accepted. Items sharing this material share
  * its draw state. Distinct materials may share a program, textures, and samplers.
- * Comparison, front-face, and cull setters reject invalid enum values before
- * changing their properties. Copies retain valid settings independently.
+ * Enum and mask setters reject invalid values before changing their properties,
+ * including ignored factors and disabled blending. Copies retain valid settings independently.
  * Initial settings disable depth testing, enable depth writes, select less and
- * CCW NDC front faces, and disable culling. Clears ignore these settings.
+ * CCW NDC front faces, and disable culling. Blending starts disabled with one/zero/add
+ * equations, a zero constant, and all color channels writable. Clears ignore draw state.
  */
 class material_t {
 public:
@@ -107,7 +169,33 @@ public:
     void cull(cull_mode_t mode);
     cull_mode_t cull() const;
 
+    void blend(bool enabled);
+    bool blend() const;
+
+    void blend_color(blend_equation_t blend_equation);
+    blend_equation_t blend_color() const;
+
+    void blend_alpha(blend_equation_t blend_equation);
+    blend_equation_t blend_alpha() const;
+
+    /**
+     * @brief Stores a sanitized and clamped linear blend constant.
+     *
+     * NaN and negative infinity become zero, positive infinity becomes one;
+     * finite components clamp to [0,1]. Constants are independent of attachment encoding.
+     */
+    void blend_constant(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 4>& blend_constant);
+    const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 4>& blend_constant() const;
+
+    /**
+     * @brief Selects channels to write without affecting shader execution, blending inputs, or depth.
+     */
+    void color_write(color_mask_t color_mask);
+    color_mask_t color_write() const;
+
 private:
+    static void validate_blend_equation(const blend_equation_t& blend_equation);
+
     const std::shared_ptr<const software_shader::program_t> m_program;
     software_shader::bindings_t m_bindings;
     bool m_depth_test = false;
@@ -115,6 +203,11 @@ private:
     comparison_t m_depth_compare = comparison_t::less;
     winding_t m_front_face = winding_t::counter_clockwise;
     cull_mode_t m_cull = cull_mode_t::none;
+    bool m_blend = false;
+    blend_equation_t m_blend_color;
+    blend_equation_t m_blend_alpha;
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 4> m_blend_constant {0, 0, 0, 0};
+    color_mask_t m_color_write = color_mask_t::all;
     std::unordered_map<std::uint32_t, std::shared_ptr<texture::texture_t>> m_textures;
     std::unordered_map<std::uint32_t, std::shared_ptr<texture::sampler_t>> m_samplers;
 };
@@ -131,6 +224,18 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::winding_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::cull_mode_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_op_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_equation_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_mask_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::material_t>;
@@ -254,6 +359,149 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::cull_mode_t> {
 };
 
 template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid blend_factor_t format specifier");
+        }
+        return it;
+    }
+
+    auto format(m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t option, auto& ctx) const {
+        auto out = ctx.out();
+        switch (option) {
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::zero: {
+                out = std::format_to(out, "zero");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::one: {
+                out = std::format_to(out, "one");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::src_color: {
+                out = std::format_to(out, "src_color");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::one_minus_src_color: {
+                out = std::format_to(out, "one_minus_src_color");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::dst_color: {
+                out = std::format_to(out, "dst_color");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::one_minus_dst_color: {
+                out = std::format_to(out, "one_minus_dst_color");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::src_alpha: {
+                out = std::format_to(out, "src_alpha");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::one_minus_src_alpha: {
+                out = std::format_to(out, "one_minus_src_alpha");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::dst_alpha: {
+                out = std::format_to(out, "dst_alpha");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::one_minus_dst_alpha: {
+                out = std::format_to(out, "one_minus_dst_alpha");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::constant_color: {
+                out = std::format_to(out, "constant_color");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::one_minus_constant_color: {
+                out = std::format_to(out, "one_minus_constant_color");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::constant_alpha: {
+                out = std::format_to(out, "constant_alpha");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::one_minus_constant_alpha: {
+                out = std::format_to(out, "one_minus_constant_alpha");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_factor_t::src_alpha_saturate: {
+                out = std::format_to(out, "src_alpha_saturate");
+            } break;
+            default: {
+                out = std::format_to(out, "invalid({})", std::to_underlying(option));
+            } break;
+        }
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_op_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid blend_op_t format specifier");
+        }
+        return it;
+    }
+
+    auto format(m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_op_t option, auto& ctx) const {
+        auto out = ctx.out();
+        switch (option) {
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_op_t::add: {
+                out = std::format_to(out, "add");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_op_t::subtract: {
+                out = std::format_to(out, "subtract");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_op_t::reverse_subtract: {
+                out = std::format_to(out, "reverse_subtract");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_op_t::min: {
+                out = std::format_to(out, "min");
+            } break;
+            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_op_t::max: {
+                out = std::format_to(out, "max");
+            } break;
+            default: {
+                out = std::format_to(out, "invalid({})", std::to_underlying(option));
+            } break;
+        }
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_equation_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid blend_equation_t format specifier");
+        }
+        return it;
+    }
+
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::blend_equation_t& blend_equation, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ source: {}", blend_equation.source);
+        out = std::format_to(out, ", destination: {}", blend_equation.destination);
+        out = std::format_to(out, ", operation: {} }}", blend_equation.operation);
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_mask_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid color_mask_t format specifier");
+        }
+        return it;
+    }
+
+    auto format(m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_mask_t color_mask, auto& ctx) const {
+        auto out = ctx.out();
+        const auto bits = std::to_underlying(color_mask);
+        if ((bits & ~15U) != 0) {
+            out = std::format_to(out, "invalid({})", bits);
+        } else {
+            out = std::format_to(out, "{}{}{}{}", bits & 1 ? 'r' : '-', bits & 2 ? 'g' : '-', bits & 4 ? 'b' : '-', bits & 8 ? 'a' : '-');
+        }
+        return out;
+    }
+};
+
+template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::material_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
@@ -274,6 +522,11 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::material_t> {
         out = std::format_to(out, ", depth_compare: {}", material.depth_compare());
         out = std::format_to(out, ", front_face: {}", material.front_face());
         out = std::format_to(out, ", cull: {}", material.cull());
+        out = std::format_to(out, ", blend: {}", material.blend());
+        out = std::format_to(out, ", blend_color: {}", material.blend_color());
+        out = std::format_to(out, ", blend_alpha: {}", material.blend_alpha());
+        out = std::format_to(out, ", blend_constant: {}", material.blend_constant());
+        out = std::format_to(out, ", color_write: {}", material.color_write());
         out = std::format_to(out, " }}");
 
         return out;

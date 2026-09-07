@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <format>
 #include <limits>
 #include <memory>
 #include <numbers>
@@ -32,6 +33,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -88,8 +90,10 @@ bool same_color(const api::rgba8_t& lhs, const api::rgba8_t& rhs) {
         && lhs.alpha == rhs.alpha;
 }
 
-void expect_color(const api::rgba8_t& actual, const api::rgba8_t& expected) {
-    test::expect(std::identity(), same_color(actual, expected));
+void expect_color(const api::rgba8_t& actual, const api::rgba8_t& expected, std::source_location location = std::source_location::current()) {
+    if (!same_color(actual, expected)) {
+        throw std::runtime_error(std::format("{}:{}: color {} differs from expected {}", location.file_name(), location.line(), actual, expected));
+    }
 }
 
 std::size_t pixel_index(int x, int y, int width) {
@@ -1855,6 +1859,8 @@ program_ptr_t make_visibility_program(bool write_color = true, bool discard_left
     shader::fragment_shader_ast_builder_t fragment;
     if (write_color) {
         fragment.color(fragment.uniform<vector4f_t>(0));
+    } else {
+        fragment.output(0, fragment.fragment_coordinate());
     }
     if (discard_left) {
         fragment.branch(shader::swizzle<0>(fragment.fragment_coordinate()) < 8.0F, [&] { fragment.discard(); });
@@ -2565,6 +2571,350 @@ void test_profiling() {
     require(profiler.size() == 7);
 }
 
+void configure_source_over(material_t& material) {
+    material.blend(true);
+    material.blend_color({blend_factor_t::src_alpha, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+    material.blend_alpha({blend_factor_t::one, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+}
+
+void test_blend_state() {
+    material_t material(make_visibility_program());
+    require(!material.blend() && material.color_write() == color_mask_t::all);
+    for (const auto equation : {material.blend_color(), material.blend_alpha()}) {
+        require(equation.source == blend_factor_t::one && equation.destination == blend_factor_t::zero && equation.operation == blend_op_t::add);
+    }
+    require(material.blend_constant() == vector4f_t({0, 0, 0, 0}));
+    static_assert(std::is_same_v<decltype(material.blend_color()), blend_equation_t>);
+    static_assert(std::is_same_v<decltype(material.blend_constant()), const vector4f_t&>);
+    const blend_equation_t original {blend_factor_t::dst_alpha, blend_factor_t::one, blend_op_t::min};
+    material.blend_color(original);
+    material.blend_alpha(original);
+    for (bool enabled : {false, true}) {
+        material.blend(enabled);
+        for (int field = 0; field < 3; ++field) {
+            auto invalid = original;
+            if (field == 0) { invalid.source = static_cast<blend_factor_t>(-1); }
+            if (field == 1) { invalid.destination = static_cast<blend_factor_t>(99); }
+            if (field == 2) { invalid.operation = static_cast<blend_op_t>(99); }
+            test::expect_throws<std::invalid_argument>([&] { material.blend_color(invalid); });
+            test::expect_throws<std::invalid_argument>([&] { material.blend_alpha(invalid); });
+            for (const auto equation : {material.blend_color(), material.blend_alpha()}) {
+                require(equation.source == original.source && equation.destination == original.destination && equation.operation == original.operation);
+            }
+        }
+    }
+    material.color_write(color_mask_t::red | color_mask_t::alpha);
+    for (unsigned bits : {16U, 31U, ~0U}) {
+        test::expect_throws<std::invalid_argument>([&] { material.color_write(static_cast<color_mask_t>(bits)); });
+        require(material.color_write() == (color_mask_t::red | color_mask_t::alpha));
+    }
+    const float infinity = std::numeric_limits<float>::infinity();
+    material.blend_constant({std::numeric_limits<float>::quiet_NaN(), -infinity, infinity, 0.5F});
+    require(material.blend_constant() == vector4f_t({0, 0, 1, 0.5F}));
+    material.blend_constant({-1, 2, 0.25F, 0.75F});
+    require(material.blend_constant() == vector4f_t({0, 1, 0.25F, 0.75F}));
+    material_t copy(material);
+    material.blend(false);
+    material.blend_constant({0, 0, 0, 0});
+    material.color_write(color_mask_t::none);
+    require(copy.blend() && copy.color_write() == (color_mask_t::red | color_mask_t::alpha));
+    require(copy.blend_constant() == vector4f_t({0, 1, 0.25F, 0.75F}));
+    require(std::format("{}", copy).find("blend_color:") != std::string::npos);
+    require(std::format("{}", color_mask_t::red | color_mask_t::blue) == "r-b-");
+    test::expect_throws<std::format_error>([&] { (void)std::vformat("{:x}", std::make_format_args(copy)); });
+}
+
+void test_blend_equations() {
+    std::vector<rgba8_t> pixels(16 * 16);
+    software_renderer_t renderer(framebuffer_t(pixels, 16, 16));
+    auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle, {0.2F, 0.4F, 0.6F, 0.8F});
+    auto& material = *item.material();
+    material.depth_test(false);
+    material.blend(true);
+    material.blend_constant({0.1F, 0.3F, 0.5F, 0.7F});
+    const auto draw = [&] {
+        renderer.clear_color({153, 102, 51, 85}, inactive_metric);
+        renderer.draw(make_camera(16, 16), item, inactive_metric);
+    };
+    // Literal expected bytes were calculated with rational S=(1,2,3,4)/5,
+    // D=(3/5,2/5,1/5,1/3), K=(1,3,5,7)/10, independently of renderer helpers.
+    const std::array factors {
+        std::tuple {blend_factor_t::zero, rgba8_t {0, 0, 0, 0}, rgba8_t {0, 0, 0, 0}},
+        std::tuple {blend_factor_t::one, rgba8_t {51, 102, 153, 204}, rgba8_t {153, 102, 51, 85}},
+        std::tuple {blend_factor_t::src_color, rgba8_t {10, 41, 92, 163}, rgba8_t {31, 41, 31, 68}},
+        std::tuple {blend_factor_t::one_minus_src_color, rgba8_t {41, 61, 61, 41}, rgba8_t {122, 61, 20, 17}},
+        std::tuple {blend_factor_t::dst_color, rgba8_t {31, 41, 31, 68}, rgba8_t {92, 41, 10, 28}},
+        std::tuple {blend_factor_t::one_minus_dst_color, rgba8_t {20, 61, 122, 136}, rgba8_t {61, 61, 41, 57}},
+        std::tuple {blend_factor_t::src_alpha, rgba8_t {41, 82, 122, 163}, rgba8_t {122, 82, 41, 68}},
+        std::tuple {blend_factor_t::one_minus_src_alpha, rgba8_t {10, 20, 31, 41}, rgba8_t {31, 20, 10, 17}},
+        std::tuple {blend_factor_t::dst_alpha, rgba8_t {17, 34, 51, 68}, rgba8_t {51, 34, 17, 28}},
+        std::tuple {blend_factor_t::one_minus_dst_alpha, rgba8_t {34, 68, 102, 136}, rgba8_t {102, 68, 34, 57}},
+        std::tuple {blend_factor_t::constant_color, rgba8_t {5, 31, 77, 143}, rgba8_t {15, 31, 26, 60}},
+        std::tuple {blend_factor_t::one_minus_constant_color, rgba8_t {46, 71, 77, 61}, rgba8_t {138, 71, 26, 26}},
+        std::tuple {blend_factor_t::constant_alpha, rgba8_t {36, 71, 107, 143}, rgba8_t {107, 71, 36, 60}},
+        std::tuple {blend_factor_t::one_minus_constant_alpha, rgba8_t {15, 31, 46, 61}, rgba8_t {46, 31, 15, 26}},
+        std::tuple {blend_factor_t::src_alpha_saturate, rgba8_t {34, 68, 102, 204}, rgba8_t {102, 68, 34, 85}}
+    };
+    for (const auto& [factor, source_expected, destination_expected] : factors) {
+        material.blend_color({factor, blend_factor_t::zero, blend_op_t::add});
+        material.blend_alpha(material.blend_color());
+        draw();
+        for (const auto pixel : pixels) { expect_color(pixel, source_expected); }
+        material.blend_color({blend_factor_t::zero, factor, blend_op_t::add});
+        material.blend_alpha(material.blend_color());
+        draw();
+        for (const auto pixel : pixels) { expect_color(pixel, destination_expected); }
+    }
+    const std::array operations {
+        std::pair {blend_op_t::add, rgba8_t {204, 204, 204, 255}},
+        std::pair {blend_op_t::subtract, rgba8_t {0, 0, 102, 119}},
+        std::pair {blend_op_t::reverse_subtract, rgba8_t {102, 0, 0, 0}},
+        std::pair {blend_op_t::min, rgba8_t {51, 102, 51, 85}},
+        std::pair {blend_op_t::max, rgba8_t {153, 102, 153, 204}}
+    };
+    for (const auto& [operation, expected] : operations) {
+        const auto factor = operation == blend_op_t::min || operation == blend_op_t::max ? blend_factor_t::zero : blend_factor_t::one;
+        material.blend_color({factor, factor, operation});
+        material.blend_alpha(material.blend_color());
+        draw();
+        expect_color(pixels[0], expected);
+    }
+    // Both equations must consume original alpha, not the newly computed alpha.
+    material.blend_color({blend_factor_t::dst_alpha, blend_factor_t::src_alpha, blend_op_t::add});
+    material.blend_alpha({blend_factor_t::one, blend_factor_t::one, blend_op_t::subtract});
+    draw();
+    expect_color(pixels[0], {139, 116, 92, 119});
+    // The unsaturated branch, including the exceptional alpha factor of one.
+    material.uniform(0, vector4f_t({1, 1, 1, 0.2F}));
+    material.blend_color({blend_factor_t::src_alpha_saturate, blend_factor_t::zero, blend_op_t::add});
+    material.blend_alpha(material.blend_color());
+    draw();
+    expect_color(pixels[0], {51, 51, 51, 51});
+    // Sanitization precedes factors, including their complements, with blending on/off.
+    const float infinity = std::numeric_limits<float>::infinity();
+    material.uniform(0, vector4f_t({std::numeric_limits<float>::quiet_NaN(), -infinity, infinity, 0.5F}));
+    for (bool enabled : {false, true}) {
+        material.blend(enabled);
+        material.blend_color({});
+        material.blend_alpha({});
+        draw();
+        expect_color(pixels[0], {0, 0, 255, 128});
+    }
+    material.blend(true);
+    material.blend_color({blend_factor_t::one_minus_src_color, blend_factor_t::zero, blend_op_t::add});
+    draw();
+    expect_color(pixels[0], {0, 0, 0, 128});
+}
+
+void test_color_encoding_and_masks() {
+    std::vector<rgba8_t> pixels(256);
+    framebuffer_t framebuffer(pixels, 16, 16);
+    require(framebuffer.encoding() == color_encoding_t::linear);
+    software_renderer_t renderer(framebuffer);
+    framebuffer.encoding(color_encoding_t::srgb);
+    require(renderer.framebuffer().encoding() == color_encoding_t::linear);
+    renderer.framebuffer() = framebuffer;
+    framebuffer.encoding(color_encoding_t::linear);
+    require(renderer.framebuffer().encoding() == color_encoding_t::srgb);
+    auto& attachment = renderer.framebuffer();
+    renderer.clear_color(texture_color, inactive_metric);
+    test::expect_throws<std::invalid_argument>([&] { attachment.encoding(static_cast<color_encoding_t>(99)); });
+    require(attachment.encoding() == color_encoding_t::srgb);
+    for (const auto pixel : pixels) { expect_color(pixel, texture_color); }
+    attachment.encoding(color_encoding_t::linear);
+    for (const auto pixel : pixels) { expect_color(pixel, texture_color); }
+    auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle, {0.5F, 0.25F, 0.75F, 0.5F});
+    auto& material = *item.material();
+    material.depth_test(false);
+    const auto camera = make_camera(16, 16);
+    for (const auto encoding : {color_encoding_t::linear, color_encoding_t::srgb}) {
+        attachment.encoding(encoding);
+        for (bool enabled : {false, true}) {
+            configure_source_over(material);
+            material.blend(enabled);
+            for (unsigned bits = 0; bits < 16; ++bits) {
+                material.color_write(static_cast<color_mask_t>(bits));
+                renderer.clear_color({64, 128, 192, 64}, inactive_metric);
+                renderer.draw(camera, item, inactive_metric);
+                // Fixed independent transfer-function/equation results, with original alpha.
+                const rgba8_t written = encoding == color_encoding_t::linear
+                    ? (enabled ? rgba8_t{96, 96, 192, 160} : rgba8_t{128, 64, 191, 128})
+                    : (enabled ? rgba8_t{143, 133, 209, 160} : rgba8_t{188, 137, 225, 128});
+                const rgba8_t expected {
+                    bits & 1 ? written.red : std::uint8_t(64), bits & 2 ? written.green : std::uint8_t(128),
+                    bits & 4 ? written.blue : std::uint8_t(192), bits & 8 ? written.alpha : std::uint8_t(64)
+                };
+                for (const auto pixel : pixels) { expect_color(pixel, expected); }
+            }
+        }
+    }
+    material.color_write(color_mask_t::all);
+    material.blend(false);
+    attachment.encoding(color_encoding_t::srgb);
+    material.uniform(0, vector4f_t({0.003F, 0.0031308F, 0.0033F, 0.5F}));
+    renderer.draw(camera, item, inactive_metric);
+    expect_color(pixels[0], {10, 10, 11, 128});
+    // Every stored byte survives sRGB decode/encode; then test decoded destination
+    // numerically by storing its linear value through a DST_COLOR factor.
+    material.blend(true);
+    material.blend_color({blend_factor_t::zero, blend_factor_t::one, blend_op_t::add});
+    material.blend_alpha(material.blend_color());
+    for (unsigned byte = 0; byte < 256; ++byte) {
+        const auto channel = static_cast<std::uint8_t>(byte);
+        renderer.clear_color({channel, channel, channel, channel}, inactive_metric);
+        renderer.draw(camera, item, inactive_metric);
+        expect_color(pixels[0], {channel, channel, channel, channel});
+    }
+    // Decode must happen before destination-dependent factors as well as addition.
+    material.uniform(0, vector4f_t({1, 1, 1, 1}));
+    material.blend_color({blend_factor_t::dst_color, blend_factor_t::dst_color, blend_op_t::add});
+    material.blend_alpha({});
+    renderer.clear_color({10, 11, 128, 64}, inactive_metric);
+    renderer.draw(camera, item, inactive_metric);
+    expect_color(pixels[0], {10, 11, 140, 255});
+    // Byte clears are independent of encoding, material mask and blend state.
+    material.color_write(color_mask_t::none);
+    renderer.clear_color(camera, texture_color, inactive_metric);
+    for (const auto pixel : pixels) { expect_color(pixel, texture_color); }
+}
+
+void test_translucent_composition() {
+    std::vector<rgba8_t> pixels(256);
+    software_renderer_t renderer(framebuffer_t(pixels, 16, 16));
+    auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle, {1, 0, 0, 0.5F});
+    auto& material = *item.material();
+    material.depth_test(false);
+    configure_source_over(material);
+    const auto camera = make_camera(16, 16);
+    for (bool premultiplied : {false, true}) {
+        renderer.clear_color({0, 0, 0, 0}, inactive_metric);
+        material.uniform(0, vector4f_t({premultiplied ? 0.5F : 1.0F, 0, 0, 0.5F}));
+        material.blend_color({premultiplied ? blend_factor_t::one : blend_factor_t::src_alpha, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+        renderer.draw(camera, item, inactive_metric);
+        expect_color(pixels[0], {128, 0, 0, 128});
+        renderer.draw(camera, item, inactive_metric);
+        expect_color(pixels[0], {192, 0, 0, 192});
+    }
+    configure_source_over(material);
+    material.uniform(0, vector4f_t({0, 1, 0, 0}));
+    renderer.draw(camera, item, inactive_metric);
+    expect_color(pixels[0], {192, 0, 0, 192});
+    material.uniform(0, vector4f_t({0, 1, 0, 1}));
+    renderer.draw(camera, item, inactive_metric);
+    expect_color(pixels[0], green);
+    // Shared material updates are visible to both items on the next draw.
+    auto shared_item = item;
+    material.blend(false);
+    material.uniform(0, vector4f_t({1, 0, 0, 0.5F}));
+    renderer.draw(camera, shared_item, inactive_metric);
+    expect_color(pixels[0], {255, 0, 0, 128});
+}
+
+void test_blend_depth_and_metrics() {
+    const auto camera = make_camera(16, 16);
+    for (int mode = 0; mode < 6; ++mode) {
+        auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle, {1, 0, 0, 0.5F}, make_visibility_program(mode != 2, mode == 3));
+        configure_source_over(*item.material());
+        item.material()->color_write(mode == 0 ? color_mask_t::none : (mode == 1 ? color_mask_t::red : color_mask_t::all));
+        item.material()->depth_write(mode != 5);
+        std::vector<rgba8_t> recorded_pixels(256), inactive_pixels(256);
+        std::vector<float> recorded_depth(256), inactive_depth(256);
+        profiling::profiler_t profiler;
+        const auto render = [&](auto& pixels, auto& depths, profiling::metric_t& metric) {
+            framebuffer_t framebuffer(pixels, 16, 16);
+            framebuffer.depth(depths);
+            framebuffer.encoding(color_encoding_t::srgb);
+            software_renderer_t renderer(framebuffer);
+            renderer.clear_color({0, 0, 0, 0}, metric);
+            renderer.clear_depth(mode == 4 ? 0.0F : 1.0F, metric);
+            renderer.draw(camera, item, metric);
+        };
+        {
+            auto metric = profiler.metric<application_metrics_t>();
+            render(recorded_pixels, recorded_depth, metric);
+        }
+        render(inactive_pixels, inactive_depth, inactive_metric);
+        require(std::equal(recorded_pixels.begin(), recorded_pixels.end(), inactive_pixels.begin(), same_color));
+        require(recorded_depth == inactive_depth);
+        const auto* metrics = profiler.metrics<application_metrics_t, draw_metrics_t, raster_metrics_t>();
+        require(metrics->m_invocations == 256 && metrics->m_discards == (mode == 3 ? 128U : 0U));
+        require(metrics->m_depth_rejections == (mode == 4 ? 256U : 0U));
+        require(metrics->m_color_writes == (mode == 0 || mode == 2 || mode == 4 ? 0U : (mode == 3 ? 128U : 256U)));
+        require(metrics->m_depth_writes == (mode == 4 || mode == 5 ? 0U : (mode == 3 ? 128U : 256U)));
+        for (int y = 0; y < 16; ++y) {
+            for (int x = 0; x < 16; ++x) {
+                const auto i = pixel_index(x, y, 16);
+                const bool passes = mode != 4 && !(mode == 3 && x < 8);
+                const bool color = passes && mode != 0 && mode != 2;
+                expect_color(recorded_pixels[i], color ? rgba8_t{188, 0, 0, std::uint8_t(mode == 1 ? 0 : 128)} : rgba8_t{0, 0, 0, 0});
+                require(recorded_depth[i] == (passes && mode != 5 ? 0.5F : (mode == 4 ? 0.0F : 1.0F)));
+            }
+        }
+    }
+}
+
+void test_blended_coverage() {
+    std::vector<rgba8_t> pixels(1024);
+    software_renderer_t renderer(framebuffer_t(pixels, 32, 32));
+    for (const auto bounds : {fractional, clipped}) {
+        const auto [xmin, xmax, ymin, ymax] = bounds;
+        const std::vector<clip_position_fixture_t> positions {{xmin, ymax, 0, 1}, {xmax, ymin, 0, 1}, {xmax, ymax, 0, 1}, {xmin, ymin, 0, 1}};
+        for (const auto topology : {vertex_primitive_topology_t::triangle, vertex_primitive_topology_t::triangle_strip, vertex_primitive_topology_t::triangle_fan}) {
+            index_buffer_t::indices_t indices = topology == vertex_primitive_topology_t::triangle ? index_buffer_t::indices_t{0, 1, 2, 1, 0, 3} : (topology == vertex_primitive_topology_t::triangle_strip ? index_buffer_t::indices_t{2, 0, 1, 3} : index_buffer_t::indices_t{0, 2, 1, 3});
+            for (bool reverse : {false, true}) {
+                if (reverse) { std::reverse(indices.begin(), indices.end()); }
+                auto item = make_visibility_item(positions, indices, topology, {1, 0, 0, 0.5F});
+                item.material()->depth_test(false);
+                configure_source_over(*item.material());
+                renderer.clear_color({0, 0, 0, 0}, inactive_metric);
+                const camera_t camera({{2, 30}, {2, 30}}, orthographic_t({{-1, 1}, {-1, 1}}, 0, 2));
+                // Full viewport has independent literal expected coverage; bounded camera
+                // is checked separately below using a full-screen clipped primitive.
+                renderer.draw(make_camera(32, 32), item, inactive_metric);
+                for (int y = 0; y < 32; ++y) {
+                    for (int x = 0; x < 32; ++x) {
+                        const bool inside = bounds == clipped || (4 <= x && x <= 28 && 8 <= y && y <= 24);
+                        expect_color(pixels[pixel_index(x, y, 32)], inside ? rgba8_t{128, 0, 0, 128} : rgba8_t{0, 0, 0, 0});
+                    }
+                }
+                if (bounds == clipped) {
+                    renderer.clear_color({0, 0, 0, 0}, inactive_metric);
+                    renderer.draw(camera, item, inactive_metric);
+                    for (int y = 0; y < 32; ++y) {
+                        for (int x = 0; x < 32; ++x) {
+                            const bool inside = 2 <= x && x < 30 && 2 <= y && y < 30;
+                            expect_color(pixels[pixel_index(x, y, 32)], inside ? rgba8_t{128, 0, 0, 128} : rgba8_t{0, 0, 0, 0});
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (const auto& triangle : {crossing, concave}) {
+        for (bool reverse : {false, true}) {
+            auto item = make_visibility_item({triangle.begin(), triangle.end()}, reverse ? index_buffer_t::indices_t{2, 1, 0} : index_buffer_t::indices_t{0, 1, 2}, vertex_primitive_topology_t::triangle, {1, 0, 0, 0.5F});
+            item.material()->depth_test(false);
+            configure_source_over(*item.material());
+            renderer.clear_color({0, 0, 0, 0}, inactive_metric);
+            renderer.draw(make_camera(32, 32), item, inactive_metric);
+            expect_color(pixels[0], {128, 0, 0, 128});
+            for (std::size_t i = 1; i < pixels.size(); ++i) { expect_color(pixels[i], {0, 0, 0, 0}); }
+        }
+    }
+    // Existing point disks and inclusive line endpoints retain separate primitive hits.
+    for (const auto topology : {vertex_primitive_topology_t::point, vertex_primitive_topology_t::line, vertex_primitive_topology_t::line_strip, vertex_primitive_topology_t::line_loop}) {
+        const bool points = topology == vertex_primitive_topology_t::point;
+        const std::vector<clip_position_fixture_t> positions = points ? std::vector<clip_position_fixture_t>{{0, 0, 0, 1}, {0, 0, 0, 1}} : std::vector<clip_position_fixture_t>{{-0.5F, 0, 0, 1}, {0, 0, 0, 1}, {0.5F, 0, 0, 1}};
+        const index_buffer_t::indices_t indices = points ? index_buffer_t::indices_t{0, 1} : (topology == vertex_primitive_topology_t::line ? index_buffer_t::indices_t{0, 1, 1, 2} : index_buffer_t::indices_t{0, 1, 2});
+        auto item = make_visibility_item(positions, indices, topology, {1, 0, 0, 0.5F});
+        item.material()->depth_test(false);
+        configure_source_over(*item.material());
+        renderer.clear_color({0, 0, 0, 0}, inactive_metric);
+        renderer.draw(make_camera(32, 32), item, inactive_metric);
+        expect_color(pixels[pixel_index(16, 16, 32)], topology == vertex_primitive_topology_t::line_loop ? rgba8_t{224, 0, 0, 224} : rgba8_t{192, 0, 0, 192});
+    }
+}
+
 void run_resource_tests() {
     test_rotation_and_item_transform();
     test_resource_model();
@@ -2580,6 +2930,12 @@ void run_framebuffer_tests() {
 }
 
 void run_pipeline_tests() {
+    test_blend_state();
+    test_blend_equations();
+    test_color_encoding_and_masks();
+    test_translucent_composition();
+    test_blend_depth_and_metrics();
+    test_blended_coverage();
     test_profiling();
     test_material_setting_invariants();
     test_depth_attachment_updates();

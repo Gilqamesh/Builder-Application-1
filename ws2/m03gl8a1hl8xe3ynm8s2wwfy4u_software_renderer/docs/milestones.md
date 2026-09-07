@@ -1,6 +1,6 @@
 # Software renderer milestones
 
-Status: milestones 0, 1, and 2 are implemented and validated. Milestone 6 has profiling and an initial optimized baseline; algorithmic optimization remains unstarted. Milestones 3–5 remain proposed and unstarted. Public behavior is owned by the module headers.
+Status: milestones 0–3 are implemented and validated. Milestone 6 has profiling and an initial optimized baseline; algorithmic optimization remains unstarted. Milestones 4–5 remain proposed and unstarted. Public behavior is owned by the module headers.
 
 Baseline: [Builder-Modules at 540bbede71740d24292cc3b7cd9c8ed126eca0c3](https://github.com/Gilqamesh/Builder-Modules/tree/540bbede71740d24292cc3b7cd9c8ed126eca0c3).
 
@@ -106,11 +106,42 @@ software_renderer.draw(camera, item, inactive_metric);
 
 ## 3. Blending and color writes
 
-Status: unstarted.
+Status: implemented; automated, visible integration, and benchmark validation passed.
 
-- Outcome: transparent overlays compose correctly with opaque geometry.
-- Open decisions: blend factors/equations, color masks, straight versus premultiplied alpha, linear versus sRGB attachments, and encoding boundaries. Build on the ownership decisions settled in milestone 2.
-- Acceptance criteria: known source/destination colors produce expected RGB and alpha, masks preserve disabled channels, sRGB conversion occurs at the agreed boundary, and shared edges have no blending seams. The application supplies transparent draw order.
+- Outcome: configurable single-source blending composes transparent geometry in application-supplied order.
+- Materials own blend enablement, independent RGB/alpha equations, all 15 single-source factors, five basic operations, linear constants, and RGBA channel masks. Defaults preserve linear replacement output. See [material.h](../material.h).
+- Framebuffer views own linear/sRGB encoding and prescribe no alpha association. Encoding changes reinterpret storage; byte clears remain literal fills. See [framebuffer.h](../framebuffer.h).
+- Processing sanitizes and clamps source values, decodes destination RGB when needed, evaluates both equations from original inputs, clamps, encodes, quantizes, and writes enabled channels. See [software_renderer.h](../software_renderer.h). No implicit premultiplication or division by alpha is performed.
+- Acceptance criteria: independent RGB/alpha expectations, factor and operation tables, exact masked-byte preservation, sRGB boundaries, repeated translucent composition, shared-edge coverage, unchanged late depth/discard behavior, and consistent profiling counters.
+- Dual-source blending, advanced operations, logic operations, and additional color attachments remain deferred.
+
+Representative caller (with geometry, program and bindings already assigned):
+
+```cpp
+namespace renderer = m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer;
+auto& material = *transparent_item.material();
+material.blend_color({
+    .source = renderer::blend_factor_t::src_alpha,
+    .destination = renderer::blend_factor_t::one_minus_src_alpha,
+    .operation = renderer::blend_op_t::add
+});
+material.blend_alpha({
+    .source = renderer::blend_factor_t::one,
+    .destination = renderer::blend_factor_t::one_minus_src_alpha,
+    .operation = renderer::blend_op_t::add
+});
+material.blend(true);
+material.depth_test(true);
+material.depth_write(false);
+software_renderer.framebuffer().encoding(renderer::color_encoding_t::srgb);
+renderer::profiling::metric_t inactive_metric;
+software_renderer.draw(camera, opaque_item, inactive_metric);
+software_renderer.draw(camera, transparent_item, inactive_metric);
+```
+
+This example emits straight shader color into a premultiplied destination convention.
+For premultiplied shader output, use `one` as the RGB source factor. The application
+initializes attachments before the pass and supplies transparent draw ordering.
 
 ## 4. Stencil and render-to-texture
 
@@ -444,6 +475,69 @@ them while preserving attachments. Renderer stage boundaries and counter meaning
 are preserved, and the benchmark compares attached and unattached instances of the
 same renderer class. See [the current profiling contract and caller](profiling.md).
 
+
+### Milestone 3 implementation record — 2026-09-07
+
+Reviewed base: `0d1db912038f0d15f76d256b3db55b04858a87fd`. Changes are in the
+working tree; this task created no commit.
+
+The settled contracts are in [material.h](../material.h), [framebuffer.h](../framebuffer.h),
+and [software_renderer.h](../software_renderer.h). Materials have validated blend
+properties and independent RGB/alpha equations; framebuffer color storage is neutral
+about alpha association and supports explicit linear/sRGB interpretation. Both equations
+use original inputs before any channel is stored. Byte clears and late depth behavior
+are preserved. No milestone 3 semantic decision remains open.
+
+Changed files: `material.h/.cpp`, `framebuffer.h/.cpp`, `helpers.h/.cpp`,
+`software_renderer.h`, `profiling_metrics.h`, `test/public_api.cpp`, `benchmark.cpp`,
+`cli.cpp`, `AGENTS.md`, `docs/milestones.md`, `docs/profiling.md`, and
+`docs/blending-performance.md/.json`.
+
+Checks obtained from changed source (all exit 0):
+
+```sh
+python3 /tmp/renderer-m3-implementation/build.py public_api
+./cli m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer:benchmark --help
+/tmp/renderer-m1-implementation/install_binary m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
+/tmp/renderer-m1-implementation/install_binary m03gilsfsv3k34ej14ytz8a29k_tower_defense_game
+python3 /tmp/renderer-m3-implementation/smoke.py m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer 'Software Renderer' renderer
+python3 /tmp/renderer-m3-implementation/smoke.py m03gilsfsv3k34ej14ytz8a29k_tower_defense_game 'Tower Defense Game' tower-defense
+git -C /home/gilqamesh/Projects/Builder-Modules diff --check
+```
+
+Staged GNU C++23 validation used `-O0 -g -Wall -Wextra -ftrapv` against current
+installed dependencies. Additional GNU `-std=c++23 -Wall -Wextra -fsyntax-only`
+checks passed for the demo and benchmark. Native Builder rebuilt with Clang C++23
+and automatically ran the expanded public suite. Native consumer compilation also
+passed. The first new-test failures exposed an incorrect literal sRGB expectation
+and a fixture missing a required shader AST output; these were corrected before
+application and native validation.
+
+Public checks cover all factors in both contribution roles and RGB/alpha channels,
+all operations, separate equations, original-alpha dependence, constants, numeric
+boundaries, all 16 masks in linear/sRGB storage, transfer boundaries and all 256
+sRGB byte round trips, repeated composition, state validation/copying/sharing,
+attachment interpretation, discard, depth failure, absent color, disabled masks,
+profiling equivalence/counters, camera bounds, shared/clipped edges, crossed and
+concave fixtures, and point/line/strip/loop/fan behavior.
+
+Both X11 desktop checks displayed content and closed normally. Inspected captures
+are `/tmp/renderer-m3-implementation/renderer-smoke-0.png` (960×540, translucent
+overlay over intersecting opaque geometry) and `tower-defense-smoke-0.png`
+(1600×1200, preserving the consumer's 400×200 camera region). The renderer demo
+uses an opaque clear so alpha remains one; its sRGB bytes pass through the existing
+RGBA8 presentation upload without texture sRGB decoding.
+
+[Benchmark comparison and exact commands](blending-performance.md) and
+[raw results](blending-performance.json) retain the four existing workloads and
+new linear/sRGB translucent costs. These use the same native build settings before
+and after, separately from the historical optimized baseline. Timing conclusions
+are limited by measured variation and uncontrolled external load.
+
+Logs, staged sources and helpers remain in `/tmp/renderer-m3-implementation`.
+Only the active tower-defense software path was visually checked. Dual-source
+blending, advanced operations, logic operations, extra attachments, stencil, and
+later feature milestones remain deferred.
 
 ## Deferred scope
 

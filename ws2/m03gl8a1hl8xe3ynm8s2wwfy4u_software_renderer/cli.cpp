@@ -168,6 +168,19 @@ int main() {
         second_item.rotation(vector3f_t({-0.2F, -0.65F, 0.0F}));
         second_item.translation() = {0.15F, 0.0F, -1.35F};
 
+        auto transparent_item = render_item;
+        auto transparent_material = std::make_shared<software_renderer_api::material_t>(*transparent_item.material());
+        transparent_material->uniform(0, vector4f_t({0.5F, 1.0F, 0.7F, 0.45F}));
+        transparent_material->blend(true);
+        transparent_material->blend_color({software_renderer_api::blend_factor_t::src_alpha, software_renderer_api::blend_factor_t::one_minus_src_alpha, software_renderer_api::blend_op_t::add});
+        transparent_material->blend_alpha({software_renderer_api::blend_factor_t::one, software_renderer_api::blend_factor_t::one_minus_src_alpha, software_renderer_api::blend_op_t::add});
+        transparent_material->depth_write(false);
+        transparent_material->cull(software_renderer_api::cull_mode_t::none);
+        transparent_item.material() = std::move(transparent_material);
+        transparent_item.scale() = {0.55F, 0.55F, 1.0F};
+        transparent_item.translation() = {0.0F, -0.15F, -0.95F};
+        transparent_item.rotation(vector3f_t({0.2F, 0.35F, 0.1F}));
+
         const auto started_at = steady_clock_t::now();
         auto previous_frame_started_at = started_at;
 
@@ -185,6 +198,7 @@ int main() {
                 depth.resize(pixels.size());
                 software_renderer_api::framebuffer_t replacement(pixels, size[0], size[1]);
                 replacement.depth(depth);
+                replacement.encoding(software_renderer_api::color_encoding_t::srgb);
                 software_renderer.framebuffer() = replacement;
                 framebuffer = software_renderer.framebuffer();
             }
@@ -208,6 +222,8 @@ int main() {
                     software_renderer.draw(camera, second_item, frame_metric);
                     software_renderer.draw(camera, render_item, frame_metric);
                 }
+                // Composite after opaque visibility. The opaque clear keeps output alpha one.
+                software_renderer.draw(camera, transparent_item, frame_metric);
                 opengl_renderer.present_rgba8(
                     std::as_bytes(std::span<const rgba8_t>(pixels)),
                     framebuffer.width(),

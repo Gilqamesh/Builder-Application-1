@@ -49,9 +49,19 @@ namespace profiling = m03gtjqkhqacstl3luv2ojsz3q_profiling;
  * front-face selection without changing coverage; points and lines stay front-facing.
  * Covered, unculled samples execute the fragment shader before depth testing.
  * Discard prevents color and depth writes. A failed depth test also prevents both.
- * Passing samples write depth when enabled and overwrite color when supplied;
- * an unwritten color preserves color while still permitting depth writes.
- * There is no blending.
+ * Passing samples write depth when enabled. Supplied color is processed using
+ * the material's independent RGB/alpha blend equations and channel-write mask.
+ * Absent color or a disabled color mask preserves color while permitting depth writes.
+ *
+ * Source components are sanitized and clamped to [0,1]: NaN and negative infinity
+ * become zero, positive infinity becomes one. Fragment RGB and blend constants are
+ * linear. Destination sRGB RGB is decoded before use in factors or equations.
+ * Both equations read the original source and destination, before any channel write.
+ * Results clamp to [0,1]; sRGB RGB is then encoded, including with blending disabled.
+ * Alpha remains linear. Byte conversion rounds to nearest, with halfway values upward.
+ * Masked channels preserve their exact stored bytes without changing blend inputs.
+ * Shaders and equations determine alpha association; there is no implicit premultiplication
+ * or division by alpha. Applications supply pass sequencing and transparent draw order.
  *
  * Drawing and clearing borrow a parent metric for the call and create children
  * beneath it. Pass a default inactive metric when recording is unnecessary.
@@ -70,12 +80,13 @@ public:
     framebuffer_t& framebuffer() noexcept;
     const framebuffer_t& framebuffer() const noexcept;
 
+    /** @brief Fills stored bytes verbatim, independently of encoding and material state. */
     void clear_color(rgba8_t color, profiling::metric_t& parent_metric);
 
     /**
      * @brief Fills the intersection of the camera rectangle and framebuffer.
      *
-     * Camera pose, projection, materials, and shader state do not affect clearing.
+     * Stores bytes verbatim; encoding, camera pose, projection, materials, and shader state do not affect clearing.
      * Empty intersections do no work.
      */
     void clear_color(const camera_t& camera, rgba8_t color, profiling::metric_t& parent_metric);

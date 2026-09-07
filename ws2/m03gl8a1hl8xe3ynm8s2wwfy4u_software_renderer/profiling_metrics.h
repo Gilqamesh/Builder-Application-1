@@ -40,6 +40,8 @@ struct vertex_metrics_t {
  * Discards count completed invocations reporting discard. Depth rejections count
  * non-discarded samples that fail enabled depth testing. Writes count actual sample
  * assignments, including repeated assignments to overlapping framebuffer locations.
+ * A color sample counts once when at least one channel is assigned, even if its bytes
+ * are unchanged; a fully disabled color mask counts zero.
  * Unwinding preserves counts up to the failed operation. Clear writes are separate.
  * Reported discard/depth-rejection percentages use invocations as the denominator;
  * no invocations is reported as n/a.

@@ -92,7 +92,9 @@ std::vector<render_item_t> make_workload(std::string_view name) {
     fragment.color(shader::sample(fragment.resource<shader::shader_texture_2d_t>(0), fragment.resource<shader::shader_sampler_t>(0), coordinates));
     const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
     auto material = std::make_shared<material_t>(program);
-    const std::array<rgba8_t, 4> texels {{{255, 72, 72, 255}, {72, 255, 128, 255}, {72, 128, 255, 255}, {255, 232, 72, 255}}};
+    const bool translucent = name == "translucent_linear" || name == "translucent_srgb";
+    const std::uint8_t alpha = translucent ? 128 : 255;
+    const std::array<rgba8_t, 4> texels {{{255, 72, 72, alpha}, {72, 255, 128, alpha}, {72, 128, 255, alpha}, {255, 232, 72, alpha}}};
     material->texture(0, std::make_shared<texture::texture_t>(texture::format_t::rgba8_unorm, 2, 2, byte_stream::byte_stream_t(std::as_bytes(std::span(texels)))));
     material->sampler(0, std::make_shared<texture::sampler_t>(texture::filter_t::linear, texture::address_mode_t::clamp_to_edge, texture::address_mode_t::clamp_to_edge));
     material->depth_test(true);
@@ -109,6 +111,16 @@ std::vector<render_item_t> make_workload(std::string_view name) {
     item.geometry() = geometry;
     item.material() = material;
     item.translation() = {0, 0, -1};
+    if (translucent) {
+        material->blend(true);
+        material->blend_color({blend_factor_t::src_alpha, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+        material->blend_alpha({blend_factor_t::one, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+        material->depth_write(false);
+        std::vector<render_item_t> items(4, item);
+        // Four translucent layers, supplied back to front by the application.
+        for (std::size_t i = 0; i < items.size(); ++i) { items[i].translation()[2] = -1.3F + float(i) * 0.1F; }
+        return items;
+    }
     if (name == "textured_fill") { return {item}; }
     if (name == "depth_overdraw") {
         std::vector<render_item_t> items(4, item);
@@ -163,7 +175,7 @@ benchmark_t::benchmark_t(int argc, char** argv) {
     }
     if (m_output.empty() || m_output.front() != '/') { throw std::invalid_argument("benchmark requires --output with an absolute directory path"); }
     if (m_size <= 0 || m_warmup < 0 || m_samples <= 0 || m_runs <= 0) { throw std::invalid_argument("benchmark requires positive size, samples and runs, and nonnegative warmup"); }
-    if (!m_workload.empty() && m_workload != "textured_fill" && m_workload != "depth_overdraw" && m_workload != "many_draws" && m_workload != "clipping") {
+    if (!m_workload.empty() && m_workload != "textured_fill" && m_workload != "depth_overdraw" && m_workload != "many_draws" && m_workload != "clipping" && m_workload != "translucent_linear" && m_workload != "translucent_srgb") {
         throw std::invalid_argument(std::format("unknown benchmark workload '{}'", m_workload));
     }
 }
@@ -180,7 +192,7 @@ void benchmark_t::run() const {
     filesystem::create_directories(output);
     json_t results {{"metadata", metadata(program)}, {"workloads", json_t::object()}};
     write_json(output / filesystem::relative_path_t("metadata.json"), results.at("metadata"));
-    for (const std::string workload : {"textured_fill", "depth_overdraw", "many_draws", "clipping"}) {
+    for (const std::string workload : {"textured_fill", "depth_overdraw", "many_draws", "clipping", "translucent_linear", "translucent_srgb"}) {
         std::cout.flush(); // Keep buffered summaries out of the child process.
         process::create_and_wait_checked(process::command_t({
             program.string(), "--worker", workload, "--output", output.string(),
@@ -209,6 +221,10 @@ json_t benchmark_t::run_workload() const {
     std::vector<float> normal_depth(count), measured_depth(count);
     framebuffer_t normal_buffer(normal_pixels, m_size, m_size), measured_buffer(measured_pixels, m_size, m_size);
     normal_buffer.depth(normal_depth); measured_buffer.depth(measured_depth);
+    if (m_workload == "translucent_srgb") {
+        normal_buffer.encoding(color_encoding_t::srgb);
+        measured_buffer.encoding(color_encoding_t::srgb);
+    }
     software_renderer_t normal(normal_buffer);
     profiling::profiler_t normal_profiler;
     normal_profiler.enabled() = false;
@@ -298,7 +314,7 @@ json_t benchmark_t::metadata(const filesystem::path_t& program) const {
     }
     if (!maps.eof()) { throw std::runtime_error("benchmark could not read loaded artifact mappings"); }
     return {
-        {"schema_version", 4}, {"workload_version", 1},
+        {"schema_version", 4}, {"workload_version", 2},
         {"size", m_size}, {"warmup_per_run", m_warmup}, {"samples_per_run", m_samples}, {"runs", m_runs},
         {"cpu", cpu}, {"platform", std::format("{} {} {}", platform.sysname, platform.release, platform.machine)},
         {"scope", "frame measurement, full color/depth clears, fixed draw sequence; setup, comparison, reporting excluded"},
@@ -367,7 +383,7 @@ int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--help") {
             std::cout << "usage: benchmark --output /absolute/new/run-directory [--size 128] [--warmup 3] [--samples 20] [--runs 5]\n"
-                         "Runs four workloads in separate processes using the current Builder build configuration.\n";
+                         "Runs six workloads in separate processes using the current Builder build configuration.\n";
             return 0;
         }
         m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_t(argc, argv).run();

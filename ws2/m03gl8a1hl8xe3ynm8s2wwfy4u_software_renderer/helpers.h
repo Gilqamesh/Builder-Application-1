@@ -260,9 +260,20 @@ void set_fragment_inputs(
     std::span<const varying_entry_t> inputs
 );
 
+// Sanitizes NaN/infinities and clamps finite values without vector normalization.
+float sanitize_unorm(float component);
+
 std::uint8_t to_unorm8(float component);
 
 rgba8_t to_rgba8(const vector4f_t& color);
+
+// Transfer functions consume finite [0,1] components.
+float decode_srgb(float component);
+float encode_srgb(float component);
+
+float blend_factor_component(blend_factor_t factor, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component);
+float blend_component(const blend_equation_t& blend_equation, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component);
+void write_color(const material_t& material, color_encoding_t encoding, const vector4f_t& source, rgba8_t& pixel);
 
 float depth_clear_value(float depth);
 
