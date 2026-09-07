@@ -31,12 +31,14 @@ assembly within those classes.
 - Planar scenes use the same 3D model with an orthographic camera and explicit
   placement. Maintain one camera model and one public drawing API.
 
-- Profiling attaches an application-owned profiler to the ordinary renderer at
-  quiescent boundaries. The default renderer is unattached. Renderer metrics,
-  formatters, counter meanings, and stage boundaries remain owned here; timing,
-  replacement, metric storage, and reporting belong to
+- Each renderer owns a disabled-by-default profiler exposed through profiler().
+  Applications enable recording and may measure their own work with that same
+  profiler. Renderer metrics, formatters, counter meanings, and stage boundaries
+  remain owned here; timing statistics,
+  latest-data replacement, metric storage, and reporting belong to
   [`profiling`](../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md).
-  Only counter updates depend on active metrics; rendering always executes.
+  Counter updates run through metric.update(); rendering always executes outside
+  those callbacks, including while profiling is disabled.
   Color and depth clears have distinct types so each retains its latest measurement.
 
 ## Validation

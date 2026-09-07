@@ -1,12 +1,52 @@
 #include "helpers.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <exception>
 #include <format>
 #include <string_view>
 
 namespace m03gtjqkhqacstl3luv2ojsz3q_profiling {
+
+metric_base_t::metric_base_t(const std::type_info& type) noexcept:
+    m_type(&type)
+{
+}
+
+metric_base_t::~metric_base_t() = default;
+
+void metric_base_t::start() noexcept {
+    m_exceptions = std::uncaught_exceptions();
+    m_start = clock_now();
+}
+
+void metric_base_t::stop() noexcept {
+    m_completed = clock_now();
+    m_elapsed = m_completed - m_start;
+    m_total += m_elapsed;
+    m_max = std::max(m_max, m_elapsed);
+    ++m_count;
+    m_unwinding = m_exceptions < std::uncaught_exceptions();
+    m_active = false;
+}
+
+void metric_base_t::report_timing(std::ostream& out, std::chrono::nanoseconds now) const {
+    out << std::format(
+        "  count={} last={} mean={} max={} total={} age={}",
+        m_count,
+        format_elapsed(m_elapsed),
+        format_elapsed(m_total / m_count),
+        format_elapsed(m_max),
+        format_elapsed(m_total),
+        format_elapsed(now - m_completed)
+    );
+    if (m_unwinding) {
+        out << " unwinding";
+    }
+    out << '\n';
+}
 
 #ifndef PROFILING_TEST_CLOCK
 std::chrono::nanoseconds clock_now() noexcept {

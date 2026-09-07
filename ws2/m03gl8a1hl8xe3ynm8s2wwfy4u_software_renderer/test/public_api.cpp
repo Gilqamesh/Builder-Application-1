@@ -2406,16 +2406,24 @@ void test_depth_clears() {
 }
 
 void test_profiling() {
-    using profiler_t = profiling::profiler_t;
-    profiler_t profiler;
+    require(std::format("{}", raster_metrics_t{}).find("discarded=n/a, depth_rejected=n/a") != std::string::npos);
+    raster_metrics_t ratios;
+    ratios.m_invocations = 8;
+    ratios.m_discards = 2;
+    ratios.m_depth_rejections = 3;
+    require(std::format("{}", ratios).find("discarded=25.0%, depth_rejected=37.5%") != std::string::npos);
     std::vector<api::rgba8_t> measured_pixels(256), normal_pixels(256);
     std::vector<float> measured_depth(256), normal_depth(256);
     api::framebuffer_t measured_framebuffer(measured_pixels, 16, 16), normal_framebuffer(normal_pixels, 16, 16);
     measured_framebuffer.depth(measured_depth);
     normal_framebuffer.depth(normal_depth);
     api::software_renderer_t measured(measured_framebuffer);
-    measured.profiler(profiler);
+    auto& profiler = measured.profiler();
+    require(!profiler.enabled() && profiler.size() == 0);
+    profiler.enabled() = true;
     api::software_renderer_t normal(normal_framebuffer);
+    require(!std::as_const(normal).profiler().enabled());
+    require(&std::as_const(measured).profiler() == &profiler);
     const auto camera = make_camera(16, 16);
     for (int mode = 0; mode < 6; ++mode) {
         auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
@@ -2434,7 +2442,7 @@ void test_profiling() {
         {
             auto metric = profiler.metric<application_metrics_t>();
             render(measured);
-            if (metric) { metric->m_items = draws; }
+            metric.update([draws](application_metrics_t& metric) noexcept { metric.m_items = draws; });
         }
         render(normal);
         require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
@@ -2506,18 +2514,18 @@ void test_profiling() {
     require(profiler.metrics<vertex_metrics_t>()->m_expected == 6);
     require(profiler.unwinding<preparation_metrics_t>() == false);
 
-    // Attachment changes require both collectors to be quiescent and leave
-    // the old attachment intact on failure.
+    // Enablement affects new measurements; an active application metric still finishes.
     {
         auto metric = profiler.metric<application_metrics_t>();
-        test::expect_throws([&] { measured.profiler(nullptr); });
-        test::expect_throws([&] { normal.profiler(profiler); });
+        profiler.enabled() = false;
+        metric.update([](application_metrics_t& metric) noexcept { metric.m_items = 3; });
     }
-    measured.profiler(nullptr);
+    require(profiler.metrics<application_metrics_t>()->m_items == 3);
+    require(!normal.profiler().enabled() && normal.profiler().size() == 0);
     const auto color_writes = profiler.metrics<clear_color_metrics_t>()->m_color_writes;
     measured.clear_color(empty_camera, clear_color);
     require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == color_writes);
-    measured.profiler(profiler);
+    profiler.enabled() = true;
     measured.clear_color(empty_camera, clear_color);
     measured.clear_depth(empty_camera, 1);
     require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == 0);

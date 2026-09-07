@@ -38,6 +38,8 @@ struct vertex_metrics_t {
  * non-discarded samples that fail enabled depth testing. Writes count actual sample
  * assignments, including repeated assignments to overlapping framebuffer locations.
  * Unwinding preserves counts up to the failed operation. Clear writes are separate.
+ * Reported discard/depth-rejection percentages use invocations as the denominator;
+ * no invocations is reported as n/a.
  */
 struct raster_metrics_t {
     std::size_t m_invocations = 0;
@@ -169,6 +171,12 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_metrics_t>
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_metrics_t& raster_metrics, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "renderer.rasterization fragment_invocations={}, discards={}, depth_rejections={}, color_writes={}, depth_writes={}", raster_metrics.m_invocations, raster_metrics.m_discards, raster_metrics.m_depth_rejections, raster_metrics.m_color_writes, raster_metrics.m_depth_writes);
+        if (raster_metrics.m_invocations == 0) {
+            out = std::format_to(out, ", discarded=n/a, depth_rejected=n/a");
+        } else {
+            const auto percent = 100.0L / raster_metrics.m_invocations;
+            out = std::format_to(out, ", discarded={:.1f}%, depth_rejected={:.1f}%", raster_metrics.m_discards * percent, raster_metrics.m_depth_rejections * percent);
+        }
         return out;
     }
 };

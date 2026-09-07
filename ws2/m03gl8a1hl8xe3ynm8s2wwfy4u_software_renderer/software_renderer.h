@@ -59,14 +59,14 @@ public:
     explicit software_renderer_t(framebuffer_t framebuffer);
 
     /**
-     * @brief Attaches a borrowed profiler; both old and new profilers must be quiescent.
+     * @brief Exposes this renderer's owned profiler, which starts disabled.
      *
-     * The renderer defaults to unattached. The profiler outlives its use by this
-     * renderer. Passing nullptr detaches it. Each metric type retains the latest
-     * completed measurement; repeated draws replace their previous stage metrics.
+     * Applications may measure their own work with this profiler. Each metric type
+     * retains the latest data and accumulates timing statistics. Borrowed use of
+     * the profiler ends with this renderer.
      */
-    void profiler(profiling::profiler_t& profiler);
-    void profiler(std::nullptr_t);
+    profiling::profiler_t& profiler() noexcept;
+    const profiling::profiler_t& profiler() const noexcept;
 
     software_renderer_t(const software_renderer_t&) = delete;
     software_renderer_t& operator=(const software_renderer_t&) = delete;
@@ -118,7 +118,7 @@ public:
 private:
     framebuffer_t m_framebuffer;
     scratch_t m_scratch;
-    profiling::profiler_t* m_profiler = nullptr;
+    profiling::profiler_t m_profiler;
 };
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

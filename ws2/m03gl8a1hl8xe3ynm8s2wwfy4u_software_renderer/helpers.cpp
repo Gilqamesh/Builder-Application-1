@@ -838,14 +838,14 @@ void shade_sample(
         front_facing
     );
     set_fragment_inputs(io, inputs);
-    if (metric) {
-        ++metric->m_invocations;
-    }
+    metric.update([](raster_metrics_t& metric) noexcept {
+        ++metric.m_invocations;
+    });
     material.program()->run(material.bindings(), io);
     if (io.discarded()) {
-        if (metric) {
-            ++metric->m_discards;
-        }
+        metric.update([](raster_metrics_t& metric) noexcept {
+            ++metric.m_discards;
+        });
         return;
     }
     const auto index = static_cast<std::size_t>(y) * static_cast<std::size_t>(bounds.m_width) + static_cast<std::size_t>(x);
@@ -853,23 +853,23 @@ void shade_sample(
         const auto comparison = material.depth_compare();
         const bool passes = comparison == comparison_t::always || (comparison != comparison_t::never && depth_passes(comparison, depth, framebuffer.depth()[index]));
         if (!passes) {
-            if (metric) {
-                ++metric->m_depth_rejections;
-            }
+            metric.update([](raster_metrics_t& metric) noexcept {
+                ++metric.m_depth_rejections;
+            });
             return;
         }
         if (material.depth_write()) {
             framebuffer.depth()[index] = depth;
-            if (metric) {
-                ++metric->m_depth_writes;
-            }
+            metric.update([](raster_metrics_t& metric) noexcept {
+                ++metric.m_depth_writes;
+            });
         }
     }
     if (const auto color = io.color()) {
         framebuffer.pixels()[index] = to_rgba8(*color);
-        if (metric) {
-            ++metric->m_color_writes;
-        }
+        metric.update([](raster_metrics_t& metric) noexcept {
+            ++metric.m_color_writes;
+        });
     }
 }
 

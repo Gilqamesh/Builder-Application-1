@@ -40,8 +40,8 @@ struct timing_t {};
 
 struct counted_t {
     explicit counted_t(int number) noexcept: m_number(number) { ++live_metrics; tick += 5; }
-    counted_t(counted_t&& other) noexcept: m_number(other.m_number) { ++live_metrics; tick += 7; }
-    counted_t& operator=(counted_t&& other) noexcept { m_number = other.m_number; tick += 7; return *this; }
+    counted_t(const counted_t&) = delete;
+    counted_t& operator=(const counted_t&) = delete;
     ~counted_t() { --live_metrics; tick += 3; }
     int m_number;
 };
@@ -74,10 +74,9 @@ struct numbered_t {};
 
 struct observing_t {
     explicit observing_t(profiler_t& profiler) noexcept;
-    observing_t(observing_t&& other) noexcept;
-    observing_t& operator=(observing_t&& other) noexcept;
     ~observing_t();
     profiler_t* m_profiler;
+    bool m_check_destruction = false;
 };
 
 } // namespace m03gtjqkhqacstl3luv2ojsz3q_profiling
@@ -196,24 +195,6 @@ void operator delete[](void* memory, std::size_t, std::align_val_t) noexcept { s
 
 namespace m03gtjqkhqacstl3luv2ojsz3q_profiling {
 
-observing_t::observing_t(profiler_t& profiler) noexcept: m_profiler(&profiler) {
-    if (profiler.quiescent()) { std::abort(); }
-}
-
-observing_t::observing_t(observing_t&& other) noexcept: m_profiler(other.m_profiler) {
-    if (m_profiler->quiescent()) { std::abort(); }
-    other.m_profiler = nullptr;
-}
-
-observing_t& observing_t::operator=(observing_t&& other) noexcept {
-    if (other.m_profiler->quiescent()) { std::abort(); }
-    m_profiler = other.m_profiler;
-    other.m_profiler = nullptr;
-    return *this;
-}
-
-observing_t::~observing_t() = default;
-
 void require(bool condition, std::source_location location = std::source_location::current()) {
     if (!condition) { throw std::runtime_error(std::format("profiling contract check failed at line {}", location.line())); }
 }
@@ -225,18 +206,37 @@ void rejects(F&& operation) {
     require(failed);
 }
 
+observing_t::observing_t(profiler_t& profiler) noexcept: m_profiler(&profiler) {
+    rejects([&] { (void)profiler.size(); });
+    rejects([&] { auto metric = profiler.metric<observing_t>(profiler); });
+}
+
+observing_t::~observing_t() {
+    if (m_check_destruction) {
+        rejects([&] { (void)m_profiler->size(); });
+        rejects([&] { auto metric = m_profiler->metric<observing_t>(*m_profiler); });
+    }
+}
+
 void test_replacement() {
     static_assert(!std::is_copy_constructible_v<profiler_t> && !std::is_move_constructible_v<profiler_t>);
     static_assert(!std::is_copy_constructible_v<metric_t<counted_t>> && !std::is_move_constructible_v<metric_t<counted_t>>);
     profiler_t profiler;
-    require(profiler.quiescent() && profiler.size() == 0);
+    profiler.enabled() = true;
+    require(profiler.size() == 0);
     require(!profiler.metrics<counted_t>() && !profiler.elapsed<counted_t>() && !profiler.unwinding<counted_t>());
     tick = 10;
     const auto formatted = formats;
     {
         auto metric = profiler.metric<counted_t>(7);
-        require(!profiler.quiescent() && live_metrics == 1);
-        static_assert(std::same_as<decltype(std::as_const(metric).operator->()), const counted_t*>);
+        require(live_metrics == 1);
+        profiler.enabled() = false;
+        bool updated = false;
+        metric.update([&updated](const counted_t& metric) {
+            require(metric.m_number == 7);
+            updated = true;
+        });
+        require(updated && metric);
         rejects([&] { (void)profiler.metrics<counted_t>(); });
         rejects([&] { (void)profiler.elapsed<counted_t>(); });
         rejects([&] { (void)profiler.unwinding<counted_t>(); });
@@ -245,9 +245,10 @@ void test_replacement() {
         tick = 50;
         allocation_forbidden = true;
         metric.stop();
-        require(!metric && profiler.quiescent() && live_metrics == 1 && formats == formatted);
+        require(!metric && live_metrics == 1 && formats == formatted);
         const auto calls = clock_calls;
         metric.stop();
+        metric.update([](counted_t&) { std::abort(); });
         require(clock_calls == calls);
         allocation_forbidden = false;
         tick = 500;
@@ -258,66 +259,84 @@ void test_replacement() {
     require(profiler.elapsed<counted_t>()->count() == 35);
 #endif
     const auto count = allocations;
+    const auto calls = clock_calls;
     allocation_forbidden = true;
+    {
+        auto metric = profiler.metric<counted_t>(99);
+        metric.update([](counted_t&) { std::abort(); });
+        metric.stop();
+    }
+    require(clock_calls == calls && allocations == count);
+    require(profiler.metrics<counted_t>()->m_number == 7);
+    profiler.enabled() = true;
     tick = 100;
     {
         auto metric = profiler.metric<counted_t>(20);
-        require(live_metrics == 2);
-        metric->m_number = 21;
+        require(live_metrics == 1);
+        metric.update([](counted_t& metric) noexcept { metric.m_number = 21; });
         tick = 125;
     }
     allocation_forbidden = false;
     require(allocations == count && profiler.size() == 1 && live_metrics == 1);
     require(profiler.metrics<counted_t>()->m_number == 21);
 #ifdef PROFILING_TEST_CLOCK
-    require(profiler.elapsed<counted_t>()->count() == 20);
+    require(profiler.elapsed<counted_t>()->count() == 17);
 #endif
     std::ostringstream report;
     profiler.report(report);
     require(formats == formatted + 1);
-    require(report.str().starts_with("21 elapsed=") && report.str().find("7 elapsed=") == std::string::npos);
+    require(report.str().find("\n21\n  count=2 last=") != std::string::npos);
     profiler.report(report);
     require(formats == formatted + 2);
-    require(std::format("{}", profiler).find("quiescent: true") != std::string::npos);
-}
-
-void recurse(profiler_t& profiler, int depth) {
-    auto metric = profiler.metric<counted_t>(depth);
-    if (depth != 0) { recurse(profiler, depth - 1); }
+    require(std::format("{}", profiler).find("enabled: true") != std::string::npos);
 }
 
 void test_independent_completion() {
     profiler_t profiler;
-    recurse(profiler, 4);
-    require(profiler.size() == 1 && profiler.metrics<counted_t>()->m_number == 4);
+    profiler.enabled() = true;
     {
-        auto first_metric = profiler.metric<counted_t>(11);
-        auto last_metric = profiler.metric<counted_t>(22);
-        first_metric.stop();
-        require(!profiler.quiescent());
-        last_metric.stop();
-        require(profiler.quiescent());
+        auto metric = profiler.metric<counted_t>(11);
+        const auto calls = clock_calls;
+        rejects([&] { auto overlapping_metric = profiler.metric<counted_t>(22); });
+        require(clock_calls == calls && live_metrics == 1);
+        metric.update([](const counted_t& metric) { require(metric.m_number == 11); });
+        profiler.enabled() = false;
+        auto disabled_metric = profiler.metric<counted_t>(22);
+        require(!disabled_metric && clock_calls == calls);
+        profiler.enabled() = true;
+        metric.stop();
+        auto next_metric = profiler.metric<counted_t>(33);
+        metric.update([](counted_t&) { std::abort(); });
+        metric.stop();
+        next_metric.update([](const counted_t& metric) { require(metric.m_number == 33); });
     }
-    require(profiler.metrics<counted_t>()->m_number == 22);
+    require(profiler.metrics<counted_t>()->m_number == 33);
     {
         auto outer_metric = profiler.metric<timing_t>();
         auto inner_metric = profiler.metric<counted_t>(33);
         outer_metric.stop();
+        rejects([&] { (void)profiler.size(); });
         inner_metric.stop();
     }
     require(profiler.size() == 2 && profiler.metrics<counted_t>()->m_number == 33);
     try {
-        auto metric = profiler.metric<counted_t>(44);
-        throw 1;
+        auto metric = profiler.metric<counted_t>(43);
+        metric.update([](counted_t& metric) {
+            metric.m_number = 44;
+            throw 1;
+        });
     } catch (int) {}
-    require(profiler.quiescent() && profiler.unwinding<counted_t>() == true);
+    require(profiler.unwinding<counted_t>() == true);
     require(profiler.metrics<counted_t>()->m_number == 44);
     {
         auto metric = profiler.metric<counted_t>(55);
         try { throw 1; } catch (int) {}
     }
     require(profiler.unwinding<counted_t>() == false);
-    { auto metric = profiler.metric<observing_t>(profiler); }
+    {
+        auto metric = profiler.metric<observing_t>(profiler);
+        metric.update([](observing_t& metric) { metric.m_check_destruction = true; });
+    }
     { auto metric = profiler.metric<observing_t>(profiler); }
 }
 
@@ -327,17 +346,26 @@ void grow(profiler_t& profiler, std::index_sequence<N...>) {
 }
 
 void test_storage() {
+    static_assert(!std::is_move_constructible_v<counted_t>);
+    static_assert(sizeof(metric_t<aligned_t>) == sizeof(void*));
     profiler_t profiler;
+    profiler.enabled() = true;
+    { auto metric = profiler.metric<throwing_move_t>(); }
+    { auto metric = profiler.metric<throwing_assignment_t>(); }
     { auto metric = profiler.metric<aligned_t>(); }
     const auto* aligned = profiler.metrics<aligned_t>();
     require(reinterpret_cast<std::uintptr_t>(aligned) % alignof(aligned_t) == 0);
     {
         auto metric = profiler.metric<counted_t>(3);
-        auto* current = metric.operator->();
-        grow(profiler, std::make_index_sequence<64>());
-        require(metric.operator->() == current && current->m_number == 3);
+        metric.update([&](counted_t& counted) {
+            const auto* current = &counted;
+            grow(profiler, std::make_index_sequence<64>());
+            metric.update([current](const counted_t& counted) {
+                require(&counted == current && counted.m_number == 3);
+            });
+        });
     }
-    require(profiler.size() == 66 && profiler.metrics<aligned_t>() == aligned);
+    require(profiler.size() == 68 && profiler.metrics<aligned_t>() == aligned);
     require(aligned->m_number == 42 && profiler.metrics<counted_t>()->m_number == 3);
     const auto count = allocations;
     allocation_forbidden = true;
@@ -348,7 +376,9 @@ void test_storage() {
     auto owned = std::make_unique<int>(5);
     {
         auto metric = profiler.metric<forwarded_t>(borrowed, std::move(owned));
-        require(!owned && metric->m_borrowed == &borrowed && *metric->m_owned == 5);
+        metric.update([&](const forwarded_t& metric) {
+            require(!owned && metric.m_borrowed == &borrowed && *metric.m_owned == 5);
+        });
     }
     require(profiler.metrics<forwarded_t>()->m_borrowed == &borrowed);
     require(*profiler.metrics<forwarded_t>()->m_owned == 5);
@@ -358,19 +388,25 @@ void test_storage() {
 }
 
 void test_allocation_failure() {
-    allocations_before_failure = 0;
-    bool failed = false;
-    try { profiler_t profiler; } catch (const std::bad_alloc&) { failed = true; }
-    allocations_before_failure = -1;
-    require(failed);
     profiler_t profiler;
+    profiler.enabled() = true;
+    bool failed = false;
+    const auto initial_calls = clock_calls;
+    for (const auto permitted : std::array{0, 1}) {
+        allocations_before_failure = permitted;
+        failed = false;
+        try { auto metric = profiler.metric<counted_t>(8); } catch (const std::bad_alloc&) { failed = true; }
+        allocations_before_failure = -1;
+        require(failed && profiler.size() == 0);
+        require(clock_calls == initial_calls && live_metrics == 0);
+    }
     { auto metric = profiler.metric<counted_t>(8); }
     const auto calls = clock_calls;
     allocations_before_failure = 0;
     failed = false;
     try { auto metric = profiler.metric<timing_t>(); } catch (const std::bad_alloc&) { failed = true; }
     allocations_before_failure = -1;
-    require(failed && profiler.quiescent() && profiler.size() == 1 && clock_calls == calls);
+    require(failed && profiler.size() == 1 && clock_calls == calls);
     require(profiler.metrics<counted_t>()->m_number == 8 && !profiler.metrics<timing_t>());
     { auto metric = profiler.metric<timing_t>(); }
     require(profiler.size() == 2);
@@ -381,23 +417,86 @@ void test_inactive() {
     const auto count = allocations;
     allocation_forbidden = true;
     {
+        profiler_t profiler;
+        require(!std::as_const(profiler).enabled() && profiler.size() == 0);
         metric_t<counted_t> metric;
-        require(!metric && live_metrics == 0);
+        auto disabled_metric = profiler.metric<counted_t>(17);
+        require(!metric && !disabled_metric && live_metrics == 0);
+        profiler.enabled() = true;
+        metric.update([](counted_t&) { std::abort(); });
+        disabled_metric.update([](counted_t&) { std::abort(); });
+        static_assert(noexcept(metric.update([](counted_t&) noexcept {})));
+        static_assert(!noexcept(metric.update([](counted_t&) {})));
         metric.stop();
         metric.stop();
+        disabled_metric.stop();
+        disabled_metric.update([](counted_t&) { std::abort(); });
+        require(profiler.size() == 0);
     }
     allocation_forbidden = false;
     require(clock_calls == calls && allocations == count && live_metrics == 0);
 }
 
+void test_reporting() {
+    profiler_t profiler;
+    std::ostringstream empty;
+    profiler.report(empty);
+    require(empty.str() == "Recording: disabled\nNo completed metrics.\n");
+#ifdef PROFILING_TEST_CLOCK
+    tick = 100;
+    profiler.enabled() = true;
+    {
+        auto metric = profiler.metric<timing_t>();
+        tick = 120;
+    }
+    {
+        auto metric = profiler.metric<timing_t>();
+        tick = 160;
+    }
+    {
+        auto metric = profiler.metric<numbered_t<7>>();
+        tick = 220;
+    }
+    try {
+        auto metric = profiler.metric<counted_t>(42); // Construction ends at 225.
+        tick = 325;
+        throw 1;
+    } catch (int) {}
+    profiler.enabled() = false;
+    tick = 400;
+    const auto calls = clock_calls;
+    std::ostringstream report;
+    profiler.report(report);
+    const std::string expected =
+        "Recording: disabled\n"
+        "Data: latest measurement; timing: since profiler construction; inclusive durations\n"
+        "42\n  count=1 last=100 ns mean=100 ns max=100 ns total=100 ns age=75 ns unwinding\n"
+        "timing\n  count=2 last=40 ns mean=30 ns max=40 ns total=60 ns age=240 ns\n"
+        "7\n  count=1 last=60 ns mean=60 ns max=60 ns total=60 ns age=180 ns\n";
+    require(report.str() == expected && clock_calls == calls + 1);
+    tick = 410;
+    std::ostringstream later_report;
+    profiler.report(later_report);
+    require(later_report.str().find("age=85 ns unwinding") != std::string::npos);
+    require(profiler.elapsed<counted_t>()->count() == 100 && profiler.metrics<counted_t>()->m_number == 42);
+    profiler.enabled() = true;
+    { auto metric = profiler.metric<timing_t>(); } // Zero duration still completes.
+    std::ostringstream resumed_report;
+    profiler.report(resumed_report);
+    require(resumed_report.str().find("count=3 last=0 ns mean=20 ns max=40 ns total=60 ns age=0 ns") != std::string::npos);
+#endif
+}
+
 void test_reporting_failure() {
     profiler_t profiler;
+    profiler.enabled() = true;
     { auto metric = profiler.metric<failing_t>(); }
     std::ostringstream report;
     rejects([&] { profiler.report(report); });
     rejects([&] { profiler.report(report); });
     require(profiler.size() == 1 && profiler.metrics<failing_t>());
     profiler_t working_profiler;
+    working_profiler.enabled() = true;
     { auto metric = working_profiler.metric<counted_t>(29); }
     std::ostringstream failed;
     failed.setstate(std::ios::badbit);
@@ -417,12 +516,6 @@ int main() {
     profiling::profiler_t profiler;
     auto metric = profiler.metric<profiling::throwing_constructor_t>();
 #endif
-#ifdef PROFILING_TEST_THROWING_MOVE
-    profiling::metric_t<profiling::throwing_move_t> metric;
-#endif
-#ifdef PROFILING_TEST_THROWING_ASSIGNMENT
-    profiling::metric_t<profiling::throwing_assignment_t> metric;
-#endif
 #ifdef PROFILING_TEST_THROWING_DESTRUCTOR
     profiling::metric_t<profiling::throwing_destructor_t> metric;
 #endif
@@ -433,6 +526,7 @@ int main() {
         profiling::test_storage();
         profiling::test_allocation_failure();
         profiling::test_inactive();
+        profiling::test_reporting();
         profiling::test_reporting_failure();
         profiling::require(profiling::live_metrics == 0);
         std::cout << "profiling public validation passed\n";
