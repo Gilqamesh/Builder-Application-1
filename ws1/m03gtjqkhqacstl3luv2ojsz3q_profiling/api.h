@@ -46,8 +46,9 @@ public:
      * capture expressions are evaluated even when inactive.
      */
     template <typename F>
-        requires std::invocable<F, T&>
+    requires std::invocable<F, T&>
     void update(F&& function) noexcept(std::is_nothrow_invocable_v<F, T&>);
+
     /** @brief Stops timing once; subsequent updates, stops, and destruction do nothing. */
     void stop() noexcept;
 
@@ -60,20 +61,20 @@ private:
 };
 
 /**
- * @brief Retains the latest data and lifetime timing statistics for each metric type.
+ * @brief Retains persistent data and lifetime timing statistics for each metric type.
  *
- * Single-threaded and initially disabled. Enablement affects new measurements;
+ * Single-threaded and initially enabled. Enablement affects new measurements;
  * active measurements finish normally. Disabled creation skips lookup, allocation,
  * T construction, and clock reads; argument expressions still evaluate normally.
  * Storage grows internally; constructing a profiler allocates nothing.
  *
  * One measurement of each type may be active; different types may overlap.
- * Starting a type replaces its data before timing begins. Durations are inclusive
- * monotonic elapsed time. Stopping also records partial data on exception exits.
+ * Each type is constructed once and reused; only update() changes its data.
+ * Durations are inclusive monotonic elapsed time. Exception exits preserve updates.
  *
  * Reads, reports, and destruction require all metrics stopped. Returned data
- * pointers expire at that type's next start or profiler destruction. Data borrowed
- * inside T must remain valid through deferred reporting.
+ * pointers remain valid until profiler destruction; access requires all metrics
+ * stopped. Data borrowed inside T must remain valid through deferred use.
  */
 class profiler_t {
 public:
@@ -91,13 +92,15 @@ public:
      *
      * T needs nonthrowing construction/destruction and a const std::formatter;
      * keep construction, destruction, and updates allocation-free. T need not move.
-     * First enabled use may allocate; failure preserves previous results. Reuse
-     * and stopping perform no profiler allocation, formatting, I/O, or locking.
+     * Arguments initialize T only on first enabled use; later calls leave them
+     * unused, although argument expressions still evaluate. First use may allocate;
+     * failure preserves previous results. Reuse and stopping perform no profiler
+     * allocation, formatting, I/O, or locking.
      */
     template <typename T, typename... Args>
     metric_t<T> metric(Args&&... args);
     /**
-     * @brief Reports latest data and count, last/mean/max/total duration, and age since completion.
+     * @brief Reports current data and count, last/mean/max/total duration, and age since completion.
      *
      * Timing includes every completion since construction, including exception exits.
      * Order is descending total duration, with registration order breaking ties.
@@ -106,7 +109,7 @@ public:
      */
     void report(std::ostream& out) const;
 
-    /** @brief Returns the latest completed T, or null when absent. */
+    /** @brief Returns the stored T, or null when absent. */
     template <typename T>
     const T* metrics() const;
     /** @brief Returns T's latest duration, or no value when absent. */
@@ -122,7 +125,7 @@ private:
     void require_stopped() const;
 
     std::vector<std::unique_ptr<metric_base_t>> m_metrics;
-    bool m_enabled = false;
+    bool m_enabled;
 };
 
 } // namespace m03gtjqkhqacstl3luv2ojsz3q_profiling
@@ -151,9 +154,11 @@ metric_t<T>::metric_t(stored_metric_t<T>& stored_metric, Args&&... args):
     if (stored_metric.m_active) {
         throw std::logic_error("profiler_t::metric cannot start an already-active metric type");
     }
-    // Block reads and same-type reentry during data destruction and construction.
+    // Block reads and same-type reentry during first construction.
     stored_metric.m_active = true;
-    stored_metric.m_metrics.emplace(std::forward<Args>(args)...);
+    if (!stored_metric.m_metrics) {
+        stored_metric.m_metrics.emplace(std::forward<Args>(args)...);
+    }
     stored_metric.start();
 }
 

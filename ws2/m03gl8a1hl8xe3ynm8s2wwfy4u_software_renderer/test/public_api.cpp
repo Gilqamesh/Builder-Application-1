@@ -2419,12 +2419,14 @@ void test_profiling() {
     normal_framebuffer.depth(normal_depth);
     api::software_renderer_t measured(measured_framebuffer);
     auto& profiler = measured.profiler();
-    require(!profiler.enabled() && profiler.size() == 0);
-    profiler.enabled() = true;
+    require(profiler.enabled() && profiler.size() == 0);
     api::software_renderer_t normal(normal_framebuffer);
+    normal.profiler().enabled() = false;
     require(!std::as_const(normal).profiler().enabled());
     require(&std::as_const(measured).profiler() == &profiler);
     const auto camera = make_camera(16, 16);
+    std::size_t vertex_invocations = 0;
+    raster_metrics_t expected_raster;
     for (int mode = 0; mode < 6; ++mode) {
         auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
         if (mode == 2 || mode == 3) {
@@ -2449,28 +2451,34 @@ void test_profiling() {
         require(measured_depth == normal_depth);
         require(profiler.size() == 7);
         require(profiler.metrics<application_metrics_t>()->m_items == draws);
-        require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == 256);
-        require(profiler.metrics<clear_depth_metrics_t>()->m_depth_writes == 256);
+        require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == 256 * std::size_t(mode + 1));
+        require(profiler.metrics<clear_depth_metrics_t>()->m_depth_writes == 256 * std::size_t(mode + 1));
         const auto* vertex_metrics = profiler.metrics<vertex_metrics_t>();
-        require(vertex_metrics->m_invocations == 6 && vertex_metrics->m_expected == 6);
+        vertex_invocations += 6 * draws;
+        require(vertex_metrics->m_invocations == vertex_invocations && vertex_metrics->m_expected == vertex_invocations);
         const auto* raster_metrics = profiler.metrics<raster_metrics_t>();
-        require(raster_metrics->m_invocations == (mode == 4 ? 0 : 256));
-        require(raster_metrics->m_discards == (mode == 2 || mode == 3 ? 128 : 0));
-        require(raster_metrics->m_depth_rejections == (mode == 1 || mode == 5 ? 256 : 0));
-        const std::size_t writes = mode == 1 || mode == 4 || mode == 5 ? 0 : (mode == 2 || mode == 3 ? 128 : 256);
-        require(raster_metrics->m_depth_writes == writes);
-        require(raster_metrics->m_color_writes == (mode == 3 ? 0 : writes));
+        expected_raster.m_invocations += mode == 4 ? 0 : 256 * draws;
+        expected_raster.m_discards += mode == 2 || mode == 3 ? 128 : 0;
+        expected_raster.m_depth_rejections += mode == 1 || mode == 5 ? 256 : 0;
+        const std::size_t writes = mode == 1 || mode == 4 ? 0 : (mode == 2 || mode == 3 ? 128 : 256);
+        expected_raster.m_depth_writes += writes;
+        expected_raster.m_color_writes += mode == 3 ? 0 : writes;
+        require(raster_metrics->m_invocations == expected_raster.m_invocations);
+        require(raster_metrics->m_discards == expected_raster.m_discards);
+        require(raster_metrics->m_depth_rejections == expected_raster.m_depth_rejections);
+        require(raster_metrics->m_depth_writes == expected_raster.m_depth_writes);
+        require(raster_metrics->m_color_writes == expected_raster.m_color_writes);
     }
     std::ostringstream report;
     profiler.report(report);
     require(report.str().find("application.frame") != std::string::npos && report.str().find("items=2") != std::string::npos);
-    require(report.str().find("vertex_invocations=6") != std::string::npos);
+    require(report.str().find("vertex_invocations=42, expected=42") != std::string::npos);
 
-    // Invalid resources replace the entered metrics; unentered stages retain their latest data.
+    // Invalid resources update timing; counters retain all work completed so far.
     test::expect_throws([&] { measured.draw(camera, api::render_item_t{}); });
     test::expect_throws([&] { normal.draw(camera, api::render_item_t{}); });
     require(profiler.size() == 7 && profiler.unwinding<draw_metrics_t>() == true && profiler.unwinding<preparation_metrics_t>() == true);
-    require(profiler.metrics<vertex_metrics_t>()->m_invocations == 6);
+    require(profiler.metrics<vertex_metrics_t>()->m_invocations == vertex_invocations);
 
     // Empty intersections retain their original validation bypass in both configurations.
     auto empty_camera = make_camera(0, 0);
@@ -2490,6 +2498,9 @@ void test_profiling() {
         measured.clear_color(clear_color); normal.clear_color(clear_color);
         measured.clear_depth(1); normal.clear_depth(1);
         measured.draw(camera, item); normal.draw(camera, item);
+        vertex_invocations += indices.size();
+        require(profiler.metrics<vertex_metrics_t>()->m_invocations == vertex_invocations);
+        require(profiler.metrics<vertex_metrics_t>()->m_expected == vertex_invocations);
         require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
         require(measured_depth == normal_depth);
     }
@@ -2510,8 +2521,8 @@ void test_profiling() {
     test::expect_throws<std::runtime_error>([&] { normal.draw(camera, throwing_item); });
     require(profiler.size() == 7);
     require(profiler.unwinding<vertex_metrics_t>() == true);
-    require(profiler.metrics<vertex_metrics_t>()->m_invocations == 1);
-    require(profiler.metrics<vertex_metrics_t>()->m_expected == 6);
+    require(profiler.metrics<vertex_metrics_t>()->m_invocations == vertex_invocations + 1);
+    require(profiler.metrics<vertex_metrics_t>()->m_expected == vertex_invocations + 6);
     require(profiler.unwinding<preparation_metrics_t>() == false);
 
     // Enablement affects new measurements; an active application metric still finishes.
@@ -2523,13 +2534,18 @@ void test_profiling() {
     require(profiler.metrics<application_metrics_t>()->m_items == 3);
     require(!normal.profiler().enabled() && normal.profiler().size() == 0);
     const auto color_writes = profiler.metrics<clear_color_metrics_t>()->m_color_writes;
+    const auto depth_writes = profiler.metrics<clear_depth_metrics_t>()->m_depth_writes;
     measured.clear_color(empty_camera, clear_color);
     require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == color_writes);
     profiler.enabled() = true;
     measured.clear_color(empty_camera, clear_color);
     measured.clear_depth(empty_camera, 1);
-    require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == 0);
-    require(profiler.metrics<clear_depth_metrics_t>()->m_depth_writes == 0);
+    require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == color_writes);
+    require(profiler.metrics<clear_depth_metrics_t>()->m_depth_writes == depth_writes);
+    measured.clear_color(make_camera(2, 2), clear_color);
+    measured.clear_depth(make_camera(2, 2), 1);
+    require(profiler.metrics<clear_color_metrics_t>()->m_color_writes == color_writes + 4);
+    require(profiler.metrics<clear_depth_metrics_t>()->m_depth_writes == depth_writes + 4);
     require(profiler.size() == 7);
 }
 

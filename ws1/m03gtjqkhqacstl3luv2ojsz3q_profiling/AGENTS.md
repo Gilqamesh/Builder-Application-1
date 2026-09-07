@@ -4,7 +4,7 @@
 
 Measure synchronous code execution. Producers own metric data, constructors,
 counter meanings, formatters, and measurement boundaries. The profiler owns
-storage, latest-data replacement, timing statistics, and deferred reporting.
+persistent storage, timing statistics, and deferred reporting.
 See [the public contract](api.h) for enablement, lifetime, and type requirements.
 
 ## Validation

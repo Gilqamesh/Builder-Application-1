@@ -34,7 +34,7 @@ void software_renderer_t::clear_color(rgba8_t color) {
     auto metric = m_profiler.metric<clear_color_metrics_t>();
     std::ranges::fill(m_framebuffer.pixels(), color);
     metric.update([this](clear_color_metrics_t& metric) {
-        metric.m_color_writes = m_framebuffer.pixels().size();
+        metric.m_color_writes += m_framebuffer.pixels().size();
     });
 }
 
@@ -64,7 +64,7 @@ void software_renderer_t::clear_depth(float depth) {
     }
     std::ranges::fill(m_framebuffer.depth(), depth_clear_value(depth));
     metric.update([this](clear_depth_metrics_t& metric) {
-        metric.m_depth_writes = m_framebuffer.depth().size();
+        metric.m_depth_writes += m_framebuffer.depth().size();
     });
 }
 
@@ -139,7 +139,10 @@ void software_renderer_t::draw(
 
     preparation_metric.stop();
     const auto indices = geometry->indices();
-    auto vertex_metric = m_profiler.metric<vertex_metrics_t>(indices.size());
+    auto vertex_metric = m_profiler.metric<vertex_metrics_t>();
+    vertex_metric.update([expected = indices.size()](vertex_metrics_t& metric) noexcept {
+        metric.m_expected += expected;
+    });
     auto& scratch = m_scratch;
     scratch.m_vertex_results.clear();
     scratch.m_vertex_values.clear();

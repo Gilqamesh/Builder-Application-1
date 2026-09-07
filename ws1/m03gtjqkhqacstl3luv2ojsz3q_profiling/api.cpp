@@ -6,7 +6,10 @@
 
 namespace m03gtjqkhqacstl3luv2ojsz3q_profiling {
 
-profiler_t::profiler_t() noexcept = default;
+profiler_t::profiler_t() noexcept:
+    m_enabled(true)
+{
+}
 
 profiler_t::~profiler_t() {
     assert(std::none_of(m_metrics.begin(), m_metrics.end(), [](const auto& metric) { return metric->m_active; }));
@@ -36,7 +39,7 @@ void profiler_t::report(std::ostream& out) const {
     std::stable_sort(ordered.begin(), ordered.end(), [](const auto* left, const auto* right) {
         return right->m_total < left->m_total;
     });
-    out << "Data: latest measurement; timing: since profiler construction; inclusive durations\n";
+    out << "Data: current; timing: since profiler construction; inclusive durations\n";
     for (const auto* metric : ordered) {
         metric->report(out);
         metric->report_timing(out, now);

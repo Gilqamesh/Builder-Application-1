@@ -210,6 +210,7 @@ json_t benchmark_t::run_workload() const {
     framebuffer_t normal_buffer(normal_pixels, m_size, m_size), measured_buffer(measured_pixels, m_size, m_size);
     normal_buffer.depth(normal_depth); measured_buffer.depth(measured_depth);
     software_renderer_t normal(normal_buffer);
+    normal.profiler().enabled() = false;
     software_renderer_t measured(measured_buffer);
     auto& profiler = measured.profiler();
     profiler.enabled() = true;
@@ -300,7 +301,7 @@ json_t benchmark_t::metadata(const filesystem::path_t& program) const {
         {"size", m_size}, {"warmup_per_run", m_warmup}, {"samples_per_run", m_samples}, {"runs", m_runs},
         {"cpu", cpu}, {"platform", std::format("{} {} {}", platform.sysname, platform.release, platform.machine)},
         {"scope", "frame measurement, full color/depth clears, fixed draw sequence; setup, comparison, reporting excluded"},
-        {"report", "latest application data; inclusive timing statistics across all enabled completions, including warmup; descending total duration"},
+        {"report", "persistent application data; inclusive timing statistics across all enabled completions, including warmup; descending total duration"},
         {"peak_rss_scope", "Linux VmHWM through workload capture and text report; both profiling configurations, setup and warmup included; summaries and JSON serialization excluded"},
         {"build", {
             {"system", "Builder"}, {"binary", program.string()}, {"loaded_files", std::move(loaded_files)},

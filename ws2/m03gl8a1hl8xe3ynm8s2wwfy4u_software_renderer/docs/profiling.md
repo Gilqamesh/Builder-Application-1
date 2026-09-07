@@ -1,8 +1,8 @@
 # Renderer profiling and benchmark
 
-Each ordinary `software_renderer_t` owns a profiler that starts disabled.
-Applications use `renderer.profiler().enabled() = true` to enable recording and
-assign `false` to disable it. Rendering and clearing execute in either state.
+Each ordinary `software_renderer_t` owns a profiler that starts enabled.
+Applications assign `renderer.profiler().enabled() = false` to disable recording
+and `true` to resume it. Rendering and clearing execute in either state.
 Enablement is sampled when each metric is created; existing active metrics finish
 normally after a change, and previously completed results remain available.
 
@@ -26,7 +26,7 @@ software_renderer.clear_color({0, 0, 0, 255});
 software_renderer.clear_depth(1);
 software_renderer.draw(camera, item);
 metric.update([](frame_metrics_t& metric) noexcept {
-    metric.m_draws = 1;
+    ++metric.m_draws;
 });
 metric.stop();
 
@@ -42,11 +42,13 @@ renderer's lifetime; other consumers may own or borrow a profiler independently.
 
 ## Data and timing
 
-The profiler owns one data object per measured type. Starting a measurement
-reconstructs that object, then starts its clock. `update(function)` invokes the
+The profiler constructs one data object per type on first enabled use and keeps it
+until destruction. Constructor arguments initialize it only that first time; later
+measurements reuse it and restart the clock. `update(function)` invokes the
 callable immediately with a borrowed reference to that data and propagates any
 exception. Application work stays outside the callback. `stop()` ends timing;
 destruction calls it automatically. Later updates and stops do nothing.
+Within `update()`, increments accumulate and assignments replace data explicitly.
 
 Default metrics and metrics created while disabled do nothing. They skip lookup,
 allocation, data construction, and clock reads; `update()` skips its callable.
@@ -55,14 +57,16 @@ metric-only computations inside the callback. A returned metric holds one pointe
 disabled use still has runtime checks.
 
 Different metric types can overlap. Starting an already-active type is rejected.
-Repeating a stopped type replaces its application data and adds another timing
+Repeating a stopped type preserves its application data and adds another timing
 observation. Reads and reports require all metrics stopped. Borrowed result
-pointers expire at their type's next start or profiler destruction.
+pointers remain valid until profiler destruction; read them only with all metrics
+stopped.
 [The profiling public contract](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h)
 owns storage, lifetime, type requirements, and failure guarantees.
 
 [profiling_metrics.h](../profiling_metrics.h) owns renderer counters and their
-formatters. Color/depth clears retain their latest write counts separately.
+formatters. All renderer counters accumulate across enabled measurements, including
+partial work before exceptions. Color/depth clears accumulate writes separately.
 Vertex metrics count entered calls and expected selected indices. Raster metrics
 count fragment invocations, discards, depth rejections, and color/depth writes.
 Discard and depth-rejection percentages use fragment invocations as the denominator;
@@ -70,13 +74,13 @@ zero invocations reports `n/a`. Draw and preparation metrics contain only timing
 
 Durations include nested work, such as shaders inside draw. There is no retained
 parent/child relationship. Exception exits retain partial counters and mark the
-latest completion `unwinding`. Lookup and data construction/destruction precede
-timing; stopping reads the clock before updating statistics. First-use allocation
+latest completion `unwinding`. Lookup and first data construction precede timing;
+stopping reads the clock before updating statistics. First-use allocation
 for a nested type can contribute to an enclosing measurement's duration.
 
 ## Reporting and readback
 
-Reports separate **latest application data** from **timing since profiler
+Reports separate **current application data** from **timing since profiler
 construction**, including exception exits. Each type has count, last duration,
 mean, maximum, total, and age since last completion. Disabling and reporting
 preserve these observations. A stage skipped by a later draw retains its previous
@@ -84,7 +88,7 @@ data; age helps identify older measurements.
 
 ```text
 Recording: disabled
-Data: latest measurement; timing: since profiler construction; inclusive durations
+Data: current; timing: since profiler construction; inclusive durations
 renderer.draw
   count=120 last=6.66 ms mean=6.4 ms max=12.1 ms total=768 ms age=30 ms
 ```
@@ -92,7 +96,7 @@ renderer.draw
 Types appear in descending total duration, with registration order breaking ties.
 Durations scale automatically from nanoseconds to exaseconds. Inclusive durations
 can overlap, so adding them does not give elapsed frame time or CPU utilization.
-There is no sample history, application-data accumulation callback, or reset.
+There is no sample history or reset.
 
 ```cpp
 if (const auto* vertex_metrics = profiler.metrics<renderer::vertex_metrics_t>()) {
@@ -101,7 +105,7 @@ if (const auto* vertex_metrics = profiler.metrics<renderer::vertex_metrics_t>())
 }
 ```
 
-`metrics<T>()` returns the latest completed data or null. `elapsed<T>()` and
+`metrics<T>()` returns the persistent data or null when absent. `elapsed<T>()` and
 `unwinding<T>()` return optional observations, and `size()` counts stored types.
 
 ## Builder benchmark
@@ -133,7 +137,7 @@ remains available with its [unchanged raw data](profiling-baseline.json).
 
 The coordinator starts a fresh copy of its installed binary for each of the four
 workloads: textured fill, depth overdraw, many small draws, and clipping. Each
-worker writes a JSON result and a text report with latest data and timing statistics.
+worker writes a JSON result and a text report with current data and timing statistics.
 The coordinator writes `metadata.json` before the workers run and `results.json`
 after all workers succeed.
 A failed run retains its completed workload files and does not produce a complete
@@ -152,7 +156,7 @@ No source scanning or alternative build system runs inside the benchmark.
 Each sample measures an application frame, complete color/depth clears,
 and a fixed draw sequence. Setup, correctness comparisons, and reporting are outside
 that interval. The profiler persists across samples. The final report contains
-the latest frame and individual draw counters, with timing statistics across all enabled
+cumulative frame and draw counters with timing statistics across all enabled
 measurements, including warm-up. These totals cover more observations than the
 sample-only benchmark summaries. Metadata records that distinction. Both
 configurations receive warm-up before each run; their execution order alternates.

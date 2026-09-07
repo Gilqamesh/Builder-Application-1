@@ -59,10 +59,10 @@ public:
     explicit software_renderer_t(framebuffer_t framebuffer);
 
     /**
-     * @brief Exposes this renderer's owned profiler, which starts disabled.
+     * @brief Exposes this renderer's owned profiler, which starts enabled.
      *
      * Applications may measure their own work with this profiler. Each metric type
-     * retains the latest data and accumulates timing statistics. Borrowed use of
+     * retains its data and accumulates timing statistics. Borrowed use of
      * the profiler ends with this renderer.
      */
     profiling::profiler_t& profiler() noexcept;

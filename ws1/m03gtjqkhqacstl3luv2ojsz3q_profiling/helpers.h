@@ -13,7 +13,7 @@
 namespace m03gtjqkhqacstl3luv2ojsz3q_profiling {
 
 // Internal heterogeneous storage. Each T stays at a stable address as the pointer
-// vector grows; reconstruction excludes data lifecycle costs from its own timing.
+// vector grows; first construction precedes timing and reuse preserves the data.
 struct metric_base_t {
     explicit metric_base_t(const std::type_info& type) noexcept;
     virtual ~metric_base_t();

@@ -223,6 +223,8 @@ game_t::~game_t() {
 }
 
 void game_t::run() {
+    m_software_renderer.profiler().enabled() = true;
+
     m_window->swap_interval(1);
 
     auto& input_states = m_window->input_states();
@@ -244,6 +246,8 @@ void game_t::run() {
         const auto framebuffer = m_software_renderer.framebuffer();
         std::cout << std::format("frame: {:.2f} ms, framebuffer: {}x{}\n", frame_time_ms.count(), framebuffer.width(), framebuffer.height());
     }
+
+    m_software_renderer.profiler().report(std::cout);
 }
 
 void game_t::update(float dt) {

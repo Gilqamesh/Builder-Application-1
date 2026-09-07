@@ -6,12 +6,12 @@
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
-/** @brief Counts color samples actually written by the latest color clear. */
+/** @brief Counts color samples written across all measured color clears. */
 struct clear_color_metrics_t {
     std::size_t m_color_writes = 0;
 };
 
-/** @brief Counts depth samples actually written by the latest depth clear. */
+/** @brief Counts depth samples written across all measured depth clears. */
 struct clear_depth_metrics_t {
     std::size_t m_depth_writes = 0;
 };
@@ -20,19 +20,19 @@ struct draw_metrics_t {};
 struct preparation_metrics_t {};
 
 /**
- * @brief Counts vertex invocations entered in the latest vertex measurement, including one that throws.
+ * @brief Counts vertex invocations across all measurements, including calls that throw.
  *
- * Expected counts selected index entries, including repeated indices.
+ * Expected accumulates selected index entries across measurements, including repeated indices.
  */
 struct vertex_metrics_t {
-    explicit vertex_metrics_t(std::size_t expected) noexcept;
+    explicit vertex_metrics_t(std::size_t expected = 0) noexcept;
 
     std::size_t m_expected;
     std::size_t m_invocations = 0;
 };
 
 /**
- * @brief Counts fragment invocations and rasterization results in the latest raster measurement.
+ * @brief Counts fragment invocations and rasterization results across all measurements.
  *
  * Discards count completed invocations reporting discard. Depth rejections count
  * non-discarded samples that fail enabled depth testing. Writes count actual sample
