@@ -157,12 +157,16 @@ execution, measurement, summaries, and reports.
 The benchmark uses Builder's current compilation settings. The current default
 build supplies C++23 and `-g`, without an optimization option or `NDEBUG`. Registering
 a target does not optimize its dependency libraries. General optimization support
-and a new optimized baseline are deferred. The [historical optimized baseline](profiling-baseline.md)
+remains deferred. Separately captured [milestone 5](milestone-5-performance.md) and
+[milestone 6](milestone-6-performance.md) comparisons use consistent optimization
+across performance-relevant dependencies. The [historical optimized baseline](profiling-baseline.md)
 remains available with its [unchanged raw data](profiling-baseline.json).
 
 The coordinator starts a fresh copy of its installed binary for each workload.
-Workload version 3 preserves the six workloads from versions 1 and 2. It adds
-`stencil_mask` and `two_pass_linear`/`two_pass_srgb`. The mask draw populates stencil
+Workload version 4 preserves the nine workloads from versions 1–3, including
+`stencil_mask` and `two_pass_linear`/`two_pass_srgb`. It adds `flat_fill`,
+`noperspective_fill`, `mipmapped_fill` and `mipmapped_two_pass`. The last regenerates
+mips between the offscreen and sampled passes. The mask draw populates stencil
 inside a smaller quad, then scene draws test that mask. Two-pass workloads render
 four translucent layers into a texture-owned target and composite its premultiplied
 result onto a separate output. Allocation, view validation, and bindings occur at

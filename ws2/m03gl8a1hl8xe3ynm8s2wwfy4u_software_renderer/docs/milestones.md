@@ -1,6 +1,6 @@
 # Software renderer milestones
 
-Status: milestones 0–5 are implemented and validated. Milestone 6 has profiling, the historical baseline and a consistently optimized milestone 5 comparison; broader algorithmic optimization remains unstarted. Public behavior is owned by the module headers.
+Status: milestones 0–5 are implemented and validated. Milestone 6 has profiling, the historical baseline and a consistently optimized milestone 5 comparison. Its selected direction is bounded cleanup followed by repeated profiling and incremental improvement, with shader bytecode compilation and interpretation as the next substantial step; implementation is pending. Public behavior is owned by the module headers.
 
 Baseline: [Builder-Modules at 540bbede71740d24292cc3b7cd9c8ed126eca0c3](https://github.com/Gilqamesh/Builder-Modules/tree/540bbede71740d24292cc3b7cd9c8ed126eca0c3).
 
@@ -190,18 +190,46 @@ and optimized benchmark validation passed.
 
 ## 6. Measurement and incremental optimization
 
-Status: profiling and an initial optimized baseline are implemented and validated;
-algorithmic optimization is unstarted. See [the measurement path](profiling.md)
-and [baseline evidence](profiling-baseline.md).
+Status: profiling, optimized measurements and the first bytecode optimization
+delivery are implemented and validated. See [the measurement path](profiling.md),
+[historical baseline evidence](profiling-baseline.md), and the
+[consistently optimized milestone 5 comparison](milestone-5-performance.md).
 
 - Outcome: each optimization delivery demonstrates its effect through repeatable measurements while preserving rendering correctness.
 - Measurement ownership: [`profiling`](../../../ws1/m03gtjqkhqacstl3luv2ojsz3q_profiling/AGENTS.md) owns timing statistics, persistent storage, and deferred reporting. The renderer owns its metric types and measurement boundaries. Applications own profilers and pass parent metrics into rendering. The benchmark driver owns workloads, repeated-run summaries, and comparisons.
 - Metrics: track median and high-percentile elapsed render time and process peak RSS across stable headless workloads. The benchmark records precise timing and memory scopes. Keep these scopes consistent across deliveries. Normal Builder runs use its default build. Milestone 5 records a separate, consistently optimized build of the renderer and performance-relevant dependencies; general Builder optimization configuration remains deferred.
 - Comparisons: record workload, resolution, rendering settings, hardware, build configuration, and source revision. Report absolute results, percentage changes, and run-to-run variation against both the previous delivery and the established baseline. New feature workloads establish their own baselines.
-- Delivery process: use measured results to select each bounded optimization. Every delivery includes the same comparison report and correctness evidence, making improvements, regressions, and tradeoffs visible. Specific optimization techniques remain undecided until measurements justify them.
+- Delivery process: make bounded, behavior-preserving cleanups, then repeatedly profile, identify a bottleneck, improve it, and measure again. Shader bytecode compilation and interpretation are the first completed substantial optimization. Every delivery includes comparison and correctness evidence; subsequent techniques follow measured bottlenecks.
 - Acceptance criteria: repeated runs establish measurement variability, and each optimization delivery has comparable before/after results with passing correctness validation.
 
 The initial baseline follows milestone 2 and precedes future feature and optimization comparisons. It does not provide historical before/after measurements for completed milestones. Preserve this baseline when comparing subsequent deliveries.
+
+### Compiled shader bytecode delivery
+
+Implemented against `Builder-Modules` revision `cd6be21`. Programs compile both
+stages at construction, retain immutable code/constants/reflection, and release
+AST ownership. [The execution guide](../../m03gt1djvvy5atia5evkbg6rqy_software_shader/docs/bytecode.md)
+explains the internal representation and a lowering example;
+[the public contract](../../m03gt1djvvy5atia5evkbg6rqy_software_shader/software_shader.h)
+owns invocation reuse, validation and failure semantics.
+
+`execution_context_t` is caller-owned and reusable across stages and programs.
+One complete `value_t` variant definition serves IO, constants and execution slots.
+Writes establish slot alternatives. Results are cleared before preparation and on
+failure; successful calls reuse execution and IO storage once capacity suffices,
+including numbered outputs on previously untaken branches. Renderer scratch retains
+the context without changing material ownership or rasterization order.
+
+The complete existing language is lowered, including matrices, locals, branches,
+loops, short-circuiting, sampling and discard. Shared expressions execute at their
+use sites. [Validation and optimized measurements](milestone-6-performance.md)
+include AST comparisons, all thirteen renderer workloads, warmed allocation checks,
+construction and storage costs, native consumers and presentation smoke checks.
+
+Prepared bindings remain a separate increment requiring explicit mutation and
+lifetime contracts. JIT, SIMD, serialization, temporary-slot reuse and early
+depth/stencil tests remain later measured choices. No bytecode-delivery semantic
+decision remains open; continue profiling to select the next optimization.
 
 ## Completion records
 
@@ -709,6 +737,25 @@ unprofiled medians increased by 0.34–12.44% in the retained comparison; variat
 uncontrolled external load limit causal conclusions. This delivers renderer
 features and measurement evidence; broader performance optimization remains later
 scope. Automatic derivatives/LOD and advanced sampling remain deferred.
+
+### Milestone 6 bytecode implementation record — 2026-09-07
+
+Base: `cd6be21ad2a9c1766ed10b3a7cacede334a2b2c6`. Implementation remains in the
+working tree; no commit was created. Software-shader owns lowering, immutable
+stages, shared inline values and caller-retained `execution_context_t`; the
+renderer uses that context across vertex and fragment invocations.
+
+All four optimized public suites pass. AST differential validation passes 10,240
+cases; all thirteen renderer workloads match attachment/mip bytes (49 buffers).
+Warmed vertex/fragment pairs allocate no execution/IO storage; injected preparation
+failures clear results and leave both IO/context types reusable. Native renderer
+and tower-defense builds and visible desktop smoke checks pass. Median frame time
+falls 28.6–34.6% against the matching optimized AST baseline on this machine.
+[The report](milestone-6-performance.md) and [raw evidence](milestone-6-performance.json)
+record exact conditions, commands, variation and storage/construction costs.
+
+Prepared bindings and subsequent optimizations remain deferred. This completes the
+bytecode delivery within the ongoing measured-optimization milestone.
 
 ## Deferred scope
 

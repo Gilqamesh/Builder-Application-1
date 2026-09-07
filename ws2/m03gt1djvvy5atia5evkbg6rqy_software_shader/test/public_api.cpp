@@ -3,6 +3,8 @@
 #include <m03gt1djvvy5atia5evkbg6rqy_software_shader/api.h>
 
 #include <array>
+#include <cstdlib>
+#include <new>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +20,62 @@ namespace test = m03gn97n4iusbtl7uthb01wu9m_test_framework;
 namespace software_shader = m03gt1djvvy5atia5evkbg6rqy_software_shader;
 namespace shader = m03gsy25j4v7nccgmsdov9ioft_shader;
 namespace texture = m03gt0l0q3l4b1k27eab5k7py1_texture;
+
+namespace m03gt1djvvy5atia5evkbg6rqy_software_shader {
+
+class allocation_probe_t {
+public:
+    explicit allocation_probe_t(std::size_t failure = std::numeric_limits<std::size_t>::max());
+    ~allocation_probe_t();
+    std::size_t count() const;
+    static void allocation();
+
+private:
+    static thread_local bool s_enabled;
+    static thread_local std::size_t s_count;
+    static thread_local std::size_t s_failure;
+};
+
+thread_local bool allocation_probe_t::s_enabled = false;
+thread_local std::size_t allocation_probe_t::s_count = 0;
+thread_local std::size_t allocation_probe_t::s_failure = std::numeric_limits<std::size_t>::max();
+
+allocation_probe_t::allocation_probe_t(std::size_t failure) {
+    s_count = 0;
+    s_failure = failure;
+    s_enabled = true;
+}
+allocation_probe_t::~allocation_probe_t() { s_enabled = false; }
+std::size_t allocation_probe_t::count() const { return s_count; }
+void allocation_probe_t::allocation() {
+    if (s_enabled) {
+        if (s_count++ == s_failure) { throw std::bad_alloc(); }
+    }
+}
+
+} // namespace m03gt1djvvy5atia5evkbg6rqy_software_shader
+
+void* operator new(std::size_t size) {
+    m03gt1djvvy5atia5evkbg6rqy_software_shader::allocation_probe_t::allocation();
+    if (void* storage = std::malloc(size == 0 ? 1 : size)) { return storage; }
+    throw std::bad_alloc();
+}
+void* operator new[](std::size_t size) { return ::operator new(size); }
+[[gnu::noinline]] void operator delete(void* storage) noexcept { std::free(storage); }
+[[gnu::noinline]] void operator delete[](void* storage) noexcept { std::free(storage); }
+[[gnu::noinline]] void operator delete(void* storage, std::size_t) noexcept { std::free(storage); }
+[[gnu::noinline]] void operator delete[](void* storage, std::size_t) noexcept { std::free(storage); }
+void* operator new(std::size_t size, std::align_val_t alignment) {
+    m03gt1djvvy5atia5evkbg6rqy_software_shader::allocation_probe_t::allocation();
+    void* storage = nullptr;
+    if (posix_memalign(&storage, static_cast<std::size_t>(alignment), size == 0 ? 1 : size) == 0) { return storage; }
+    throw std::bad_alloc();
+}
+void* operator new[](std::size_t size, std::align_val_t alignment) { return ::operator new(size, alignment); }
+[[gnu::noinline]] void operator delete(void* storage, std::align_val_t) noexcept { std::free(storage); }
+[[gnu::noinline]] void operator delete[](void* storage, std::align_val_t) noexcept { std::free(storage); }
+[[gnu::noinline]] void operator delete(void* storage, std::size_t, std::align_val_t) noexcept { std::free(storage); }
+[[gnu::noinline]] void operator delete[](void* storage, std::size_t, std::align_val_t) noexcept { std::free(storage); }
 
 namespace {
 
@@ -586,10 +644,252 @@ void test_scalar_operations() {
     test::expect(std::identity(), *io.output<bool>(28));
 }
 
+void test_context_reuse_and_lowering() {
+    shader::vertex_shader_ast_builder_t vertex;
+    const auto input = vertex.input<float>(0);
+    const auto enabled = vertex.input<bool>(1);
+    const auto local = vertex.local(1.0F);
+    const auto doubled = local * 2.0F;
+    vertex.branch(enabled, [&] { vertex.assign(local, input + 1.0F); });
+    vertex.output(0, doubled);
+    vertex.position(vector4f_t({0, 0, 0, 1}));
+    software_shader::program_t program(std::move(vertex).finalize(), trivial_fragment());
+    software_shader::execution_context_t context;
+    software_shader::execution_context_t independent_context;
+    software_shader::bindings_t bindings;
+    software_shader::vertex_io_t io(0, 0);
+    io.input(0, 3.0F); io.input(1, true);
+    program.run(bindings, io, context);
+    test::expect(std::equal_to<>(), *io.output<float>(0), 8.0F);
+    const auto slots = context.slot_capacity();
+    const auto locals = context.local_capacity();
+    io.input(1, false);
+    program.run(bindings, io, context);
+    test::expect(std::equal_to<>(), *io.output<float>(0), 2.0F);
+    test::expect(std::equal_to<>(), context.slot_capacity(), slots);
+    test::expect(std::equal_to<>(), context.local_capacity(), locals);
+    program.run(bindings, io, independent_context);
+    test::expect(std::equal_to<>(), *io.output<float>(0), 2.0F);
+
+    shader::vertex_shader_ast_builder_t integer_vertex;
+    integer_vertex.position(vector4f_t({1, 2, 3, 1}));
+    integer_vertex.output(0, std::uint32_t(0xfedcba98));
+    software_shader::program_t integer_program(std::move(integer_vertex).finalize(), trivial_fragment());
+    integer_program.run(bindings, io, context);
+    test::expect(std::equal_to<>(), *io.output<std::uint32_t>(0), std::uint32_t(0xfedcba98));
+    software_shader::fragment_io_t fragment_io(vector4f_t(0), true);
+    integer_program.run(bindings, fragment_io, context);
+    test::expect(std::equal_to<>(), *fragment_io.output<vector4f_t>(0), vector4f_t({0, 0, 0, 1}));
+    program.run(bindings, io, context);
+    test::expect(std::equal_to<>(), *io.output<float>(0), 2.0F);
+}
+
+void test_compiled_short_circuit_and_failures() {
+    shader::vertex_shader_ast_builder_t vertex;
+    const auto skip = vertex.input<bool>(0);
+    const auto divisor = vertex.input<std::int32_t>(1);
+    const auto division = std::int32_t(8) / divisor;
+    vertex.position(vector4f_t({0, 0, 0, 1}));
+    vertex.output(0, skip || (division == std::int32_t(4)));
+    vertex.output(1, !skip && (division == std::int32_t(4)));
+    software_shader::program_t program(std::move(vertex).finalize(), trivial_fragment());
+    software_shader::bindings_t bindings;
+    software_shader::execution_context_t context;
+    software_shader::vertex_io_t io(0, 0);
+    io.input(0, true); io.input(1, std::int32_t(0));
+    program.run(bindings, io, context);
+    test::expect(std::identity(), *io.output<bool>(0));
+    test::expect(std::logical_not<>(), *io.output<bool>(1));
+    io.input(0, false);
+    bool failed = false;
+    try { program.run(bindings, io, context); } catch (const std::domain_error&) { failed = true; }
+    test::expect(std::identity(), failed);
+    test::expect(std::logical_not<>(), io.output<bool>(0).has_value());
+    failed = false;
+    try { (void)io.position(); } catch (const std::logic_error&) { failed = true; }
+    test::expect(std::identity(), failed);
+    io.input(1, std::int32_t(2));
+    program.run(bindings, io, context);
+    test::expect(std::identity(), *io.output<bool>(0));
+    test::expect(std::identity(), *io.output<bool>(1));
+    io.reset(0, 0);
+    failed = false;
+    try { program.run(bindings, io, context); } catch (const std::invalid_argument&) { failed = true; }
+    test::expect(std::identity(), failed);
+    test::expect(std::logical_not<>(), io.output<bool>(0).has_value());
+}
+
+void test_compiled_nested_loops() {
+    shader::vertex_shader_ast_builder_t vertex;
+    const auto outer = vertex.local(std::int32_t(0));
+    const auto sum = vertex.local(std::int32_t(0));
+    vertex.loop(outer < std::int32_t(3), [&] {
+        vertex.assign(outer, outer + std::int32_t(1));
+        const auto inner = vertex.local(std::int32_t(0));
+        vertex.loop(inner < std::int32_t(5), [&] {
+            vertex.assign(inner, inner + std::int32_t(1));
+            vertex.branch(inner == std::int32_t(2), [&] { vertex.continue_loop(); });
+            vertex.branch(inner == std::int32_t(4), [&] { vertex.break_loop(); });
+            vertex.assign(sum, sum + inner);
+        });
+    });
+    vertex.position(vector4f_t({0, 0, 0, 1}));
+    vertex.output(0, sum);
+    software_shader::program_t program(std::move(vertex).finalize(), trivial_fragment());
+    software_shader::execution_context_t context;
+    software_shader::bindings_t bindings;
+    software_shader::vertex_io_t io(0, 0);
+    for (int run = 0; run < 3; ++run) {
+        program.run(bindings, io, context);
+        test::expect(std::equal_to<>(), *io.output<std::int32_t>(0), std::int32_t(12));
+    }
+}
+
+template <typename T>
+void test_compiled_value(T expected, software_shader::execution_context_t& context) {
+    shader::vertex_shader_ast_builder_t vertex;
+    vertex.position(vector4f_t({0, 0, 0, 1}));
+    vertex.output(0, vertex.input<T>(0));
+    vertex.output(1, vertex.uniform<T>(0));
+    vertex.output(2, expected);
+    shader::fragment_shader_ast_builder_t fragment;
+    fragment.output(0, fragment.input<T>(0));
+    fragment.output(1, fragment.uniform<T>(0));
+    fragment.output(2, expected);
+    software_shader::program_t program(std::move(vertex).finalize(), std::move(fragment).finalize());
+    software_shader::bindings_t bindings;
+    bindings.uniform(0, expected);
+    software_shader::vertex_io_t vertex_io(0, 0);
+    software_shader::fragment_io_t fragment_io(vector4f_t(0), true);
+    vertex_io.input(0, expected); fragment_io.input(0, expected);
+    program.run(bindings, vertex_io, context);
+    program.run(bindings, fragment_io, context);
+    for (std::uint32_t location = 0; location < 3; ++location) {
+        test::expect(std::equal_to<>(), *vertex_io.output<T>(location), expected);
+        test::expect(std::equal_to<>(), *fragment_io.output<T>(location), expected);
+    }
+}
+
+void test_compiled_value_types() {
+    software_shader::execution_context_t context;
+    test_compiled_value(true, context);
+    test_compiled_value(std::int32_t(-123456789), context);
+    test_compiled_value(std::uint32_t(0xfedcba98), context);
+    test_compiled_value(1.25F, context);
+    test_compiled_value(shader::vector_t<bool, 2>(true), context);
+    test_compiled_value(shader::vector_t<bool, 3>(true), context);
+    test_compiled_value(shader::vector_t<bool, 4>(true), context);
+    test_compiled_value(shader::vector_t<std::int32_t, 2>(-123456789), context);
+    test_compiled_value(shader::vector_t<std::int32_t, 3>(-123456789), context);
+    test_compiled_value(shader::vector_t<std::int32_t, 4>(-123456789), context);
+    test_compiled_value(shader::vector_t<std::uint32_t, 2>(0xfedcba98), context);
+    test_compiled_value(shader::vector_t<std::uint32_t, 3>(0xfedcba98), context);
+    test_compiled_value(shader::vector_t<std::uint32_t, 4>(0xfedcba98), context);
+    test_compiled_value(shader::vector_t<float, 2>(1.25F), context);
+    test_compiled_value(shader::vector_t<float, 3>(1.25F), context);
+    test_compiled_value(shader::vector_t<float, 4>(1.25F), context);
+    test_compiled_value(shader::matrix_t<float, 2, 2>(1.25F), context);
+    test_compiled_value(shader::matrix_t<float, 2, 3>(1.25F), context);
+    test_compiled_value(shader::matrix_t<float, 2, 4>(1.25F), context);
+    test_compiled_value(shader::matrix_t<float, 3, 2>(1.25F), context);
+    test_compiled_value(shader::matrix_t<float, 3, 3>(1.25F), context);
+    test_compiled_value(shader::matrix_t<float, 3, 4>(1.25F), context);
+    test_compiled_value(shader::matrix_t<float, 4, 2>(1.25F), context);
+    test_compiled_value(shader::matrix_t<float, 4, 3>(1.25F), context);
+    test_compiled_value(shader::matrix_t<float, 4, 4>(1.25F), context);
+}
+
+void test_context_allocation_and_preparation_failure() {
+    shader::vertex_shader_ast_builder_t vertex;
+    const auto enabled = vertex.input<bool>(0);
+    const auto local = vertex.local(1.0F);
+    vertex.position(vector4f_t({0, 0, 0, 1}));
+    vertex.output(0, local);
+    vertex.branch(enabled, [&] { vertex.output(1, local + 1.0F); vertex.output(2, local + 2.0F); });
+    shader::fragment_shader_ast_builder_t fragment;
+    const auto fragment_enabled = fragment.uniform<bool>(9);
+    const auto fragment_local = fragment.local(5.0F);
+    fragment.color(vector4f_t(1));
+    fragment.output(0, fragment_local);
+    fragment.branch(fragment_enabled, [&] { fragment.output(1, fragment_local + 1.0F); fragment.output(2, fragment_local + 2.0F); });
+    fragment.branch(!fragment.front_facing(), [&] { fragment.discard(); });
+    software_shader::program_t program(std::move(vertex).finalize(), std::move(fragment).finalize());
+    software_shader::bindings_t bindings;
+    software_shader::execution_context_t context;
+    software_shader::vertex_io_t io(0, 0);
+    io.input(0, false);
+    program.run(bindings, io, context);
+    software_shader::fragment_io_t fragment_io(vector4f_t(0), true);
+    bindings.uniform(9, false);
+    program.run(bindings, fragment_io, context);
+    io.input(0, true);
+    bindings.uniform(9, true);
+    std::size_t allocations = 0;
+    {
+        software_shader::allocation_probe_t probe;
+        for (int run = 0; run < 20; ++run) {
+            program.run(bindings, io, context);
+            program.run(bindings, fragment_io, context);
+        }
+        allocations = probe.count();
+    }
+    test::expect(std::equal_to<>(), allocations, std::size_t(0));
+    test::expect(std::equal_to<>(), *io.output<float>(2), 3.0F);
+    test::expect(std::equal_to<>(), *fragment_io.output<float>(2), 7.0F);
+    fragment_io.reset(vector4f_t(0), false);
+    program.run(bindings, fragment_io, context);
+    test::expect(std::identity(), fragment_io.discarded());
+    test::expect(std::logical_not<>(), fragment_io.color().has_value());
+    test::expect(std::logical_not<>(), fragment_io.output<float>(0).has_value());
+    fragment_io.reset(vector4f_t(0), true);
+    program.run(bindings, fragment_io, context);
+    test::expect(std::logical_not<>(), fragment_io.discarded());
+    test::expect(std::equal_to<>(), *fragment_io.output<float>(2), 7.0F);
+    for (std::size_t failure = 0; failure < 3; ++failure) {
+        software_shader::execution_context_t fresh_context;
+        software_shader::vertex_io_t fresh_io(0, 0);
+        fresh_io.input(0, true);
+        fresh_io.position(vector4f_t(9));
+        fresh_io.output(0, 99.0F);
+        bool failed = false;
+        try {
+            software_shader::allocation_probe_t probe(failure);
+            program.run(bindings, fresh_io, fresh_context);
+        } catch (const std::bad_alloc&) { failed = true; }
+        test::expect(std::identity(), failed);
+        test::expect(std::logical_not<>(), fresh_io.output<float>(0).has_value());
+        failed = false;
+        try { (void)fresh_io.position(); } catch (const std::logic_error&) { failed = true; }
+        test::expect(std::identity(), failed);
+        program.run(bindings, fresh_io, fresh_context);
+        test::expect(std::equal_to<>(), *fresh_io.output<float>(2), 3.0F);
+
+        software_shader::execution_context_t fresh_fragment_context;
+        software_shader::fragment_io_t fresh_fragment_io(vector4f_t(0), true);
+        fresh_fragment_io.color(vector4f_t(9));
+        fresh_fragment_io.output(0, 99.0F);
+        failed = false;
+        try {
+            software_shader::allocation_probe_t probe(failure);
+            program.run(bindings, fresh_fragment_io, fresh_fragment_context);
+        } catch (const std::bad_alloc&) { failed = true; }
+        test::expect(std::identity(), failed);
+        test::expect(std::logical_not<>(), fresh_fragment_io.color().has_value());
+        test::expect(std::logical_not<>(), fresh_fragment_io.output<float>(0).has_value());
+        program.run(bindings, fresh_fragment_io, fresh_fragment_context);
+        test::expect(std::equal_to<>(), *fresh_fragment_io.output<float>(2), 7.0F);
+    }
+}
+
 } // namespace
 
 int main() {
     return test::run([] {
+        test_context_reuse_and_lowering();
+        test_compiled_short_circuit_and_failures();
+        test_compiled_nested_loops();
+        test_compiled_value_types();
+        test_context_allocation_and_preparation_failure();
         test_explicit_lod_execution();
         test_program_link_validation();
         test_vertex_execution_is_fresh_and_reads_current_state();

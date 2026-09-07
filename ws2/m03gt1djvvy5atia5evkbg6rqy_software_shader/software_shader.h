@@ -1,247 +1,99 @@
 #ifndef M03GT1DJVVY5ATIA5EVKBG6RQY_SOFTWARE_SHADER_SOFTWARE_SHADER_H
 # define M03GT1DJVVY5ATIA5EVKBG6RQY_SOFTWARE_SHADER_SOFTWARE_SHADER_H
 
-# include <m03gsy25j4v7nccgmsdov9ioft_shader/api.h>
-# include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
+# include "helpers.h"
+# include "invocation.h"
 
-# include <algorithm>
-# include <any>
+# include <cstddef>
 # include <cstdint>
 # include <format>
-# include <functional>
-# include <optional>
-# include <stdexcept>
-# include <type_traits>
-# include <unordered_map>
-# include <utility>
-# include <variant>
 # include <vector>
 
 namespace m03gt1djvvy5atia5evkbg6rqy_software_shader {
 
-namespace shader = m03gsy25j4v7nccgmsdov9ioft_shader;
-namespace texture = m03gt0l0q3l4b1k27eab5k7py1_texture;
-
 /**
- * @brief Holds the values and CPU resources visible to shader invocations.
+ * @brief Owns reusable storage for sequential shader invocations across stages and programs.
  *
- * Uniform, texture, and sampler indices occupy separate namespaces. Uniform values are owned by the bindings. Textures and samplers are borrowed and must outlive every `run()` that can use their binding.
+ * Each simultaneous invocation needs independent context and IO. Storage grows when
+ * required and retains its capacity. Locals are logically fresh on every run;
+ * temporary storage need not be cleared. Failure leaves the context reusable.
+ * No program, binding, resource, or IO references are retained after a call.
  */
-class bindings_t {
+class execution_context_t {
 public:
-    template <shader::shader_value T>
-    void uniform(std::uint32_t binding, T uniform);
+    execution_context_t();
 
-    template <shader::shader_value T>
-    std::remove_cvref_t<T> uniform(std::uint32_t binding) const;
+    std::size_t slot_capacity() const;
+    std::size_t local_capacity() const;
 
-    void texture(std::uint32_t binding, const texture::texture_t& texture);
-    void texture(std::uint32_t binding, texture::texture_t&& texture) = delete;
-    void texture(std::uint32_t binding, const texture::texture_t&& texture) = delete;
-    const texture::texture_t& texture(std::uint32_t binding) const;
-    void clear_texture(std::uint32_t binding);
-
-    void sampler(std::uint32_t binding, const texture::sampler_t& sampler);
-    void sampler(std::uint32_t binding, texture::sampler_t&& sampler) = delete;
-    void sampler(std::uint32_t binding, const texture::sampler_t&& sampler) = delete;
-    const texture::sampler_t& sampler(std::uint32_t binding) const;
-    void clear_sampler(std::uint32_t binding);
+    // Module-local execution entry points for immutable, AST-compiled stages.
+    // A stage/IO mismatch fails with cleared results.
+    void execute(const stage_code_t& code, const bindings_t& bindings, vertex_io_t& io);
+    void execute(const stage_code_t& code, const bindings_t& bindings, fragment_io_t& io);
 
 private:
-    std::unordered_map<std::uint32_t, std::any> m_uniforms;
-    std::unordered_map<std::uint32_t, std::reference_wrapper<const texture::texture_t>> m_textures;
-    std::unordered_map<std::uint32_t, std::reference_wrapper<const texture::sampler_t>> m_samplers;
+    std::vector<value_t> m_slots;
+    std::vector<std::uint8_t> m_local_initialized;
 };
 
 /**
- * @brief Carries typed vertex inputs, built-ins, and results for one invocation at a time.
- */
-class vertex_io_t {
-public:
-    vertex_io_t(std::int32_t vertex_index, std::int32_t instance_index);
-
-    /**
-     * @brief Starts reuse with new indices, empty inputs, and empty results while preserving matrix state.
-     */
-    void reset(std::int32_t vertex_index, std::int32_t instance_index);
-
-    std::int32_t vertex_index() const;
-    std::int32_t instance_index() const;
-
-    void object_to_world(shader::matrix_t<float, 4, 4> matrix);
-    shader::matrix_t<float, 4, 4> object_to_world() const;
-
-    void world_to_clip(shader::matrix_t<float, 4, 4> matrix);
-    shader::matrix_t<float, 4, 4> world_to_clip() const;
-
-    template <shader::shader_value T>
-    void input(std::uint32_t location, T input);
-
-    template <shader::shader_value T>
-    std::remove_cvref_t<T> input(std::uint32_t location) const;
-
-    template <shader::shader_value T>
-    void output(std::uint32_t location, T output);
-
-    template <shader::shader_value T>
-    std::optional<std::remove_cvref_t<T>> output(std::uint32_t location) const;
-
-    void position(shader::vector_t<float, 4> position);
-    shader::vector_t<float, 4> position() const;
-
-    void clear_results();
-
-private:
-    using value_t = std::variant<
-        bool,
-        std::int32_t,
-        std::uint32_t,
-        float,
-        shader::vector_t<bool, 2>,
-        shader::vector_t<bool, 3>,
-        shader::vector_t<bool, 4>,
-        shader::vector_t<std::int32_t, 2>,
-        shader::vector_t<std::int32_t, 3>,
-        shader::vector_t<std::int32_t, 4>,
-        shader::vector_t<std::uint32_t, 2>,
-        shader::vector_t<std::uint32_t, 3>,
-        shader::vector_t<std::uint32_t, 4>,
-        shader::vector_t<float, 2>,
-        shader::vector_t<float, 3>,
-        shader::vector_t<float, 4>,
-        shader::matrix_t<float, 2, 2>,
-        shader::matrix_t<float, 2, 3>,
-        shader::matrix_t<float, 2, 4>,
-        shader::matrix_t<float, 3, 2>,
-        shader::matrix_t<float, 3, 3>,
-        shader::matrix_t<float, 3, 4>,
-        shader::matrix_t<float, 4, 2>,
-        shader::matrix_t<float, 4, 3>,
-        shader::matrix_t<float, 4, 4>
-    >;
-
-    std::int32_t m_vertex_index;
-    std::int32_t m_instance_index;
-    shader::matrix_t<float, 4, 4> m_object_to_world;
-    shader::matrix_t<float, 4, 4> m_world_to_clip;
-    std::vector<std::pair<std::uint32_t, value_t>> m_inputs;
-    std::vector<std::pair<std::uint32_t, value_t>> m_outputs;
-    std::optional<shader::vector_t<float, 4>> m_position;
-};
-
-/**
- * @brief Carries typed fragment inputs, built-ins, and results for one invocation at a time.
- */
-class fragment_io_t {
-public:
-    fragment_io_t(shader::vector_t<float, 4> fragment_coordinate, bool front_facing);
-
-    /**
-     * @brief Starts reuse with new built-ins and empty inputs and results.
-     */
-    void reset(shader::vector_t<float, 4> fragment_coordinate, bool front_facing);
-
-    shader::vector_t<float, 4> fragment_coordinate() const;
-    bool front_facing() const;
-
-    template <shader::shader_value T>
-    void input(std::uint32_t location, T input);
-
-    template <shader::shader_value T>
-    std::remove_cvref_t<T> input(std::uint32_t location) const;
-
-    template <shader::shader_value T>
-    void output(std::uint32_t location, T output);
-
-    template <shader::shader_value T>
-    std::optional<std::remove_cvref_t<T>> output(std::uint32_t location) const;
-
-    void color(shader::vector_t<float, 4> color);
-    std::optional<shader::vector_t<float, 4>> color() const;
-
-    bool discarded() const;
-    void discard();
-    void clear_results();
-
-private:
-    using value_t = std::variant<
-        bool,
-        std::int32_t,
-        std::uint32_t,
-        float,
-        shader::vector_t<bool, 2>,
-        shader::vector_t<bool, 3>,
-        shader::vector_t<bool, 4>,
-        shader::vector_t<std::int32_t, 2>,
-        shader::vector_t<std::int32_t, 3>,
-        shader::vector_t<std::int32_t, 4>,
-        shader::vector_t<std::uint32_t, 2>,
-        shader::vector_t<std::uint32_t, 3>,
-        shader::vector_t<std::uint32_t, 4>,
-        shader::vector_t<float, 2>,
-        shader::vector_t<float, 3>,
-        shader::vector_t<float, 4>,
-        shader::matrix_t<float, 2, 2>,
-        shader::matrix_t<float, 2, 3>,
-        shader::matrix_t<float, 2, 4>,
-        shader::matrix_t<float, 3, 2>,
-        shader::matrix_t<float, 3, 3>,
-        shader::matrix_t<float, 3, 4>,
-        shader::matrix_t<float, 4, 2>,
-        shader::matrix_t<float, 4, 3>,
-        shader::matrix_t<float, 4, 4>
-    >;
-
-    shader::vector_t<float, 4> m_fragment_coordinate;
-    bool m_front_facing;
-    bool m_discarded;
-    std::vector<std::pair<std::uint32_t, value_t>> m_inputs;
-    std::vector<std::pair<std::uint32_t, value_t>> m_outputs;
-    std::optional<shader::vector_t<float, 4>> m_color;
-};
-
-/**
- * @brief Owns a linked vertex and fragment shader program executable on the CPU.
+ * @brief Owns two immutable compiled shader stages and their reflected interfaces.
+ *
+ * Compilation borrows the ASTs only during construction. Successful construction
+ * establishes stage/link compatibility and executable code; expression evaluation
+ * and invocation-dependent failures remain runtime behavior.
  */
 class program_t {
 public:
-    /**
-     * Fails if the AST stages are wrong, a fragment input has no compatible vertex output, or a binding has incompatible types across stages.
-     */
     program_t(shader::shader_ast_t vertex, shader::shader_ast_t fragment);
+
+    program_t(const program_t&) = delete;
+    program_t& operator=(const program_t&) = delete;
+    program_t(program_t&&) = default;
+    program_t& operator=(program_t&&) = default;
 
     const shader::shader_interface_t& vertex_interface() const;
     const shader::shader_interface_t& fragment_interface() const;
 
-    /**
-     * @brief Validates every reflected binding in both stages while accepting unused extras.
-     */
+    /** @brief Validates reflected bindings in both stages, accepting unused extras. */
     void validate_bindings(const bindings_t& bindings) const;
 
     /**
-     * @brief Runs a fresh vertex invocation and replaces all prior vertex results.
+     * @brief Runs a fresh vertex invocation using temporary execution storage.
      *
-     * Caller-supplied inputs, indices, and matrices remain available after execution.
-     *
-     * Fails if a required input or binding is absent or has the wrong type.
-     * Fails if execution completes without writing position.
+     * Preserves caller inputs, indices, and matrices. Validates the invoked stage's
+     * inputs and bindings. Normal completion requires position. Results are cleared
+     * before any potentially failing preparation and again on failure.
      */
     void run(const bindings_t& bindings, vertex_io_t& io) const;
 
     /**
-     * @brief Runs a fresh fragment invocation and replaces all prior fragment results.
+     * @brief Runs a fresh fragment invocation using temporary execution storage.
      *
-     * Caller-supplied inputs and built-ins remain available after execution.
-     *
-     * Discard terminates execution, clears all outputs, and is reported by `fragment_io_t::discarded()`.
-     *
-     * Fails if a required input or binding is absent or has the wrong type.
+     * Preserves caller inputs and built-ins. Validates the invoked stage's inputs
+     * and bindings. Color and numbered outputs are optional. Discard terminates
+     * execution and invalidates all outputs. Results are cleared before any
+     * potentially failing preparation and again on failure.
      */
     void run(const bindings_t& bindings, fragment_io_t& io) const;
 
+    /**
+     * @brief Runs a vertex invocation with reusable execution storage.
+     *
+     * Follows the convenience overload's result and validation rules. Successful
+     * invocations allocate no execution or IO storage once both have sufficient
+     * capacity. Preparation reserves all reflected numbered outputs, including
+     * outputs on untaken paths. This guarantee does not cover exception construction
+     * or resource operations. Context, IO, and bindings are borrowed for this call.
+     */
+    void run(const bindings_t& bindings, vertex_io_t& io, execution_context_t& context) const;
+
+    /** @brief Runs a fragment invocation with the same storage-reuse guarantee and its convenience overload's semantics. */
+    void run(const bindings_t& bindings, fragment_io_t& io, execution_context_t& context) const;
+
 private:
-    shader::shader_ast_t m_vertex;
-    shader::shader_ast_t m_fragment;
+    stage_code_t m_vertex;
+    stage_code_t m_fragment;
 };
 
 } // namespace m03gt1djvvy5atia5evkbg6rqy_software_shader
@@ -249,199 +101,21 @@ private:
 namespace std {
 
 template <>
-struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::bindings_t>;
-
-template <>
-struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::vertex_io_t>;
-
-template <>
-struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::fragment_io_t>;
+struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::execution_context_t>;
 
 template <>
 struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::program_t>;
 
 } // namespace std
 
-namespace m03gt1djvvy5atia5evkbg6rqy_software_shader {
-
-template <shader::shader_value T>
-void bindings_t::uniform(std::uint32_t binding, T uniform) {
-    using type = std::remove_cvref_t<T>;
-    m_uniforms.insert_or_assign(binding, std::any(type(std::move(uniform))));
-}
-
-template <shader::shader_value T>
-std::remove_cvref_t<T> bindings_t::uniform(std::uint32_t binding) const {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = m_uniforms.find(binding);
-    if (iterator == m_uniforms.end()) {
-        throw std::invalid_argument(std::format("software shader uniform binding {} is missing", binding));
-    }
-    const auto* uniform = std::any_cast<type>(&iterator->second);
-    if (!uniform) {
-        throw std::invalid_argument(std::format("software shader uniform binding {} has the wrong type", binding));
-    }
-    return *uniform;
-}
-
-template <shader::shader_value T>
-void vertex_io_t::input(std::uint32_t location, T input) {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_inputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_inputs.end()) {
-        m_inputs.emplace_back(location, value_t(type(std::move(input))));
-    } else {
-        iterator->second = type(std::move(input));
-    }
-}
-
-template <shader::shader_value T>
-std::remove_cvref_t<T> vertex_io_t::input(std::uint32_t location) const {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_inputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_inputs.end()) {
-        throw std::invalid_argument(std::format("software shader vertex input location {} is missing", location));
-    }
-    const auto* input = std::get_if<type>(&iterator->second);
-    if (!input) {
-        throw std::invalid_argument(std::format("software shader vertex input location {} has the wrong type", location));
-    }
-    return *input;
-}
-
-template <shader::shader_value T>
-void vertex_io_t::output(std::uint32_t location, T output) {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_outputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_outputs.end()) {
-        m_outputs.emplace_back(location, value_t(type(std::move(output))));
-    } else {
-        iterator->second = type(std::move(output));
-    }
-}
-
-template <shader::shader_value T>
-std::optional<std::remove_cvref_t<T>> vertex_io_t::output(std::uint32_t location) const {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_outputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_outputs.end()) {
-        return std::nullopt;
-    }
-    const auto* output = std::get_if<type>(&iterator->second);
-    if (!output) {
-        throw std::invalid_argument(std::format("software shader vertex output location {} has the wrong type", location));
-    }
-    return *output;
-}
-
-template <shader::shader_value T>
-void fragment_io_t::input(std::uint32_t location, T input) {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_inputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_inputs.end()) {
-        m_inputs.emplace_back(location, value_t(type(std::move(input))));
-    } else {
-        iterator->second = type(std::move(input));
-    }
-}
-
-template <shader::shader_value T>
-std::remove_cvref_t<T> fragment_io_t::input(std::uint32_t location) const {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_inputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_inputs.end()) {
-        throw std::invalid_argument(std::format("software shader fragment input location {} is missing", location));
-    }
-    const auto* input = std::get_if<type>(&iterator->second);
-    if (!input) {
-        throw std::invalid_argument(std::format("software shader fragment input location {} has the wrong type", location));
-    }
-    return *input;
-}
-
-template <shader::shader_value T>
-void fragment_io_t::output(std::uint32_t location, T output) {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_outputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_outputs.end()) {
-        m_outputs.emplace_back(location, value_t(type(std::move(output))));
-    } else {
-        iterator->second = type(std::move(output));
-    }
-}
-
-template <shader::shader_value T>
-std::optional<std::remove_cvref_t<T>> fragment_io_t::output(std::uint32_t location) const {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = std::ranges::find_if(m_outputs, [location](const auto& entry) { return entry.first == location; });
-    if (iterator == m_outputs.end()) {
-        return std::nullopt;
-    }
-    const auto* output = std::get_if<type>(&iterator->second);
-    if (!output) {
-        throw std::invalid_argument(std::format("software shader fragment output location {} has the wrong type", location));
-    }
-    return *output;
-}
-
-} // namespace m03gt1djvvy5atia5evkbg6rqy_software_shader
-
 namespace std {
 
 template <>
-struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::bindings_t> {
-    constexpr auto parse(std::format_parse_context& ctx) {
-        auto iterator = ctx.begin();
-        if (iterator != ctx.end() && *iterator != '}') {
-            throw std::format_error("invalid bindings_t format specifier");
-        }
-        return iterator;
-    }
-
-    auto format(const m03gt1djvvy5atia5evkbg6rqy_software_shader::bindings_t&, auto& ctx) const {
-        auto out = ctx.out();
-        out = std::format_to(out, "software shader bindings");
-        return out;
-    }
-};
-
-template <>
-struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::vertex_io_t> {
-    constexpr auto parse(std::format_parse_context& ctx) {
-        auto iterator = ctx.begin();
-        if (iterator != ctx.end() && *iterator != '}') {
-            throw std::format_error("invalid vertex_io_t format specifier");
-        }
-        return iterator;
-    }
-
-    auto format(const m03gt1djvvy5atia5evkbg6rqy_software_shader::vertex_io_t& io, auto& ctx) const {
-        auto out = ctx.out();
-        out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "vertex_index: {}", io.vertex_index());
-        out = std::format_to(out, ", instance_index: {}", io.instance_index());
-        out = std::format_to(out, " }}");
-        return out;
-    }
-};
-
-template <>
-struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::fragment_io_t> {
-    constexpr auto parse(std::format_parse_context& ctx) {
-        auto iterator = ctx.begin();
-        if (iterator != ctx.end() && *iterator != '}') {
-            throw std::format_error("invalid fragment_io_t format specifier");
-        }
-        return iterator;
-    }
-
-    auto format(const m03gt1djvvy5atia5evkbg6rqy_software_shader::fragment_io_t& io, auto& ctx) const {
-        auto out = ctx.out();
-        out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "fragment_coordinate: {}", io.fragment_coordinate());
-        out = std::format_to(out, ", front_facing: {}", io.front_facing());
-        out = std::format_to(out, ", discarded: {}", io.discarded());
-        out = std::format_to(out, " }}");
+struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::execution_context_t> {
+    constexpr auto parse(std::format_parse_context& context) { return context.begin(); }
+    auto format(const m03gt1djvvy5atia5evkbg6rqy_software_shader::execution_context_t& execution_context, auto& context) const {
+        auto out = context.out();
+        out = std::format_to(out, "slot_capacity={} local_capacity={}", execution_context.slot_capacity(), execution_context.local_capacity());
         return out;
     }
 };
@@ -467,6 +141,7 @@ struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::program_t> {
         return out;
     }
 };
+
 
 } // namespace std
 

@@ -205,7 +205,7 @@ void software_renderer_t::draw(
         vertex_metric.update<vertex_metrics_t>([](vertex_metrics_t& metric) noexcept {
             ++metric.m_invocations;
         });
-        program.run(bindings, io);
+        program.run(bindings, io, scratch.m_execution_context);
         const vector4f_t clip_position = io.position();
         if (!finite(clip_position)) {
             throw std::runtime_error("vertex shader produced a non-finite clip position");
@@ -257,6 +257,7 @@ void software_renderer_t::draw(
                     vertex(index),
                     scratch.m_fragment_inputs,
                     scratch.m_fragment_io,
+                    scratch.m_execution_context,
                     raster_metric
                 );
             }
@@ -272,6 +273,7 @@ void software_renderer_t::draw(
                     scratch.m_clipping,
                     scratch.m_fragment_inputs,
                     scratch.m_fragment_io,
+                    scratch.m_execution_context,
                     raster_metric
                 );
             }
@@ -287,6 +289,7 @@ void software_renderer_t::draw(
                     scratch.m_clipping,
                     scratch.m_fragment_inputs,
                     scratch.m_fragment_io,
+                    scratch.m_execution_context,
                     raster_metric
                 );
             }
@@ -302,6 +305,7 @@ void software_renderer_t::draw(
                     scratch.m_clipping,
                     scratch.m_fragment_inputs,
                     scratch.m_fragment_io,
+                    scratch.m_execution_context,
                     raster_metric
                 );
             }
@@ -318,6 +322,7 @@ void software_renderer_t::draw(
                     scratch.m_raster,
                     scratch.m_fragment_inputs,
                     scratch.m_fragment_io,
+                    scratch.m_execution_context,
                     raster_metric,
                     vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2).m_flat_outputs
                 );
@@ -336,6 +341,7 @@ void software_renderer_t::draw(
                         scratch.m_raster,
                         scratch.m_fragment_inputs,
                         scratch.m_fragment_io,
+                        scratch.m_execution_context,
                         raster_metric,
                         vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2).m_flat_outputs
                     );
@@ -350,6 +356,7 @@ void software_renderer_t::draw(
                         scratch.m_raster,
                         scratch.m_fragment_inputs,
                         scratch.m_fragment_io,
+                        scratch.m_execution_context,
                         raster_metric,
                         vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2).m_flat_outputs
                     );
@@ -368,6 +375,7 @@ void software_renderer_t::draw(
                     scratch.m_raster,
                     scratch.m_fragment_inputs,
                     scratch.m_fragment_io,
+                    scratch.m_execution_context,
                     raster_metric,
                     vertex(material->provoking_vertex() == provoking_vertex_t::first ? index : index + 1).m_flat_outputs
                 );

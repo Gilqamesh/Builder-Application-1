@@ -150,6 +150,7 @@ struct scratch_t {
     clipping_workspace_t m_clipping;
     raster_workspace_t m_raster;
     varying_values_t m_fragment_inputs;
+    software_shader::execution_context_t m_execution_context;
     software_shader::vertex_io_t m_vertex_io {0, 0};
     software_shader::fragment_io_t m_fragment_io {vector4f_t(0.0F), true};
 };
@@ -317,6 +318,7 @@ void shade_sample(
     bool front_facing,
     std::span<const varying_entry_t> inputs,
     software_shader::fragment_io_t& io,
+    software_shader::execution_context_t& execution_context,
     m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric,
     std::span<const flat_entry_t> flat_inputs = {}
 );
@@ -328,6 +330,7 @@ void rasterize_point(
     const pipeline_vertex_view_t& vertex,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
+    software_shader::execution_context_t& execution_context,
     m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 );
 
@@ -340,6 +343,7 @@ void rasterize_line(
     clipping_workspace_t& clipping,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
+    software_shader::execution_context_t& execution_context,
     m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 );
 
@@ -353,6 +357,7 @@ void rasterize_triangle(
     raster_workspace_t& workspace,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
+    software_shader::execution_context_t& execution_context,
     m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric,
     std::span<const flat_entry_t> flat_inputs = {}
 );

@@ -1053,6 +1053,7 @@ void shade_sample(
     bool front_facing,
     std::span<const varying_entry_t> inputs,
     software_shader::fragment_io_t& io,
+    software_shader::execution_context_t& execution_context,
     m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric,
     std::span<const flat_entry_t> flat_inputs
 ) {
@@ -1077,7 +1078,7 @@ void shade_sample(
     metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
         ++metric.m_invocations;
     });
-    material.program()->run(material.bindings(), io);
+    material.program()->run(material.bindings(), io, execution_context);
     if (io.discarded()) {
         metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
             ++metric.m_discards;
@@ -1127,6 +1128,7 @@ void rasterize_point(
     const pipeline_vertex_view_t& vertex,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
+    software_shader::execution_context_t& execution_context,
     m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 ) {
     if (!inside_clip_volume(vertex)) {
@@ -1160,6 +1162,7 @@ void rasterize_point(
                     true,
                     fragment_inputs,
                     fragment_io,
+                    execution_context,
                     metric,
                     vertex.m_flat_outputs
                 );
@@ -1177,6 +1180,7 @@ void rasterize_line(
     clipping_workspace_t& clipping,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
+    software_shader::execution_context_t& execution_context,
     m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
 ) {
     const auto flat_inputs = material.provoking_vertex() == provoking_vertex_t::first ? first.m_flat_outputs : second.m_flat_outputs;
@@ -1226,7 +1230,7 @@ void rasterize_line(
         }
         const sample_t sample {x, y, {0, 1, 0, 0}, {1.0 - factor, factor, 0.0, 0.0}, 2};
         const auto depth_w = interpolate_sample(endpoints, sample, fragment_inputs);
-        shade_sample(material, bounds, framebuffer, x, y, float(depth_w[0]), float(depth_w[1]), true, fragment_inputs, fragment_io, metric, flat_inputs);
+        shade_sample(material, bounds, framebuffer, x, y, float(depth_w[0]), float(depth_w[1]), true, fragment_inputs, fragment_io, execution_context, metric, flat_inputs);
     }
 }
 
@@ -1240,6 +1244,7 @@ void rasterize_triangle(
     raster_workspace_t& workspace,
     varying_values_t& fragment_inputs,
     software_shader::fragment_io_t& fragment_io,
+    software_shader::execution_context_t& execution_context,
     m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric,
     std::span<const flat_entry_t> flat_inputs
 ) {
@@ -1267,6 +1272,7 @@ void rasterize_triangle(
             front_facing,
             fragment_inputs,
             fragment_io,
+            execution_context,
             metric,
             flat_inputs
         );
