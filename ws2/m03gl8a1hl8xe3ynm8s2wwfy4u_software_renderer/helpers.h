@@ -104,6 +104,25 @@ struct projected_vertex_t {
     pipeline_vertex_view_t source;
 };
 
+// Reflection-order destination and packed component layout for one non-flat input.
+struct interpolated_input_t {
+    std::size_t input_slot;
+    std::size_t component_offset;
+    std::size_t component_count;
+    shader::interpolation_t interpolation;
+};
+
+// Both planes use vertex * component_count + input.component_offset + axis.
+// Original perspective values preserve sample-specific clamps. Noperspective
+// entries in perspective_values are unused; clipped source records remain intact.
+struct prepared_interpolants_t {
+    std::size_t component_count = 0;
+    std::vector<double> components;
+    std::vector<double> perspective_values;
+
+    void prepare(std::span<const projected_vertex_t> vertices, std::span<const interpolated_input_t> inputs);
+};
+
 struct scan_event_t {
     fraction_t x;
     std::size_t lower;
@@ -161,7 +180,8 @@ struct scratch_t {
     std::vector<pipeline_vertex_t> vertex_results;
     varying_values_t vertex_values;
     flat_values_t flat_values;
-    std::vector<std::size_t> interpolated_inputs;
+    std::vector<interpolated_input_t> interpolated_inputs;
+    prepared_interpolants_t prepared_interpolants;
     std::vector<std::size_t> flat_inputs;
     clipping_workspace_t clipping;
     raster_workspace_t raster;
@@ -248,7 +268,7 @@ sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::s
 
 // Writes interpolated payloads to the mapped fragment input slots, preserving other slots.
 // Returns window depth and reciprocal W.
-std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, std::span<const std::size_t> input_slots, std::span<software_shader::value_t> outputs);
+std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, std::span<const interpolated_input_t> inputs, const prepared_interpolants_t& prepared, std::span<software_shader::value_t> outputs);
 
 bool finite(const vector4f_t& vector);
 
@@ -383,6 +403,12 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clipping_workspac
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::projected_vertex_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::interpolated_input_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::prepared_interpolants_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scan_event_t>;
@@ -695,6 +721,35 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::projected_vertex_
         out = std::format_to(out, ", y: {}", vertex.point[1]);
         out = std::format_to(out, ", ndc_z: {}", vertex.ndc_z);
         out = std::format_to(out, ", reciprocal_w: {}", vertex.reciprocal_w);
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::interpolated_input_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::interpolated_input_t& input, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "input_slot: {}", input.input_slot);
+        out = std::format_to(out, ", component_offset: {}", input.component_offset);
+        out = std::format_to(out, ", component_count: {}", input.component_count);
+        out = std::format_to(out, ", interpolation: {}", input.interpolation);
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::prepared_interpolants_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::prepared_interpolants_t& prepared, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "component_count: {}", prepared.component_count);
+        out = std::format_to(out, ", components: {}", prepared.components.size());
+        out = std::format_to(out, ", perspective_values: {}", prepared.perspective_values.size());
         out = std::format_to(out, " }}");
         return out;
     }

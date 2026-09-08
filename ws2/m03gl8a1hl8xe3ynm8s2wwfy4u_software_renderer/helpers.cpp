@@ -44,6 +44,41 @@ bool raster_bounds_t::empty() const {
     return end_x <= first_x || end_y <= first_y;
 }
 
+void prepared_interpolants_t::prepare(std::span<const projected_vertex_t> vertices, std::span<const interpolated_input_t> inputs) {
+    component_count = inputs.empty() ? 0 : inputs.back().component_offset + inputs.back().component_count;
+    if (component_count != 0 && std::min(components.max_size(), perspective_values.max_size()) / component_count < vertices.size()) {
+        throw std::length_error("interpolant preparation exceeds numeric storage capacity");
+    }
+    const auto count = vertices.size() * component_count;
+    components.resize(count);
+    perspective_values.resize(count);
+    if (inputs.empty()) { return; }
+    for (std::size_t vertex_index = 0; vertex_index < vertices.size(); ++vertex_index) {
+        const auto& vertex = vertices[vertex_index];
+        for (std::size_t output = 0; output < inputs.size(); ++output) {
+            const auto& input = inputs[output];
+            const auto offset = vertex_index * component_count + input.component_offset;
+            std::visit([&](const auto& typed) {
+                using type_t = std::remove_cvref_t<decltype(typed)>;
+                if constexpr (std::is_same_v<type_t, noperspective_t>) {
+                    for (std::size_t axis = 0; axis < input.component_count; ++axis) {
+                        components[offset + axis] = typed.numerators[axis] / double(vertex.source.clip_position[3]);
+                    }
+                } else {
+                    for (std::size_t axis = 0; axis < input.component_count; ++axis) {
+                        const double component = [&] {
+                            if constexpr (std::is_same_v<type_t, float>) { return double(typed); }
+                            else { return double(typed[axis]); }
+                        }();
+                        components[offset + axis] = vertex.reciprocal_w * component;
+                        perspective_values[offset + axis] = component;
+                    }
+                }
+            }, vertex.source.outputs[output]);
+        }
+    }
+}
+
 vertex_input_t::vertex_input_t(const type_erased_array::type_erased_array_t& stream, const vertex_attribute_t& attribute, shader::shader_data_type_t type):
     stream(stream)
 {
@@ -370,7 +405,7 @@ sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::s
     return {x, y, indices, weights, 4};
 }
 
-std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, std::span<const std::size_t> input_slots, std::span<software_shader::value_t> outputs) {
+std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, std::span<const interpolated_input_t> inputs, const prepared_interpolants_t& prepared, std::span<software_shader::value_t> outputs) {
     // Ear and span samples both recover perspective-correct varying values by
     // dividing interpolated varying/W by interpolated reciprocal W.
     double reciprocal = 0.0, ndc_z = 0.0;
@@ -387,64 +422,52 @@ std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> ver
     }
     reciprocal = std::clamp(reciprocal, minimum_q, maximum_q);
     ndc_z = std::clamp(ndc_z, minimum_z, maximum_z);
-    const auto first_outputs = vertices[sample.vertices[0]].source.outputs;
-    for (std::size_t output = 0; output < first_outputs.size(); ++output) {
-        const auto& first = first_outputs[output];
-        auto& fragment_input = outputs[input_slots[output]];
-        std::visit([&](const auto& first_value) {
-            using type_t = std::remove_cvref_t<decltype(first_value)>;
-            if constexpr (std::is_same_v<type_t, noperspective_t>) {
-                std::array<float, 4> components {};
-                for (std::size_t axis = 0; axis < first_value.count; ++axis) {
-                    double result = 0;
+    for (const auto& input : inputs) {
+        // Match the shader's fixed scalar/vector width so component loops can
+        // unroll without changing accumulation order within any component.
+        const auto evaluate = [&]<std::size_t Count, bool Perspective>() {
+            std::array<float, Count> components {};
+            for (std::size_t axis = 0; axis < Count; ++axis) {
+                double result = 0.0;
+                if constexpr (Perspective) {
+                    double minimum = std::numeric_limits<double>::infinity(), maximum = -minimum;
                     for (std::size_t i = 0; i < sample.count; ++i) {
-                        const auto& vertex = vertices[sample.vertices[i]];
-                        const auto& payload = std::get<noperspective_t>(vertex.source.outputs[output]);
-                        result += sample.weights[i] * (payload.numerators[axis] / double(vertex.source.clip_position[3]));
+                        const auto offset = sample.vertices[i] * prepared.component_count + input.component_offset + axis;
+                        result += sample.weights[i] * prepared.components[offset];
+                        const double component = prepared.perspective_values[offset];
+                        minimum = std::min(minimum, component);
+                        maximum = std::max(maximum, component);
+                    }
+                    result /= reciprocal;
+                    components[axis] = float(minimum <= maximum ? std::clamp(result, minimum, maximum) : result);
+                } else {
+                    for (std::size_t i = 0; i < sample.count; ++i) {
+                        const auto offset = sample.vertices[i] * prepared.component_count + input.component_offset + axis;
+                        result += sample.weights[i] * prepared.components[offset];
                     }
                     components[axis] = float(result);
                 }
-                switch (first_value.count) {
-                    case 1: { fragment_input = components[0]; } break;
-                    case 2: { fragment_input = vector2f_t({components[0], components[1]}); } break;
-                    case 3: { fragment_input = shader::vector_t<float, 3>({components[0], components[1], components[2]}); } break;
-                    case 4: { fragment_input = vector4f_t({components[0], components[1], components[2], components[3]}); } break;
-                    default: throw std::logic_error("invalid noperspective component count");
-                }
-            } else {
-                const auto component = [&](std::size_t axis) {
-                    double numerator = 0.0;
-                    double minimum = std::numeric_limits<double>::infinity(), maximum = -minimum;
-                    for (std::size_t i = 0; i < sample.count; ++i) {
-                        const auto& vertex = vertices[sample.vertices[i]];
-                        const auto& typed = std::get<type_t>(vertex.source.outputs[output]);
-                        const double value = [&] {
-                            if constexpr (std::is_same_v<type_t, float>) {
-                                return double(typed);
-                            } else {
-                                return double(typed[axis]);
-                            }
-                        }();
-                        numerator += sample.weights[i] * (vertex.reciprocal_w * value);
-                        minimum = std::min(minimum, value);
-                        maximum = std::max(maximum, value);
-                    }
-                    const double result = numerator / reciprocal;
-                    return float(minimum <= maximum ? std::clamp(result, minimum, maximum) : result);
-                };
-                if constexpr (std::is_same_v<type_t, float>) {
-                    fragment_input = component(0);
-                } else {
-                    type_t result;
-                    std::size_t i = 0;
-                    for (float& value : result) {
-                        value = component(i++);
-                    }
-                    fragment_input = result;
-                }
             }
-        },
-            first);
+            if constexpr (Count == 1) {
+                outputs[input.input_slot] = components[0];
+            } else {
+                outputs[input.input_slot] = shader::vector_t<float, Count>(components);
+            }
+        };
+        const auto evaluate_mode = [&]<std::size_t Count>() {
+            if (input.interpolation == shader::interpolation_t::perspective) {
+                evaluate.template operator()<Count, true>();
+            } else {
+                evaluate.template operator()<Count, false>();
+            }
+        };
+        switch (input.component_count) {
+            case 1: { evaluate_mode.template operator()<1>(); } break;
+            case 2: { evaluate_mode.template operator()<2>(); } break;
+            case 3: { evaluate_mode.template operator()<3>(); } break;
+            case 4: { evaluate_mode.template operator()<4>(); } break;
+            default: throw std::logic_error("invalid interpolated component count");
+        }
     }
     return {ndc_z * 0.5 + 0.5, reciprocal};
 }
@@ -561,8 +584,9 @@ void rasterize_point(draw_context_t& draw, const pipeline_vertex_view_t& vertex)
     }
 
     const std::array<projected_vertex_t, 1> projected {{{{0, 0}, screen->ndc_z, screen->reciprocal_w, vertex}}};
+    scratch.prepared_interpolants.prepare(projected, scratch.interpolated_inputs);
     load_flat_inputs(scratch, vertex.flat_outputs);
-    (void)interpolate_sample(projected, {0, 0, {0, 0, 0, 0}, {1, 0, 0, 0}, 1}, scratch.interpolated_inputs, scratch.fragment_values);
+    (void)interpolate_sample(projected, {0, 0, {0, 0, 0, 0}, {1, 0, 0, 0}, 1}, scratch.interpolated_inputs, scratch.prepared_interpolants, scratch.fragment_values);
     constexpr int radius = 3;
     constexpr int radius_squared = radius * radius;
     const auto center_x = static_cast<std::int64_t>(std::floor(screen->x));
@@ -630,6 +654,7 @@ void rasterize_line(draw_context_t& draw, const pipeline_vertex_view_t& first, c
     const double line_x = second_screen->x - first_screen->x;
     const double line_y = second_screen->y - first_screen->y;
     const double length_squared = line_x * line_x + line_y * line_y;
+    scratch.prepared_interpolants.prepare(endpoints, scratch.interpolated_inputs);
     load_flat_inputs(scratch, flat_inputs);
     for (auto i = first_step; i <= last_step; ++i) {
         const auto offset = major == 0 ? 0 : std::int64_t((edge_value_t(i) * minor + major / 2) / major);
@@ -641,7 +666,7 @@ void rasterize_line(draw_context_t& draw, const pipeline_vertex_view_t& first, c
             factor = std::clamp(factor, 0.0, 1.0);
         }
         const sample_t sample {x, y, {0, 1, 0, 0}, {1.0 - factor, factor, 0.0, 0.0}, 2};
-        const auto depth_w = interpolate_sample(endpoints, sample, scratch.interpolated_inputs, scratch.fragment_values);
+        const auto depth_w = interpolate_sample(endpoints, sample, scratch.interpolated_inputs, scratch.prepared_interpolants, scratch.fragment_values);
         shade_sample(draw, x, y, float(depth_w[0]), float(depth_w[1]), true);
     }
 }
@@ -682,9 +707,10 @@ void rasterize_triangle(draw_context_t& draw, const pipeline_vertex_view_t& firs
             ++draw.counters->winding_polygons;
         }
     }
+    scratch.prepared_interpolants.prepare(workspace.vertices, scratch.interpolated_inputs);
     load_flat_inputs(scratch, flat_inputs);
     visit_samples(workspace, bounds.end_x, bounds.end_y, [&](const sample_t& sample) {
-        const auto depth_w = interpolate_sample(workspace.vertices, sample, scratch.interpolated_inputs, scratch.fragment_values);
+        const auto depth_w = interpolate_sample(workspace.vertices, sample, scratch.interpolated_inputs, scratch.prepared_interpolants, scratch.fragment_values);
         shade_sample(draw,
             sample.x,
             sample.y,

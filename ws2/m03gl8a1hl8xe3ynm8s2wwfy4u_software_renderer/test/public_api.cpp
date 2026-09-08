@@ -1188,6 +1188,86 @@ void test_clipped_boundaries() {
     }
 }
 
+// Scalar reference from d489705, retaining variant decoding and original expressions.
+std::array<double, 2> reference_interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, std::span<const std::size_t> input_slots, std::span<software_shader::value_t> outputs) {
+    // Ear and span samples both recover perspective-correct varying values by
+    // dividing interpolated varying/W by interpolated reciprocal W.
+    double reciprocal = 0.0, ndc_z = 0.0;
+    double minimum_q = std::numeric_limits<double>::infinity(), maximum_q = 0.0;
+    double minimum_z = 1.0, maximum_z = -1.0;
+    for (std::size_t i = 0; i < sample.count; ++i) {
+        const auto& vertex = vertices[sample.vertices[i]];
+        reciprocal += sample.weights[i] * vertex.reciprocal_w;
+        ndc_z += sample.weights[i] * vertex.ndc_z;
+        minimum_q = std::min(minimum_q, vertex.reciprocal_w);
+        maximum_q = std::max(maximum_q, vertex.reciprocal_w);
+        minimum_z = std::min(minimum_z, vertex.ndc_z);
+        maximum_z = std::max(maximum_z, vertex.ndc_z);
+    }
+    reciprocal = std::clamp(reciprocal, minimum_q, maximum_q);
+    ndc_z = std::clamp(ndc_z, minimum_z, maximum_z);
+    const auto first_outputs = vertices[sample.vertices[0]].source.outputs;
+    for (std::size_t output = 0; output < first_outputs.size(); ++output) {
+        const auto& first = first_outputs[output];
+        auto& fragment_input = outputs[input_slots[output]];
+        std::visit([&](const auto& first_value) {
+            using type_t = std::remove_cvref_t<decltype(first_value)>;
+            if constexpr (std::is_same_v<type_t, noperspective_t>) {
+                std::array<float, 4> components {};
+                for (std::size_t axis = 0; axis < first_value.count; ++axis) {
+                    double result = 0;
+                    for (std::size_t i = 0; i < sample.count; ++i) {
+                        const auto& vertex = vertices[sample.vertices[i]];
+                        const auto& payload = std::get<noperspective_t>(vertex.source.outputs[output]);
+                        result += sample.weights[i] * (payload.numerators[axis] / double(vertex.source.clip_position[3]));
+                    }
+                    components[axis] = float(result);
+                }
+                switch (first_value.count) {
+                    case 1: { fragment_input = components[0]; } break;
+                    case 2: { fragment_input = vector2f_t({components[0], components[1]}); } break;
+                    case 3: { fragment_input = shader::vector_t<float, 3>({components[0], components[1], components[2]}); } break;
+                    case 4: { fragment_input = vector4f_t({components[0], components[1], components[2], components[3]}); } break;
+                    default: throw std::logic_error("invalid noperspective component count");
+                }
+            } else {
+                const auto component = [&](std::size_t axis) {
+                    double numerator = 0.0;
+                    double minimum = std::numeric_limits<double>::infinity(), maximum = -minimum;
+                    for (std::size_t i = 0; i < sample.count; ++i) {
+                        const auto& vertex = vertices[sample.vertices[i]];
+                        const auto& typed = std::get<type_t>(vertex.source.outputs[output]);
+                        const double value = [&] {
+                            if constexpr (std::is_same_v<type_t, float>) {
+                                return double(typed);
+                            } else {
+                                return double(typed[axis]);
+                            }
+                        }();
+                        numerator += sample.weights[i] * (vertex.reciprocal_w * value);
+                        minimum = std::min(minimum, value);
+                        maximum = std::max(maximum, value);
+                    }
+                    const double result = numerator / reciprocal;
+                    return float(minimum <= maximum ? std::clamp(result, minimum, maximum) : result);
+                };
+                if constexpr (std::is_same_v<type_t, float>) {
+                    fragment_input = component(0);
+                } else {
+                    type_t result;
+                    std::size_t i = 0;
+                    for (float& value : result) {
+                        value = component(i++);
+                    }
+                    fragment_input = result;
+                }
+            }
+        },
+            first);
+    }
+    return {ndc_z * 0.5 + 0.5, reciprocal};
+}
+
 void test_polygon(std::vector<raster::grid_point_t> points, const mask_t& expected) {
     std::vector<raster::varying_values_t> payloads(points.size());
     raster::raster_workspace_t workspace;
@@ -1196,6 +1276,8 @@ void test_polygon(std::vector<raster::grid_point_t> points, const mask_t& expect
         workspace.vertices.push_back({points[i], double(i % 3) / 4.0, 1.0 / double(1 + i % 3), {raster::vector4f_t({0, 0, 0, 1}), payloads[i]}});
     }
     const auto originals = workspace.vertices;
+    const std::array<interpolated_input_t, 1> inputs {{{0, 0, 1, shader::interpolation_t::perspective}}};
+    prepared_interpolants_t prepared;
     std::vector<std::array<double, 3>> baseline;
     bool facing = false;
     for (bool reversed : {false, true}) {
@@ -1210,9 +1292,9 @@ void test_polygon(std::vector<raster::grid_point_t> points, const mask_t& expect
             require(winding_oracle(workspace.vertices, 8, 8) == expected);
             std::vector<std::array<double, 3>> actual(64);
             std::array<software_shader::value_t, 4> output;
-            const std::array<std::size_t, 4> input_slots {0, 1, 2, 3};
+            prepared.prepare(workspace.vertices, inputs);
             raster::visit_samples(workspace, 8, 8, [&](const raster::sample_t& sample) {
-                const auto dq = raster::interpolate_sample(workspace.vertices, sample, input_slots, output);
+                const auto dq = raster::interpolate_sample(workspace.vertices, sample, inputs, prepared, output);
                 require(0.0 < dq[1]);
                 actual[sample.y * 8 + sample.x] = {dq[0], dq[1], std::get<float>(output[0])};
             });
@@ -1276,12 +1358,19 @@ void test_interpolation() {
         workspace.vertices.push_back({points[i], z[i], q[i], {raster::vector4f_t({0, 0, 0, 1}), payloads[i]}});
     }
     raster::prepare_polygon(workspace);
+    std::array<interpolated_input_t, 4> inputs {{
+        {4, 0, 1, shader::interpolation_t::perspective},
+        {1, 1, 2, shader::interpolation_t::perspective},
+        {3, 3, 3, shader::interpolation_t::perspective},
+        {2, 6, 4, shader::interpolation_t::perspective}
+    }};
+    prepared_interpolants_t prepared;
+    prepared.prepare(workspace.vertices, inputs);
     int hits = 0;
     raster::visit_samples(workspace, 32, 32, [&](const auto& sample) {
         ++hits;
         std::array<software_shader::value_t, 5> output {std::uint32_t(0xfedcba98)};
-        const std::array<std::size_t, 4> input_slots {4, 1, 3, 2};
-        const auto dq = raster::interpolate_sample(workspace.vertices, sample, input_slots, output);
+        const auto dq = raster::interpolate_sample(workspace.vertices, sample, inputs, prepared, output);
         require(std::get<std::uint32_t>(output[0]) == std::uint32_t(0xfedcba98));
         near(dq[0], 0.6);
         near(dq[1], 0.5);
@@ -1298,11 +1387,12 @@ void test_interpolation() {
     workspace.vertices[1].point = {1024, 0};
     workspace.vertices[2].point = {0, 1024};
     raster::prepare_polygon(workspace);
+    for (std::size_t index = 0; index < inputs.size(); ++index) { inputs[index].input_slot = index; }
+    prepared.prepare(workspace.vertices, inputs);
     raster::visit_samples(workspace, 4, 4, [&](const auto& sample) {
         if (sample.x == 0 && sample.y == 0) {
             std::array<software_shader::value_t, 4> output;
-            const std::array<std::size_t, 4> input_slots {0, 1, 2, 3};
-            const auto dq = raster::interpolate_sample(workspace.vertices, sample, input_slots, output);
+            const auto dq = raster::interpolate_sample(workspace.vertices, sample, inputs, prepared, output);
             near(dq[1], 27.0 / 32.0);
             near(dq[0], 11.0 / 32.0);
             near(std::get<float>(output[0]), 4.0 / 27.0);
@@ -1315,13 +1405,171 @@ void test_interpolation() {
         workspace.vertices[i].source.outputs = payloads[i];
         workspace.vertices[i].reciprocal_w = std::numeric_limits<float>::max();
     }
+    const auto scalar_inputs = std::span<const interpolated_input_t>(inputs).first(1);
+    prepared.prepare(workspace.vertices, scalar_inputs);
     raster::visit_samples(workspace, 4, 4, [&](const auto& sample) {
         std::array<software_shader::value_t, 4> output;
-        const std::array<std::size_t, 4> input_slots {0, 1, 2, 3};
-        const auto dq = raster::interpolate_sample(workspace.vertices, sample, input_slots, output);
+        const auto dq = raster::interpolate_sample(workspace.vertices, sample, scalar_inputs, prepared, output);
         require(std::isfinite(float(dq[1])));
         require(std::get<float>(output[0]) == std::numeric_limits<float>::max());
     });
+}
+
+void expect_interpolation_equivalence(std::span<const projected_vertex_t> vertices, const sample_t& sample, std::span<const interpolated_input_t> inputs, const prepared_interpolants_t& prepared) {
+    std::array<software_shader::value_t, 12> expected, actual;
+    std::ranges::fill(expected, std::uint32_t(0xfedcba98));
+    actual = expected;
+    std::vector<std::size_t> slots;
+    for (const auto& input : inputs) { slots.push_back(input.input_slot); }
+    const auto expected_depth_w = reference_interpolate_sample(vertices, sample, slots, expected);
+    const auto actual_depth_w = interpolate_sample(vertices, sample, inputs, prepared, actual);
+    for (std::size_t axis = 0; axis < 2; ++axis) {
+        require(std::bit_cast<std::uint64_t>(actual_depth_w[axis]) == std::bit_cast<std::uint64_t>(expected_depth_w[axis]));
+    }
+    const auto same_bits = [](float actual, float expected) {
+        // Optimization can select different NaN sign/payload bits for the same
+        // expressions. Require NaN classification and exact bits for every other
+        // result, including infinities and signed zero.
+        if (std::isnan(expected)) {
+            require(std::isnan(actual));
+            return;
+        }
+        const auto actual_bits = std::bit_cast<std::uint32_t>(actual);
+        const auto expected_bits = std::bit_cast<std::uint32_t>(expected);
+        if (actual_bits != expected_bits) {
+            throw std::runtime_error(std::format("interpolation bits differ: actual {:08x}, expected {:08x}", actual_bits, expected_bits));
+        }
+    };
+    for (std::size_t slot = 0; slot < expected.size(); ++slot) {
+        require(actual[slot].index() == expected[slot].index());
+        std::visit([&](const auto& typed) {
+            using type_t = std::remove_cvref_t<decltype(typed)>;
+            const auto& result = std::get<type_t>(actual[slot]);
+            if constexpr (std::is_same_v<type_t, float>) {
+                same_bits(result, typed);
+            } else if constexpr (std::is_same_v<type_t, vector2f_t> || std::is_same_v<type_t, shader::vector_t<float, 3>> || std::is_same_v<type_t, vector4f_t>) {
+                std::size_t axis = 0;
+                for (float component : typed) { same_bits(result[axis++], component); }
+            } else if constexpr (std::is_same_v<type_t, std::uint32_t>) {
+                require(result == typed);
+            } else {
+                require(false);
+            }
+        }, expected[slot]);
+    }
+}
+
+void test_prepared_interpolation_equivalence() {
+    const std::array<std::size_t, 8> slots {8, 2, 5, 1, 9, 4, 7, 3};
+    std::vector<interpolated_input_t> inputs;
+    std::size_t offset = 0;
+    for (const auto mode : {shader::interpolation_t::perspective, shader::interpolation_t::noperspective}) {
+        for (std::size_t count = 1; count <= 4; ++count) {
+            inputs.push_back({slots[inputs.size()], offset, count, mode});
+            offset += count;
+        }
+    }
+    const auto wide_inputs = inputs;
+    std::array<varying_values_t, 6> payloads;
+    std::array<projected_vertex_t, 6> vertices;
+    prepared_interpolants_t prepared;
+    std::mt19937 random(20260908);
+    const std::array special {
+        0.0F, -0.0F, std::numeric_limits<float>::denorm_min(),
+        std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(),
+        std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::quiet_NaN(), 0.3F, -0.6F, 1.0F, -1.0F
+    };
+    for (std::size_t iteration = 0; iteration < 192; ++iteration) {
+        inputs = wide_inputs;
+        // Reuse storage across empty, scalar, and mixed layouts.
+        if (iteration % 16 == 14) { inputs.resize(1); }
+        if (iteration % 16 == 15) { inputs.clear(); }
+        for (std::size_t index = 0; index < vertices.size(); ++index) {
+            const float w = std::ldexp(1.0F, int(random() % 251) - 125);
+            payloads[index].clear();
+            for (const auto& input : inputs) {
+                std::array<float, 4> components {};
+                for (std::size_t axis = 0; axis < input.component_count; ++axis) {
+                    auto component = std::bit_cast<float>(std::uint32_t(random()));
+                    if (!std::isfinite(component)) { component = 0.375F; }
+                    components[axis] = iteration < special.size() ? special[(iteration + index + axis) % special.size()] : component;
+                }
+                if (input.interpolation == shader::interpolation_t::noperspective) {
+                    noperspective_t linear {{}, input.component_count};
+                    for (std::size_t axis = 0; axis < input.component_count; ++axis) {
+                        linear.numerators[axis] = double(components[axis]) * double(w);
+                    }
+                    payloads[index].push_back(linear);
+                } else {
+                    switch (input.component_count) {
+                        case 1: { payloads[index].push_back(components[0]); } break;
+                        case 2: { payloads[index].push_back(vector2f_t({components[0], components[1]})); } break;
+                        case 3: { payloads[index].push_back(shader::vector_t<float, 3>({components[0], components[1], components[2]})); } break;
+                        case 4: { payloads[index].push_back(vector4f_t(components)); } break;
+                    }
+                }
+            }
+            vertices[index] = {{0, 0}, double(index) / 4.0 - 0.75, 1.0 / double(w), {vector4f_t({0, 0, 0, w}), payloads[index]}};
+        }
+        prepared.prepare(vertices, inputs);
+        // A strict subset, repeated indices, and zero-weight terms must retain
+        // exactly the reference's accumulation and selected-vertex clamps.
+        for (std::size_t count = 1; count <= 4; ++count) {
+            sample_t sample {0, 0, {1, 3, 4, 1}, {}, count};
+            if (count == 1) { sample.weights = {1, 0, 0, 0}; }
+            if (count == 2) { sample.weights = {1, 0, 0, 0}; }
+            if (count == 3) { sample.weights = {0.5, 0.25, 0.25, 0}; }
+            if (count == 4) { sample.weights = {0, 0.25, 0.75, 0}; }
+            for (std::size_t rotation = 0; rotation < count; ++rotation) {
+                expect_interpolation_equivalence(vertices, sample, inputs, prepared);
+                std::rotate(sample.vertices.begin(), sample.vertices.begin() + 1, sample.vertices.begin() + count);
+                std::rotate(sample.weights.begin(), sample.weights.begin() + 1, sample.weights.begin() + count);
+            }
+        }
+    }
+
+    inputs = wide_inputs;
+    const std::array fixtures {
+        crossing, concave,
+        clip_triangle_fixture_t {{{-2, -2, 0, 1}, {4, -4, 0, 2}, {-8, 8, 0, 4}}},
+        clip_triangle_fixture_t {{{0, 2, 0, -1}, {-1, -1, 0, 1}, {1, -1, 0, 1}}},
+        clip_triangle_fixture_t {{{0, 2, 0, 0}, {-1, -1, 0, 1}, {1, -1, 0, 1}}}
+    };
+    std::size_t hits = 0;
+    for (auto positions : fixtures) {
+        for (std::size_t rotation = 0; rotation < 3; ++rotation) {
+            std::array<pipeline_vertex_view_t, 3> sources;
+            for (std::size_t index = 0; index < sources.size(); ++index) {
+                payloads[index].clear();
+                for (const auto& input : inputs) {
+                    const float component = float(index + input.component_count) * 0.125F;
+                    if (input.interpolation == shader::interpolation_t::noperspective) {
+                        noperspective_t linear {{}, input.component_count};
+                        std::ranges::fill(linear.numerators, double(component) * double(positions[index][3]));
+                        payloads[index].push_back(linear);
+                    } else {
+                        switch (input.component_count) {
+                            case 1: { payloads[index].push_back(component); } break;
+                            case 2: { payloads[index].push_back(vector2f_t(component)); } break;
+                            case 3: { payloads[index].push_back(shader::vector_t<float, 3>(component)); } break;
+                            case 4: { payloads[index].push_back(vector4f_t(component)); } break;
+                        }
+                    }
+                }
+                sources[index] = {vector4f_t(positions[index]), payloads[index]};
+            }
+            raster_workspace_t workspace;
+            prepare_triangle(sources[0], sources[1], sources[2], 32, 32, workspace);
+            prepared.prepare(workspace.vertices, inputs);
+            visit_samples(workspace, 32, 32, [&](const sample_t& sample) {
+                ++hits;
+                expect_interpolation_equivalence(workspace.vertices, sample, inputs, prepared);
+            });
+            std::rotate(positions.begin(), positions.begin() + 1, positions.end());
+        }
+    }
+    require(100 < hits);
 }
 
 void test_plane_coverage() {
@@ -1405,7 +1653,7 @@ void test_plane_coverage() {
                     if (4 <= plane) {
                         std::span<software_shader::value_t> outputs;
                         raster::visit_samples(workspace, 32, 32, [&](const auto& sample) {
-                            const auto dq = raster::interpolate_sample(workspace.vertices, sample, {}, outputs);
+                            const auto dq = raster::interpolate_sample(workspace.vertices, sample, {}, {}, outputs);
                             const double ndc_z = plane == 6 ? double(sample.x - sample.y) / 16.0
                                                             : (plane == 4 ? -1.0 : 1.0) * (double(sample.x) + 0.5) / 16.0;
                             near(dq[0], 0.5 * ndc_z + 0.5);
@@ -1588,6 +1836,7 @@ void run_raster_tests() {
     test_clipped_boundaries();
     test_general_boundaries();
     test_interpolation();
+    test_prepared_interpolation_equivalence();
     test_plane_coverage();
     test_clipping();
     test_integer_bounds();

@@ -131,7 +131,7 @@ private:
 };
 
 std::vector<render_item_t> make_workload(std::string_view name) {
-    const bool varyings = name == "indexed_varyings" || name == "unshared_varyings" || name == "sparse_varyings";
+    const bool varyings = name == "indexed_varyings" || name == "unshared_varyings" || name == "sparse_varyings" || name == "tiny_varyings" || name == "point_varyings";
     shader::vertex_shader_ast_builder_t vertex;
     const auto position = vertex.input<vector4f_t>(0);
     vertex.position(vertex.world_to_clip() * vertex.object_to_world() * position);
@@ -227,10 +227,17 @@ std::vector<render_item_t> make_workload(std::string_view name) {
             }
             grid = std::move(expanded);
         }
+        if (name == "point_varyings") {
+            selected_indices->indices().clear();
+            for (std::uint32_t index = 0; index < (side + 1) * (side + 1); ++index) {
+                selected_indices->indices().push_back(index);
+            }
+        }
         auto selected_geometry = std::make_shared<geometry_t>(selected_indices);
+        if (name == "point_varyings") { selected_geometry->primitive_topology() = vertex_primitive_topology_t::point; }
         selected_geometry->mesh() = std::make_shared<mesh_t>(std::move(grid), std::vector<vertex_attribute_t>{vertex_attribute_t(vertex_attribute_type_t::R32, 4)});
         item.geometry() = selected_geometry;
-        if (name == "tiny_triangles") { item.scale() = {0.0625F, 0.0625F, 1}; }
+        if (name == "tiny_triangles" || name == "tiny_varyings") { item.scale() = {0.0625F, 0.0625F, 1}; }
         if (name == "rejected_triangles") { item.translation()[0] = 4; }
         return {item};
     }
@@ -323,7 +330,7 @@ void benchmark_t::run() const {
     if (program.parent().parent().is_child(output)) { throw std::invalid_argument("benchmark output must be outside the installed binary artifact"); }
     filesystem::create_directories(output);
     json_t results {{"metadata", metadata(program)}, {"workloads", json_t::object()}};
-    for (const std::string workload : {"textured_fill", "depth_overdraw", "many_draws", "clipping", "translucent_linear", "translucent_srgb", "stencil_mask", "two_pass_linear", "two_pass_srgb", "flat_fill", "noperspective_fill", "mipmapped_fill", "mipmapped_two_pass", "constant_fill", "indexed_mesh", "tiny_triangles", "rejected_triangles", "indexed_varyings", "unshared_varyings", "sparse_varyings"}) {
+    for (const std::string workload : {"textured_fill", "depth_overdraw", "many_draws", "clipping", "translucent_linear", "translucent_srgb", "stencil_mask", "two_pass_linear", "two_pass_srgb", "flat_fill", "noperspective_fill", "mipmapped_fill", "mipmapped_two_pass", "constant_fill", "indexed_mesh", "tiny_triangles", "rejected_triangles", "indexed_varyings", "unshared_varyings", "sparse_varyings", "tiny_varyings", "point_varyings"}) {
         auto captured = run_workload(workload);
         const auto& summary = captured.at("summary");
         std::cout << std::format("{}: normal {:.3f} ms, profiled {:.3f} ms, difference {:+.2f}%\n",
@@ -479,7 +486,7 @@ json_t benchmark_t::run_workload(std::string_view workload) const {
 
 json_t benchmark_t::metadata(const filesystem::path_t& program) const {
     return {
-        {"schema_version", 7}, {"workload_version", 6},
+        {"schema_version", 7}, {"workload_version", 7},
         {"size", m_size}, {"warmup_per_run", m_warmup}, {"samples_per_run", m_samples}, {"runs", m_runs},
         {"scope", "frame measurement, full color/depth clears, fixed draw sequence; two-pass workloads also include stencil mask, target selection, output clear and sampled composite; mipmapped_two_pass also regenerates all lower levels; setup, comparison, reporting excluded"},
         {"build", {

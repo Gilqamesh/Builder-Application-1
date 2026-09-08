@@ -174,12 +174,22 @@ void software_renderer_t::draw(
     scratch.interpolated_inputs.clear();
     scratch.flat_inputs.clear();
     const auto fragment_inputs = program.fragment_interface().inputs();
+    std::size_t component_offset = 0;
     for (std::size_t index = 0; index < fragment_inputs.size(); ++index) {
         const auto& input = fragment_inputs[index];
         if (!supported_fragment_input(input)) {
             throw std::invalid_argument(std::format("software_renderer_t::draw cannot interpolate fragment input {} of type {} with {}; requires float scalar/vector interpolation or flat float/int32/uint32 inputs", input.index, input.type, input.interpolation));
         }
-        (input.interpolation == shader::interpolation_t::flat ? scratch.flat_inputs : scratch.interpolated_inputs).push_back(index);
+        if (input.interpolation == shader::interpolation_t::flat) {
+            scratch.flat_inputs.push_back(index);
+        } else {
+            const auto component_count = shader_component_count(input.type);
+            if (std::numeric_limits<std::size_t>::max() - component_offset < component_count) {
+                throw std::length_error("interpolant layout exceeds component index capacity");
+            }
+            scratch.interpolated_inputs.push_back({index, component_offset, component_count, input.interpolation});
+            component_offset += component_count;
+        }
     }
 
     scratch.vertex_inputs.resize(program.vertex_interface().inputs().size());
@@ -265,12 +275,13 @@ void software_renderer_t::draw(
             }
 
             const std::size_t output_offset = scratch.vertex_values.size();
-            for (const auto index : scratch.interpolated_inputs) {
+            for (const auto& interpolated_input : scratch.interpolated_inputs) {
+                const auto index = interpolated_input.input_slot;
                 const auto& input = fragment_inputs[index];
                 auto output = vertex_output(scratch.vertex_outputs[program.fragment_sources()[index]], input);
                 if (input.interpolation == shader::interpolation_t::noperspective) {
                     noperspective_t noperspective;
-                    noperspective.count = shader_component_count(input.type);
+                    noperspective.count = interpolated_input.component_count;
                     std::visit([&](const auto& typed) {
                         using type_t = std::remove_cvref_t<decltype(typed)>;
                         if constexpr (std::is_same_v<type_t, float>) {

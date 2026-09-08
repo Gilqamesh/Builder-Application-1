@@ -99,13 +99,24 @@ per-field maxima in bytes, measured after successful vertex stages; they exclude
 other renderer storage and allocator overhead. Maxima from different draws need
 not occur simultaneously.
 
-Workload version 6 retains the seventeen existing workloads and adds
-`indexed_varyings`, `unshared_varyings`, and `sparse_varyings`. All three render the
+Workload version 7 retains the twenty existing workloads and adds
+`tiny_varyings` and `point_varyings`. The existing `indexed_varyings`,
+`unshared_varyings`, and `sparse_varyings` workloads render the
 same grid with perspective, noperspective, and flat inputs consumed by the fragment
 shader. The unshared mesh expands every index occurrence into a separate vertex.
 The sparse mesh selects 1,089 vertices at the end of a 1,048,576-vertex allocation.
 Compare these workloads to measure reuse, payload storage, and the dense lookup's
 cost when a draw selects a small part of a large mesh.
+
+`tiny_varyings` uses the indexed grid and mixed-varying shader at the same 1/16
+scale as `tiny_triangles`. The latter uses a constant fragment shader, so both
+workloads are needed to distinguish general overhead from varying preparation.
+`point_varyings` submits each of the grid's 1,089 vertices once as a point, using
+the same perspective, noperspective, and flat inputs. Points evaluate interpolants
+once per point; their measurements expose preparation cost without repeated
+sample interpolation to amortize it. Compare first-frame and warmed full-frame
+costs for both new workloads alongside the fills and varying grids.
+
 Metric-node counts must remain stable after the first frame; disabled runs store no nodes.
 Peak RSS is not measured.
 [benchmark.cpp](../benchmark.cpp) defines workloads and timing boundaries. Samples
@@ -164,3 +175,26 @@ Capacity metrics include the lookup, touched indices, result records, interpolat
 payloads, and flat payloads. The dense lookup costs one `std::size_t` per mesh vertex
 at its retained high-water capacity, even for a sparse selection; the benchmark
 makes this memory and first-use cost visible alongside steady-state timing.
+
+## Prepared interpolation
+
+Draw preparation describes each non-flat fragment input's slot, mode, and packed
+component range. Rasterization prepares double numeric components once per
+projected primitive, after triangle culling, and reuses them for sample evaluation.
+The numeric planes retain their capacities in renderer scratch. Their storage is
+excluded from the benchmark's vertex-storage capacity fields.
+
+Perspective components retain both reciprocal-W products and original values for
+sample-specific clamps. Noperspective components retain W-weighted numerators
+through clipping and divide by the final positive W during numeric preparation.
+Original clipped payloads remain available for coverage tie-breaking. Points still
+evaluate once per point. Preparation is included in raster timing, with no new
+per-primitive profiler scopes.
+
+The renderer validation compares raw float components and double depth/reciprocal-W
+results with the scalar evaluator from d489705. Non-NaN results must match bits
+exactly, including infinities and signed zero; NaNs must match classification.
+Optimized evaluation can select different NaN sign/payload bits for unchanged
+expressions. Cases include exceptional numeric values and zero-weight terms. Compare attachment files across builds as well;
+attachment conversion can hide raw interpolation differences. When adding a
+benchmark workload, use the same workload definition for baseline and candidate.
