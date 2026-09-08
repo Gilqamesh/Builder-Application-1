@@ -13,12 +13,6 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 namespace texture = m03gt0l0q3l4b1k27eab5k7py1_texture;
 
-/** @brief Selects RGB storage encoding; alpha is always linear UNORM8. */
-enum class color_encoding_t {
-    linear,
-    srgb
-};
-
 /**
  * @brief Stores four eight-bit RGBA components without prescribing alpha association.
  */
@@ -97,13 +91,13 @@ public:
     /**
      * @brief Changes this view's RGB interpretation without converting or initializing storage.
      *
-     * Rejects invalid encoding before changing the view. Copies retain independent
+     * Accepts rgba8_unorm and rgba8_srgb; other formats fail before changing the view. Copies retain independent
      * encoding; changing an external view does not rebind the renderer's copy.
      * pixels().format() always reflects this interpretation. The owning texture's
      * format is unchanged; callers coordinate explicit reinterpretation with sampling.
      */
-    void encoding(color_encoding_t encoding);
-    color_encoding_t encoding() const;
+    void format(texture::format_t format);
+    texture::format_t format() const;
 
 private:
     texture::pixel_view_t m_pixels;
@@ -116,9 +110,6 @@ private:
 namespace std {
 
 template <>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_encoding_t>;
-
-template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::rgba8_t>;
 
 template <>
@@ -127,33 +118,6 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::framebuffer_t>;
 } // namespace std
 
 namespace std {
-
-template <>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_encoding_t> {
-    constexpr auto parse(std::format_parse_context& ctx) {
-        auto it = ctx.begin();
-        if (it != ctx.end() && *it != '}') {
-            throw std::format_error("invalid color_encoding_t format specifier");
-        }
-        return it;
-    }
-
-    auto format(m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_encoding_t option, auto& ctx) const {
-        auto out = ctx.out();
-        switch (option) {
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_encoding_t::linear: {
-                out = std::format_to(out, "linear");
-            } break;
-            case m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_encoding_t::srgb: {
-                out = std::format_to(out, "srgb");
-            } break;
-            default: {
-                out = std::format_to(out, "invalid({})", std::to_underlying(option));
-            } break;
-        }
-        return out;
-    }
-};
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::rgba8_t> {
@@ -198,7 +162,7 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::framebuffer_t> {
         out = std::format_to(out, ", pixels: {}", framebuffer.pixels());
         out = std::format_to(out, ", depth: {}", framebuffer.depth().size());
         out = std::format_to(out, ", stencil: {}", framebuffer.stencil().size());
-        out = std::format_to(out, ", encoding: {}", framebuffer.encoding());
+        out = std::format_to(out, ", format: {}", framebuffer.format());
         out = std::format_to(out, " }}");
 
         return out;

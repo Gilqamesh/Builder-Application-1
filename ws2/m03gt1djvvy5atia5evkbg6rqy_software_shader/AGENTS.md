@@ -17,3 +17,8 @@ for sequential reuse across programs and stages; simultaneous invocations requir
 independent context and IO. Preserve freshness, result invalidation on failure,
 and warmed allocation guarantees defined in [software_shader.h](software_shader.h).
 [invocation.h](invocation.h) owns binding lifetimes, stage IO, and reset behavior.
+
+Prepared execution resolves uniform snapshots and borrowed resources in program
+reflection order. Its indexed input contract and borrow lifetime are defined by
+`prepared_program_t` in [software_shader.h](software_shader.h). Standalone runs
+retain their location-based validation and borrowing contract.

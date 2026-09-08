@@ -11,3 +11,6 @@ and a reviewed contract before implementation.
 
 Current drawing behavior is defined in [software_renderer.h](../software_renderer.h).
 See [profiling](profiling.md) for the headless measurement command.
+
+Depth convention, point coverage, and snapped-polygon contract changes are tracked
+in [rasterization planning](rasterization-planning.md).

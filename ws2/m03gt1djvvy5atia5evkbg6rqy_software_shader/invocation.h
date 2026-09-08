@@ -5,7 +5,6 @@
 # include "value.h"
 # include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
 
-# include <any>
 # include <cstddef>
 # include <cstdint>
 # include <format>
@@ -49,7 +48,9 @@ public:
     void clear_sampler(std::uint32_t binding);
 
 private:
-    std::unordered_map<std::uint32_t, std::any> m_uniforms;
+    const value_t& uniform_value(std::uint32_t binding) const;
+
+    std::unordered_map<std::uint32_t, value_t> m_uniforms;
     std::unordered_map<std::uint32_t, std::reference_wrapper<const texture::texture_t>> m_textures;
     std::unordered_map<std::uint32_t, std::reference_wrapper<const texture::sampler_t>> m_samplers;
 };
@@ -172,17 +173,12 @@ namespace m03gt1djvvy5atia5evkbg6rqy_software_shader {
 template <shader::shader_value T>
 void bindings_t::uniform(std::uint32_t binding, T uniform) {
     using type = std::remove_cvref_t<T>;
-    m_uniforms.insert_or_assign(binding, std::any(type(std::move(uniform))));
+    m_uniforms.insert_or_assign(binding, value_t(type(std::move(uniform))));
 }
 
 template <shader::shader_value T>
 std::remove_cvref_t<T> bindings_t::uniform(std::uint32_t binding) const {
-    using type = std::remove_cvref_t<T>;
-    const auto iterator = m_uniforms.find(binding);
-    if (iterator == m_uniforms.end()) {
-        throw std::invalid_argument(std::format("software shader uniform binding {} is missing", binding));
-    }
-    const auto* uniform = std::any_cast<type>(&iterator->second);
+    const auto* uniform = std::get_if<std::remove_cvref_t<T>>(&uniform_value(binding));
     if (!uniform) {
         throw std::invalid_argument(std::format("software shader uniform binding {} has the wrong type", binding));
     }

@@ -27,7 +27,7 @@ public:
      *
      * Resources remain mutable after validation. Each draw validates their current state again.
      */
-    void finalize();
+    void validate() const;
 
     std::shared_ptr<mesh_t>& mesh();
     std::shared_ptr<mesh_t> mesh() const;

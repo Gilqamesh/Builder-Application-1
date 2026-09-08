@@ -98,7 +98,7 @@ void renderer_t::draw(
     const auto object_to_world = render_item.object_to_world();
     const auto transform_position = [&](const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 2>& position) {
         const auto world_position = object_to_world * m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 4>{position[0], position[1], 0.0F, 1.0F};
-        return camera.to_view({world_position[0], world_position[1], world_position[2]});
+        return camera.world_to_framebuffer({world_position[0], world_position[1], world_position[2]});
     };
 
     const auto& vertex_streams = mesh->vertex_streams();
@@ -123,7 +123,7 @@ void renderer_t::draw(
         throw std::runtime_error(std::format("renderer_t::draw: does not support entity_mesh with vertex_attributes that are not of type {}", static_cast<int>(expected_vertex_attribute_type)));
     }
 
-    const auto& texture = material->bindings().texture(0);
+    const auto& texture = material->texture(0);
     Image image;
     image.data = const_cast<std::byte*>(texture.bytes().data());
     image.width = texture.width();

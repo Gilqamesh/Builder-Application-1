@@ -108,7 +108,7 @@ std::shared_ptr<software_renderer_api::geometry_t> make_geometry() {
     auto geometry = std::make_shared<software_renderer_api::geometry_t>(std::move(indices));
     geometry->mesh() = std::move(mesh);
     geometry->primitive_topology() = software_renderer_api::vertex_primitive_topology_t::triangle_strip;
-    geometry->finalize();
+    geometry->validate();
     return geometry;
 }
 
@@ -252,7 +252,7 @@ int main() {
                 }
                 software_renderer_api::framebuffer_t replacement(pixels, size[0], size[1]);
                 replacement.depth(depth);
-                replacement.encoding(software_renderer_api::color_encoding_t::srgb);
+                replacement.format(software_renderer_texture::format_t::rgba8_srgb);
                 software_renderer.framebuffer() = replacement;
                 framebuffer = software_renderer.framebuffer();
             }

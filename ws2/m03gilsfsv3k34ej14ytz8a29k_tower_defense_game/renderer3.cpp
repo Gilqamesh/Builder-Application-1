@@ -200,7 +200,7 @@ m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> transform_position(
     const m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4>& object_to_world
 ) {
     const auto world_position = object_to_world * vector_api::vector_t<float, 4>{position[0], position[1], 0.0F, 1.0F};
-    return camera.to_view({world_position[0], world_position[1], world_position[2]});
+    return camera.world_to_framebuffer({world_position[0], world_position[1], world_position[2]});
 }
 
 void require_supported_texture_format(texture_api::format_t format) {
@@ -236,7 +236,7 @@ render_item_data_t validate_render_item(const software_renderer_api::render_item
         throw std::runtime_error("renderer3_t::draw: does not support a render item with no material");
     }
 
-    require_supported_texture_format(material->bindings().texture(0).format());
+    require_supported_texture_format(material->texture(0).format());
 
     const auto& vertex_streams = mesh->vertex_streams();
     if (vertex_streams.size() == 0) {

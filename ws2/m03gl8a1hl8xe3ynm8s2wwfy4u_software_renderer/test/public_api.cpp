@@ -208,7 +208,7 @@ std::shared_ptr<api::geometry_t> make_typed_geometry(
     auto geometry = std::make_shared<api::geometry_t>(make_indices(std::move(indices)));
     geometry->mesh() = std::move(mesh);
     geometry->primitive_topology() = topology;
-    geometry->finalize();
+    geometry->validate();
     return geometry;
 }
 
@@ -303,7 +303,7 @@ void test_resource_model() {
     const auto index_buffer = make_indices({0, 1, 2});
     api::geometry_t geometry(index_buffer);
     geometry.mesh() = mesh;
-    test::expect_no_throw([&] { geometry.finalize(); });
+    test::expect_no_throw([&] { geometry.validate(); });
     test::expect(std::equal_to<>(), geometry.indices().size(), std::size_t(3));
 
     test::expect_throws<std::invalid_argument>([] {
@@ -317,16 +317,16 @@ void test_resource_model() {
     });
 
     api::geometry_t missing_mesh(make_indices({0, 1, 2}));
-    test::expect_throws<std::runtime_error>([&] { missing_mesh.finalize(); });
+    test::expect_throws<std::runtime_error>([&] { missing_mesh.validate(); });
 
     api::geometry_t invalid_index(make_indices({0, 1, 3}));
     invalid_index.mesh() = mesh;
-    test::expect_throws<std::runtime_error>([&] { invalid_index.finalize(); });
+    test::expect_throws<std::runtime_error>([&] { invalid_index.validate(); });
 
     api::geometry_t invalid_line(make_indices({0, 1, 2}));
     invalid_line.mesh() = mesh;
     invalid_line.primitive_topology() = api::vertex_primitive_topology_t::line;
-    test::expect_throws<std::runtime_error>([&] { invalid_line.finalize(); });
+    test::expect_throws<std::runtime_error>([&] { invalid_line.validate(); });
 
     api::geometry_t mutable_range(index_buffer);
     index_buffer->indices().resize(1);
@@ -693,7 +693,7 @@ void test_selected_range_indices_and_pre_raster_validation() {
     );
     geometry->mesh() = std::move(mesh);
     geometry->primitive_topology() = api::vertex_primitive_topology_t::point;
-    geometry->finalize();
+    geometry->validate();
 
     std::vector<api::rgba8_t> pixels(16 * 16, clear_color);
     api::software_renderer_t renderer(api::framebuffer_t(pixels, 16, 16));
@@ -844,6 +844,19 @@ void test_material_resource_mapping() {
     );
 
     const auto program = make_textured_program();
+    auto live_material = make_material(make_unorm_texture(red), make_sampler(), program);
+    const auto& live_bindings = *live_material;
+    const auto saved_texture = &live_bindings.texture(0);
+    auto material_copy = *live_material;
+    live_material->texture(0, make_unorm_texture(green));
+    test::expect(std::identity(), &live_bindings.texture(0) != saved_texture);
+    test::expect(std::identity(), &material_copy.texture(0) == saved_texture);
+    test::expect_throws<std::invalid_argument>([&] { (void)live_material->uniform<float>(12); });
+    live_material->uniform(12, 1.0F);
+    test::expect(std::identity(), live_bindings.uniform<float>(12) == 1.0F);
+    test::expect_throws<std::invalid_argument>([&] { (void)live_material->uniform<std::int32_t>(12); });
+    live_material->uniform(12, 2.0F);
+    test::expect(std::identity(), live_bindings.uniform<float>(12) == 2.0F);
     auto mapped_material = make_material(make_unorm_texture(red), make_sampler(), program);
     mapped_material->texture(0, make_unorm_texture(texture_color));
     mapped_material->texture(7, make_unorm_texture(blue));
@@ -862,12 +875,12 @@ void test_material_resource_mapping() {
 
     distinct_material->texture(0, nullptr);
     test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, distinct, inactive_metric); });
-    test::expect_throws<std::invalid_argument>([&] { (void)distinct_material->bindings().texture(0); });
+    test::expect_throws<std::invalid_argument>([&] { (void)distinct_material->texture(0); });
 
     distinct_material->texture(0, make_unorm_texture(red));
     distinct_material->sampler(0, nullptr);
     test::expect_throws<std::invalid_argument>([&] { renderer.draw(camera, distinct, inactive_metric); });
-    test::expect_throws<std::invalid_argument>([&] { (void)distinct_material->bindings().sampler(0); });
+    test::expect_throws<std::invalid_argument>([&] { (void)distinct_material->sampler(0); });
 
     auto owned_texture = make_unorm_texture(red);
     auto owned_sampler = make_sampler();
@@ -961,7 +974,7 @@ void test_grid_public_pipeline() {
                 }
                 const auto pixels = draw_clip_scene(positions, indices, topology, program);
                 const auto facing_pixels = draw_clip_scene(positions, indices, topology, make_clip_program(true));
-                const bool front = topology == api::vertex_primitive_topology_t::triangle ? !reversed : (topology == api::vertex_primitive_topology_t::triangle_fan && reversed);
+                const bool front = topology == api::vertex_primitive_topology_t::triangle ? !reversed : (topology == api::vertex_primitive_topology_t::triangle_strip || reversed);
                 for (int y = 0; y < 32; ++y) {
                     for (int x = 0; x < 32; ++x) {
                         const bool expected = bounds == clipped || (4 <= x && x <= 28 && 8 <= y && y <= 24);
@@ -1175,7 +1188,7 @@ void test_polygon(std::vector<raster::grid_point_t> points, const mask_t& expect
     std::vector<raster::varying_values_t> payloads(points.size());
     raster::raster_workspace_t workspace;
     for (std::size_t i = 0; i < points.size(); ++i) {
-        payloads[i].emplace_back(7, float(i * i + 1) / 16.0F);
+        payloads[i].emplace_back(float(i * i + 1) / 16.0F);
         workspace.m_vertices.push_back({points[i], double(i % 3) / 4.0, 1.0 / double(1 + i % 3), {raster::vector4f_t({0, 0, 0, 1}), payloads[i]}});
     }
     const auto originals = workspace.m_vertices;
@@ -1196,7 +1209,7 @@ void test_polygon(std::vector<raster::grid_point_t> points, const mask_t& expect
             raster::visit_samples(workspace, 8, 8, [&](const raster::sample_t& sample) {
                 const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, output);
                 require(0.0 < dq[1]);
-                actual[sample.m_y * 8 + sample.m_x] = {dq[0], dq[1], std::get<float>(output[0].second)};
+                actual[sample.m_y * 8 + sample.m_x] = {dq[0], dq[1], std::get<float>(output[0])};
             });
             if (!reversed && rotation == 0) {
                 baseline = actual;
@@ -1254,7 +1267,7 @@ void test_interpolation() {
     std::array<raster::varying_values_t, 4> payloads;
     raster::raster_workspace_t workspace;
     for (std::size_t i = 0; i < points.size(); ++i) {
-        payloads[i] = {{3, float(i)}, {5, raster::vector2f_t({float(i), 7.0F})}, {7, m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>(float(i))}, {9, raster::vector4f_t(float(i))}};
+        payloads[i] = {float(i), raster::vector2f_t({float(i), 7.0F}), m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>(float(i)), raster::vector4f_t(float(i))};
         workspace.m_vertices.push_back({points[i], z[i], q[i], {raster::vector4f_t({0, 0, 0, 1}), payloads[i]}});
     }
     raster::prepare_polygon(workspace);
@@ -1265,11 +1278,11 @@ void test_interpolation() {
         const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, output);
         near(dq[0], 0.6);
         near(dq[1], 0.5);
-        near(std::get<float>(output[0].second), 0.5);
-        near(std::get<raster::vector2f_t>(output[1].second)[0], 0.5);
-        near(std::get<raster::vector2f_t>(output[1].second)[1], 7.0);
-        near(std::get<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>(output[2].second)[2], 0.5);
-        near(std::get<raster::vector4f_t>(output[3].second)[3], 0.5);
+        near(std::get<float>(output[0]), 0.5);
+        near(std::get<raster::vector2f_t>(output[1])[0], 0.5);
+        near(std::get<raster::vector2f_t>(output[1])[1], 7.0);
+        near(std::get<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>(output[2])[2], 0.5);
+        near(std::get<raster::vector4f_t>(output[3])[3], 0.5);
     });
     require(hits == 1);
     // Triangle sample: grid (0,0),(1024,0),(0,1024), lambda=(3/4,1/8,1/8).
@@ -1284,11 +1297,11 @@ void test_interpolation() {
             const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, output);
             near(dq[1], 27.0 / 32.0);
             near(dq[0], 11.0 / 32.0);
-            near(std::get<float>(output[0].second), 4.0 / 27.0);
+            near(std::get<float>(output[0]), 4.0 / 27.0);
         }
     });
     for (auto& payload : payloads) {
-        payload = {{3, std::numeric_limits<float>::max()}};
+        payload = {std::numeric_limits<float>::max()};
     }
     for (std::size_t i = 0; i < workspace.m_vertices.size(); ++i) {
         workspace.m_vertices[i].m_source.m_outputs = payloads[i];
@@ -1298,7 +1311,7 @@ void test_interpolation() {
         raster::varying_values_t output;
         const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, output);
         require(std::isfinite(float(dq[1])));
-        require(std::get<float>(output[0].second) == std::numeric_limits<float>::max());
+        require(std::get<float>(output[0]) == std::numeric_limits<float>::max());
     });
 }
 
@@ -1418,7 +1431,7 @@ void test_plane_coverage() {
 
 void test_clipping() {
     raster::clipping_workspace_t workspace;
-    const raster::varying_values_t from_values {{4, 0.0F}}, to_values {{4, 1.0F}};
+    const raster::varying_values_t from_values {0.0F}, to_values {1.0F};
     for (std::size_t plane = 0; plane < 6; ++plane) {
         auto outside = vertex({0, 0, 0, 1}), inside = outside;
         outside.m_clip_position[plane / 2] = plane % 2 == 0 ? -2.0F : 2.0F;
@@ -1429,7 +1442,7 @@ void test_clipping() {
         auto& line = workspace.m_buffers[*index];
         const auto position = line.m_vertices[0].m_clip_position;
         require(raster::clip_distance(raster::view(line.m_vertices[0], line.m_values), plane) == 0.0);
-        near(std::get<float>(raster::view(line.m_vertices[0], line.m_values).m_outputs[0].second), 0.5);
+        near(std::get<float>(raster::view(line.m_vertices[0], line.m_values).m_outputs[0]), 0.5);
         index = raster::clip_line(inside, outside, workspace);
         require(index.has_value());
         for (std::size_t axis = 0; axis < 4; ++axis) {
@@ -1442,7 +1455,7 @@ void test_clipping() {
         for (const auto& v : workspace.m_buffers[*index].m_vertices) {
             const auto actual = raster::view(v, workspace.m_buffers[*index].m_values);
             require(std::ranges::equal(actual.m_clip_position, on_plane.m_clip_position));
-            near(std::get<float>(actual.m_outputs[0].second), 1.0);
+            near(std::get<float>(actual.m_outputs[0]), 1.0);
         }
     }
     for (float sign : {-1.0F, 1.0F}) {
@@ -1644,9 +1657,9 @@ void test_camera_pose_and_projection() {
         near(clip[3], distance);
         near(clip[2] / clip[3], distance == 1 ? -1 : 1);
     }
-    auto screen = camera.to_view({0, 1, -1});
+    auto screen = camera.world_to_framebuffer({0, 1, -1});
     near(screen[0], 500); near(screen[1], 50); near(screen[2], 0);
-    screen = camera.to_view({2, 0, -1});
+    screen = camera.world_to_framebuffer({2, 0, -1});
     near(screen[0], 900); near(screen[1], 250);
 
     camera.position() = {3, 2, 5};
@@ -1673,7 +1686,7 @@ void test_camera_pose_and_projection() {
     test::expect_throws<std::invalid_argument>([&] { camera.look_at({0, 0, 0}, {-1, -3, -7}, {-1, -3, -7}); });
     test::expect_throws<std::invalid_argument>([&] { camera.rotation(m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>({0, 0, std::numeric_limits<float>::infinity()})); });
     require(camera.world_to_view() == previous);
-    test::expect_throws<std::invalid_argument>([&] { (void)camera.to_view({1, 2, 3}); });
+    test::expect_throws<std::invalid_argument>([&] { (void)camera.world_to_framebuffer({1, 2, 3}); });
     test::expect_throws<std::invalid_argument>([] { (void)api::perspective_t(0, 1, 10); });
     test::expect_throws<std::invalid_argument>([] { (void)api::perspective_t(std::numbers::pi_v<float>, 1, 10); });
     test::expect_throws<std::invalid_argument>([] { (void)api::perspective_t(1, 0, 10); });
@@ -1686,9 +1699,9 @@ void test_camera_pose_and_projection() {
     camera.position() = {0, 0, 0};
     camera.rotation(m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>());
     camera.projection() = api::orthographic_t({{-2, 6}, {-3, 1}}, 0, 10);
-    screen = camera.to_view({-2, 1, 0});
+    screen = camera.world_to_framebuffer({-2, 1, 0});
     near(screen[0], 100); near(screen[1], 50); near(screen[2], 0);
-    screen = camera.to_view({6, -3, -10});
+    screen = camera.world_to_framebuffer({6, -3, -10});
     near(screen[0], 900); near(screen[1], 450); near(screen[2], 1);
     require(!std::format("{}", camera).empty());
     static_assert(std::is_same_v<decltype(camera.rotation()), const m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<float>&>);
@@ -2150,6 +2163,41 @@ void test_depth_visibility_and_fragment_results() {
     }
 }
 
+void test_triangle_strip_matches_list_facing() {
+    using namespace api;
+    const auto program = make_clip_program(true);
+    const auto positions = visibility_quad(-0.5F);
+    for (const auto winding : {winding_t::counter_clockwise, winding_t::clockwise}) {
+        for (const auto cull : {cull_mode_t::none, cull_mode_t::front, cull_mode_t::back, cull_mode_t::both}) {
+            std::vector<rgba8_t> list_pixels(16 * 16), strip_pixels(list_pixels.size());
+            std::vector<std::uint8_t> list_stencil(list_pixels.size()), strip_stencil(list_pixels.size());
+            software_renderer_t list(framebuffer_t(list_pixels, 16, 16)), strip(framebuffer_t(strip_pixels, 16, 16));
+            list.framebuffer().stencil(list_stencil);
+            strip.framebuffer().stencil(strip_stencil);
+            auto list_item = make_visibility_item(positions, {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle, {1, 0, 0, 1}, program);
+            auto strip_item = make_visibility_item(positions, {0, 1, 2, 3}, vertex_primitive_topology_t::triangle_strip, {1, 0, 0, 1}, program);
+            for (auto* item : {&list_item, &strip_item}) {
+                item->material()->front_face(winding);
+                item->material()->cull(cull);
+                item->material()->depth_test(false);
+                item->material()->stencil_test(true);
+                item->material()->stencil_front({.reference = 7, .pass = stencil_op_t::replace});
+                item->material()->stencil_back({.reference = 11, .pass = stencil_op_t::replace});
+            }
+            const auto camera = make_camera(16, 16);
+            list.draw(camera, list_item, inactive_metric);
+            strip.draw(camera, strip_item, inactive_metric);
+            for (std::size_t index = 0; index < list_pixels.size(); ++index) {
+                expect_color(strip_pixels[index], list_pixels[index]);
+            }
+            test::expect(std::identity(), list_stencil == strip_stencil);
+            if (cull == cull_mode_t::none) {
+                require(std::ranges::find(strip_stencil, winding == winding_t::counter_clockwise ? 7 : 11) != strip_stencil.end());
+            }
+        }
+    }
+}
+
 void test_culling_and_topology_depth() {
     const std::array topologies {
         api::vertex_primitive_topology_t::point, api::vertex_primitive_topology_t::line,
@@ -2167,7 +2215,7 @@ void test_culling_and_topology_depth() {
         // These three assembly sequences produce CCW NDC faces under the existing topology contract.
         api::index_buffer_t::indices_t indices {0, 1, 2, 3};
         if (topology == api::vertex_primitive_topology_t::triangle) { indices = {0, 1, 2, 2, 1, 3}; }
-        if (topology == api::vertex_primitive_topology_t::triangle_strip) { indices = {1, 0, 3, 2}; }
+        if (topology == api::vertex_primitive_topology_t::triangle_strip) { indices = {0, 1, 2, 3}; }
         if (topology == api::vertex_primitive_topology_t::triangle_fan) { indices = {0, 1, 3, 2}; }
         auto positions = visibility_quad(-0.5F);
         for (auto& position : positions) { position[0] *= 0.75F; position[1] *= 0.75F; }
@@ -2712,26 +2760,26 @@ void test_blend_equations() {
 void test_color_encoding_and_masks() {
     std::vector<rgba8_t> pixels(256);
     framebuffer_t framebuffer(pixels, 16, 16);
-    require(framebuffer.encoding() == color_encoding_t::linear);
+    require(framebuffer.format() == texture::format_t::rgba8_unorm);
     software_renderer_t renderer(framebuffer);
-    framebuffer.encoding(color_encoding_t::srgb);
-    require(renderer.framebuffer().encoding() == color_encoding_t::linear);
+    framebuffer.format(texture::format_t::rgba8_srgb);
+    require(renderer.framebuffer().format() == texture::format_t::rgba8_unorm);
     renderer.framebuffer() = framebuffer;
-    framebuffer.encoding(color_encoding_t::linear);
-    require(renderer.framebuffer().encoding() == color_encoding_t::srgb);
+    framebuffer.format(texture::format_t::rgba8_unorm);
+    require(renderer.framebuffer().format() == texture::format_t::rgba8_srgb);
     auto& attachment = renderer.framebuffer();
     renderer.clear_color(texture_color, inactive_metric);
-    test::expect_throws<std::invalid_argument>([&] { attachment.encoding(static_cast<color_encoding_t>(99)); });
-    require(attachment.encoding() == color_encoding_t::srgb);
+    test::expect_throws<std::invalid_argument>([&] { attachment.format(static_cast<texture::format_t>(99)); });
+    require(attachment.format() == texture::format_t::rgba8_srgb);
     for (const auto pixel : pixels) { expect_color(pixel, texture_color); }
-    attachment.encoding(color_encoding_t::linear);
+    attachment.format(texture::format_t::rgba8_unorm);
     for (const auto pixel : pixels) { expect_color(pixel, texture_color); }
     auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle, {0.5F, 0.25F, 0.75F, 0.5F});
     auto& material = *item.material();
     material.depth_test(false);
     const auto camera = make_camera(16, 16);
-    for (const auto encoding : {color_encoding_t::linear, color_encoding_t::srgb}) {
-        attachment.encoding(encoding);
+    for (const auto encoding : {texture::format_t::rgba8_unorm, texture::format_t::rgba8_srgb}) {
+        attachment.format(encoding);
         for (bool enabled : {false, true}) {
             configure_source_over(material);
             material.blend(enabled);
@@ -2740,7 +2788,7 @@ void test_color_encoding_and_masks() {
                 renderer.clear_color({64, 128, 192, 64}, inactive_metric);
                 renderer.draw(camera, item, inactive_metric);
                 // Fixed independent transfer-function/equation results, with original alpha.
-                const rgba8_t written = encoding == color_encoding_t::linear
+                const rgba8_t written = encoding == texture::format_t::rgba8_unorm
                     ? (enabled ? rgba8_t{96, 96, 192, 160} : rgba8_t{128, 64, 191, 128})
                     : (enabled ? rgba8_t{143, 133, 209, 160} : rgba8_t{188, 137, 225, 128});
                 const rgba8_t expected {
@@ -2753,7 +2801,7 @@ void test_color_encoding_and_masks() {
     }
     material.color_write(color_mask_t::all);
     material.blend(false);
-    attachment.encoding(color_encoding_t::srgb);
+    attachment.format(texture::format_t::rgba8_srgb);
     material.uniform(0, vector4f_t({0.003F, 0.0031308F, 0.0033F, 0.5F}));
     renderer.draw(camera, item, inactive_metric);
     expect_color(pixels[0], {10, 10, 11, 128});
@@ -2826,7 +2874,7 @@ void test_blend_depth_and_metrics() {
         const auto render = [&](auto& pixels, auto& depths, profiling::metric_t& metric) {
             framebuffer_t framebuffer(pixels, 16, 16);
             framebuffer.depth(depths);
-            framebuffer.encoding(color_encoding_t::srgb);
+            framebuffer.format(texture::format_t::rgba8_srgb);
             software_renderer_t renderer(framebuffer);
             renderer.clear_color({0, 0, 0, 0}, metric);
             renderer.clear_depth(mode == 4 ? 0.0F : 1.0F, metric);
@@ -3188,13 +3236,13 @@ program_ptr_t make_target_program(bool vertex_sampling = false) {
 void test_target_views_and_feedback() {
     auto target = std::make_shared<texture::texture_t>(texture::format_t::rgba8_srgb, 4, 4, byte_stream::byte_stream_t(std::vector<std::byte>(64)));
     framebuffer_t framebuffer(target->view());
-    require(framebuffer.width() == 4 && framebuffer.height() == 4 && framebuffer.encoding() == color_encoding_t::srgb);
+    require(framebuffer.width() == 4 && framebuffer.height() == 4 && framebuffer.format() == texture::format_t::rgba8_srgb);
     require(framebuffer.pixels().bytes().data() == target->bytes().data());
     const auto original = framebuffer;
-    framebuffer.encoding(color_encoding_t::linear);
+    framebuffer.format(texture::format_t::rgba8_unorm);
     require(framebuffer.pixels().format() == texture::format_t::rgba8_unorm);
-    require(target->format() == texture::format_t::rgba8_srgb && original.encoding() == color_encoding_t::srgb);
-    test::expect_throws([&] { framebuffer.encoding(static_cast<color_encoding_t>(99)); });
+    require(target->format() == texture::format_t::rgba8_srgb && original.format() == texture::format_t::rgba8_srgb);
+    test::expect_throws([&] { framebuffer.format(static_cast<texture::format_t>(99)); });
     require(framebuffer.pixels().format() == texture::format_t::rgba8_unorm);
     const auto borrowed = framebuffer.pixels();
     borrowed.bytes()[0] = std::byte{123};
@@ -3260,8 +3308,8 @@ void test_target_views_and_feedback() {
 
 void test_direct_two_pass() {
     const auto camera = make_camera(4, 4);
-    for (const auto encoding : {color_encoding_t::linear, color_encoding_t::srgb}) {
-        const auto format = encoding == color_encoding_t::linear ? texture::format_t::rgba8_unorm : texture::format_t::rgba8_srgb;
+    for (const auto encoding : {texture::format_t::rgba8_unorm, texture::format_t::rgba8_srgb}) {
+        const auto format = encoding == texture::format_t::rgba8_unorm ? texture::format_t::rgba8_unorm : texture::format_t::rgba8_srgb;
         auto target = std::make_shared<texture::texture_t>(format, 4, 4, byte_stream::byte_stream_t(std::vector<std::byte>(64)));
         framebuffer_t offscreen(target->view());
         software_renderer_t renderer(offscreen);
@@ -3276,7 +3324,7 @@ void test_direct_two_pass() {
         postprocess.material()->blend_alpha({blend_factor_t::one, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
         std::vector<rgba8_t> pixels(16);
         framebuffer_t output(pixels, 4, 4);
-        output.encoding(encoding);
+        output.format(encoding);
         std::vector<std::uint8_t> stencil(16);
         offscreen.stencil(stencil);
         // Render and sample again after editing the same allocation; no texture rebinding.
@@ -3304,8 +3352,8 @@ void test_direct_two_pass() {
                 renderer.draw(camera, postprocess, inactive_metric);
                 for (int y = 0; y < 4; ++y) {
                     for (int x = 0; x < 4; ++x) {
-                        const auto channel = std::uint8_t(encoding == color_encoding_t::linear ? 128 : 188);
-                        const auto green_channel = std::uint8_t(encoding == color_encoding_t::linear ? 127 : 187);
+                        const auto channel = std::uint8_t(encoding == texture::format_t::rgba8_unorm ? 128 : 188);
+                        const auto green_channel = std::uint8_t(encoding == texture::format_t::rgba8_unorm ? 127 : 187);
                         expect_color(pixels[pixel_index(x, y, 4)], x < 2 ? rgba8_t{std::uint8_t(blue ? 0 : channel), green_channel, std::uint8_t(blue ? channel : 0), 255} : rgba8_t{0, 255, 0, 255});
                     }
                 }
@@ -3690,6 +3738,7 @@ void run_pipeline_tests() {
     test_depth_attachment_updates();
     test_depth_comparisons_and_controls();
     test_depth_visibility_and_fragment_results();
+    test_triangle_strip_matches_list_facing();
     test_culling_and_topology_depth();
     test_projected_depth_visibility();
     test_bounded_depth_writes();

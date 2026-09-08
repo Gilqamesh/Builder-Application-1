@@ -159,17 +159,25 @@ public:
     template <software_shader::shader::shader_value T>
     void uniform(std::uint32_t location, T value);
 
+    /** @brief Returns the current uniform value; missing bindings and type mismatches fail. */
+    template <software_shader::shader::shader_value T>
+    std::remove_cvref_t<T> uniform(std::uint32_t location) const;
+
     /**
-     * @brief Replaces a texture binding and its shared owner, or clears both when the value is null.
+     * @brief Replaces an owned texture binding, or removes it when the value is null.
      */
     void texture(std::uint32_t location, std::shared_ptr<texture::texture_t> value);
 
+    /** @brief Borrows the current texture until replacement, removal, or destruction; missing bindings fail. */
+    const texture::texture_t& texture(std::uint32_t location) const;
+
     /**
-     * @brief Replaces a sampler binding and its shared owner, or clears both when the value is null.
+     * @brief Replaces an owned sampler binding, or removes it when the value is null.
      */
     void sampler(std::uint32_t location, std::shared_ptr<texture::sampler_t> value);
 
-    const software_shader::bindings_t& bindings() const;
+    /** @brief Borrows the current sampler under texture()'s lifetime and failure rules. */
+    const texture::sampler_t& sampler(std::uint32_t location) const;
 
     /**
      * @brief Enables depth comparison and permits depth writes according to depth_write().
@@ -254,11 +262,12 @@ public:
     color_mask_t color_write() const;
 
 private:
+
     static void validate_stencil_state(const stencil_state_t& stencil_state);
     static void validate_blend_equation(const blend_equation_t& blend_equation);
 
     const std::shared_ptr<const software_shader::program_t> m_program;
-    software_shader::bindings_t m_bindings;
+    std::unordered_map<std::uint32_t, software_shader::value_t> m_uniforms;
     bool m_depth_test = false;
     bool m_depth_write = true;
     comparison_t m_depth_compare = comparison_t::less;
@@ -320,7 +329,16 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 template <software_shader::shader::shader_value T>
 void material_t::uniform(std::uint32_t location, T value) {
-    m_bindings.uniform(location, std::move(value));
+    m_uniforms.insert_or_assign(location, software_shader::value_t(std::move(value)));
+}
+
+template <software_shader::shader::shader_value T>
+std::remove_cvref_t<T> material_t::uniform(std::uint32_t location) const {
+    const auto iterator = m_uniforms.find(location);
+    if (iterator == m_uniforms.end()) { throw std::invalid_argument(std::format("material uniform binding {} is missing", location)); }
+    const auto* uniform = std::get_if<std::remove_cvref_t<T>>(&iterator->second);
+    if (!uniform) { throw std::invalid_argument(std::format("material uniform binding {} has the wrong type", location)); }
+    return *uniform;
 }
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
@@ -653,7 +671,6 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::material_t> {
 
         out = std::format_to(out, "{{ ");
         out = std::format_to(out, "program: {}", *material.program());
-        out = std::format_to(out, ", bindings: {}", material.bindings());
         out = std::format_to(out, ", depth_test: {}", material.depth_test());
         out = std::format_to(out, ", depth_write: {}", material.depth_write());
         out = std::format_to(out, ", depth_compare: {}", material.depth_compare());

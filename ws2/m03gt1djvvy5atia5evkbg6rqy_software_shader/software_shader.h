@@ -4,37 +4,31 @@
 # include "helpers.h"
 # include "invocation.h"
 
+# include <concepts>
 # include <cstddef>
+# include <utility>
+# include <variant>
 # include <cstdint>
 # include <format>
+# include <optional>
+# include <span>
 # include <vector>
 
 namespace m03gt1djvvy5atia5evkbg6rqy_software_shader {
 
-/**
- * @brief Owns reusable storage for sequential shader invocations across stages and programs.
- *
- * Each simultaneous invocation needs independent context and IO. Storage grows when
- * required and retains its capacity. Locals are logically fresh on every run;
- * temporary storage need not be cleared. Failure leaves the context reusable.
- * No program, binding, resource, or IO references are retained after a call.
- */
-class execution_context_t {
-public:
-    execution_context_t();
-
-    std::size_t slot_capacity() const;
-    std::size_t local_capacity() const;
-
-    // Module-local execution entry points for immutable, AST-compiled stages.
-    // A stage/IO mismatch fails with cleared results.
-    void execute(const stage_code_t& code, const bindings_t& bindings, vertex_io_t& io);
-    void execute(const stage_code_t& code, const bindings_t& bindings, fragment_io_t& io);
-
-private:
-    std::vector<value_t> m_slots;
-    std::vector<std::uint8_t> m_local_initialized;
+template <typename T, typename V>
+concept uniform_provider = requires(const T& bindings, std::uint32_t location) {
+    { bindings.template uniform<V>(location) } -> std::same_as<V>;
 };
+
+/** @brief Reads typed uniform values and borrowed resources during preparation. */
+template <typename T>
+concept binding_provider = requires(const T& bindings, std::uint32_t location) {
+    { bindings.texture(location) } -> std::same_as<const texture::texture_t&>;
+    { bindings.sampler(location) } -> std::same_as<const texture::sampler_t&>;
+} && []<std::size_t... I>(std::index_sequence<I...>) {
+    return (uniform_provider<T, std::variant_alternative_t<I, value_t>> && ...);
+}(std::make_index_sequence<std::variant_size_v<value_t>>{});
 
 /**
  * @brief Owns two immutable compiled shader stages and their reflected interfaces.
@@ -45,6 +39,8 @@ private:
  */
 class program_t {
 public:
+    class execution_context_t;
+
     program_t(shader::shader_ast_t vertex, shader::shader_ast_t fragment);
 
     program_t(const program_t&) = delete;
@@ -54,6 +50,8 @@ public:
 
     const shader::shader_interface_t& vertex_interface() const;
     const shader::shader_interface_t& fragment_interface() const;
+    /** @brief Maps each reflected fragment input to its linked vertex output index. */
+    std::span<const std::size_t> fragment_sources() const;
 
     /** @brief Validates reflected bindings in both stages, accepting unused extras. */
     void validate_bindings(const bindings_t& bindings) const;
@@ -94,31 +92,135 @@ public:
 private:
     stage_code_t m_vertex;
     stage_code_t m_fragment;
+    std::vector<std::size_t> m_fragment_sources;
 };
+
+/**
+ * @brief Owns reusable storage for sequential shader invocations across stages and programs.
+ *
+ * Each simultaneous invocation needs independent context and IO. Storage grows when
+ * required and retains its capacity. Locals are logically fresh on every run;
+ * temporary storage need not be cleared. Failure leaves the context reusable.
+ * No program, binding, resource, or IO references are retained after a call.
+ */
+class program_t::execution_context_t {
+public:
+    class prepared_t;
+
+    execution_context_t();
+
+    std::size_t slot_capacity() const;
+    std::size_t local_capacity() const;
+
+    /** @brief Runs the selected program stage with validated location-based IO and current bindings. */
+    void run(const program_t& program, const bindings_t& bindings, vertex_io_t& io);
+    void run(const program_t& program, const bindings_t& bindings, fragment_io_t& io);
+
+private:
+    std::vector<value_t> m_slots;
+    std::vector<std::uint8_t> m_local_initialized;
+};
+
+/**
+ * @brief Resolves immutable program bindings for repeated invocations with indexed IO.
+ *
+ * prepare() copies uniform values and borrows the program, textures and samplers.
+ * Keep these objects alive and unmoved until the next preparation or destruction;
+ * changes to source bindings require preparation again. Texture contents remain live.
+ * The binding provider is borrowed only during prepare(). Preparation reuses
+ * binding capacity; once sufficient, it allocates no binding storage. This excludes
+ * allocations inside provider getters and exception construction.
+ * Copies own independent uniform snapshots and share the same resource borrows.
+ * Copy assignment preserves the previous snapshot on failure.
+ * Moving leaves the source unprepared. Failed preparation leaves this object
+ * unprepared, with retained storage capacity.
+ *
+ * Inputs and numbered outputs follow their stage's reflection order. The caller
+ * supplies every input with its declared type; no location search or full input
+ * validation is performed. Output entries are empty when unwritten. Built-ins and
+ * special results use the supplied IO; its numbered inputs and outputs are unused.
+ * Result invalidation, discard, local freshness and warmed execution-storage rules
+ * are the same as program_t::run(). Each concurrent invocation needs independent
+ * context, IO and output storage. Preparation and execution are not concurrent.
+ */
+class program_t::execution_context_t::prepared_t {
+public:
+    prepared_t();
+    prepared_t(const prepared_t&) = default;
+    prepared_t& operator=(const prepared_t& other);
+    prepared_t(prepared_t&& other) noexcept;
+    prepared_t& operator=(prepared_t&& other) noexcept;
+
+    /** @brief Resolves current bindings, retaining capacity across reset and preparation. */
+    template <binding_provider T>
+    void prepare(const program_t& program, const T& bindings);
+    /** @brief Releases all borrows and retains binding storage for reuse. */
+    void reset();
+    void run(std::span<const value_t> inputs, std::span<std::optional<value_t>> outputs, vertex_io_t& io, execution_context_t& context) const;
+    void run(std::span<const value_t> inputs, std::span<std::optional<value_t>> outputs, fragment_io_t& io, execution_context_t& context) const;
+
+private:
+    template <binding_provider T>
+    static void resolve(const shader::shader_interface_t& interface, const T& bindings, std::vector<binding_value_t>& resolved);
+
+    const program_t* m_program = nullptr;
+    std::vector<binding_value_t> m_vertex_bindings;
+    std::vector<binding_value_t> m_fragment_bindings;
+};
+
+using execution_context_t = program_t::execution_context_t;
+using prepared_program_t = execution_context_t::prepared_t;
 
 } // namespace m03gt1djvvy5atia5evkbg6rqy_software_shader
 
 namespace std {
 
 template <>
-struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::execution_context_t>;
-
-template <>
 struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::program_t>;
+template <>
+struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::program_t::execution_context_t>;
+template <>
+struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::program_t::execution_context_t::prepared_t>;
 
 } // namespace std
 
-namespace std {
+namespace m03gt1djvvy5atia5evkbg6rqy_software_shader {
 
-template <>
-struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::execution_context_t> {
-    constexpr auto parse(std::format_parse_context& context) { return context.begin(); }
-    auto format(const m03gt1djvvy5atia5evkbg6rqy_software_shader::execution_context_t& execution_context, auto& context) const {
-        auto out = context.out();
-        out = std::format_to(out, "slot_capacity={} local_capacity={}", execution_context.slot_capacity(), execution_context.local_capacity());
-        return out;
+template <binding_provider T>
+void program_t::execution_context_t::prepared_t::prepare(const program_t& program, const T& bindings) {
+    reset();
+    try {
+        resolve(program.vertex_interface(), bindings, m_vertex_bindings);
+        resolve(program.fragment_interface(), bindings, m_fragment_bindings);
+        m_program = &program;
+    } catch (...) {
+        reset();
+        throw;
     }
-};
+}
+
+template <binding_provider T>
+void program_t::execution_context_t::prepared_t::resolve(const shader::shader_interface_t& interface, const T& bindings, std::vector<binding_value_t>& resolved) {
+    resolved.clear();
+    resolved.reserve(interface.bindings().size());
+    for (const auto& binding : interface.bindings()) {
+        switch (binding.type.category()) {
+            case shader::shader_data_category_t::texture_2d: { resolved.emplace_back(&bindings.texture(binding.index)); } break;
+            case shader::shader_data_category_t::sampler: { resolved.emplace_back(&bindings.sampler(binding.index)); } break;
+            default: {
+                const auto found = [&]<std::size_t... I>(std::index_sequence<I...>) {
+                    return ((binding.type == shader::shader_data_type<std::variant_alternative_t<I, value_t>>() &&
+                        (resolved.emplace_back(value_t(bindings.template uniform<std::variant_alternative_t<I, value_t>>(binding.index))), true)) || ...);
+                }(std::make_index_sequence<std::variant_size_v<value_t>>{});
+                if (!found) { throw std::logic_error("prepared shader encountered an unsupported uniform type"); }
+            } break;
+        }
+    }
+}
+
+} // namespace m03gt1djvvy5atia5evkbg6rqy_software_shader
+
+namespace std {
 
 template <>
 struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::program_t> {
@@ -142,6 +244,26 @@ struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::program_t> {
     }
 };
 
+
+template <>
+struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::program_t::execution_context_t> {
+    constexpr auto parse(std::format_parse_context& context) { return context.begin(); }
+    auto format(const m03gt1djvvy5atia5evkbg6rqy_software_shader::program_t::execution_context_t& execution_context, auto& context) const {
+        auto out = context.out();
+        out = std::format_to(out, "slot_capacity={} local_capacity={}", execution_context.slot_capacity(), execution_context.local_capacity());
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::program_t::execution_context_t::prepared_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gt1djvvy5atia5evkbg6rqy_software_shader::program_t::execution_context_t::prepared_t&, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "prepared software shader program");
+        return out;
+    }
+};
 
 } // namespace std
 

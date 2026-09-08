@@ -16,6 +16,8 @@ texture storage/sampling to
 
 - [Materials](material.h) own shared draw state and sampled resources;
   [framebuffers](framebuffer.h) borrow attachments. Clearing is explicit.
+  Material getters expose current values and borrowed resources; draw preparation resolves
+  current bindings without retaining resource borrows after the draw.
 - [Render items](render_item.h) own placement; [cameras](camera.h) own pose,
   projection, and destination rectangles. Planar scenes use this same model.
 - Quaternion mathematics belongs to

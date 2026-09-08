@@ -10,8 +10,6 @@
 
 namespace m03gt0l0q3l4b1k27eab5k7py1_texture {
 
-using color_t = m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 4>;
-
 struct linear_taps_t {
     std::size_t first;
     std::size_t second;
@@ -24,7 +22,6 @@ std::uint8_t read_u8(std::span<const std::byte> bytes, std::size_t offset);
 std::uint16_t read_u16(std::span<const std::byte> bytes, std::size_t offset);
 std::uint32_t read_u32(std::span<const std::byte> bytes, std::size_t offset);
 float decode_binary16(std::uint16_t bits);
-float decode_srgb(float encoded);
 color_t decode_texel(const const_pixel_view_t& pixels, std::size_t x, std::size_t y);
 double reduce_coordinate(float coordinate, address_mode_t address_mode);
 std::size_t address_tap(std::size_t tap, std::size_t dimension, address_mode_t address_mode);

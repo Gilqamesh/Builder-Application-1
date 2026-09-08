@@ -22,6 +22,44 @@
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
+void append_vertex(clipping_buffer_t& destination, const pipeline_vertex_view_t& source);
+void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t first, pipeline_vertex_view_t second, std::size_t plane);
+bool between(grid_point_t p, grid_point_t a, grid_point_t b);
+bool opposite(edge_value_t a, edge_value_t b);
+bool intersects(grid_point_t a, grid_point_t b, grid_point_t c, grid_point_t d);
+bool simple_boundary(const raster_workspace_t& workspace);
+bool triangulate(raster_workspace_t& workspace);
+bool crossed_facing(std::span<const projected_vertex_t> vertices);
+int compare_varying(const varying_t& a, const varying_t& b);
+int compare_record(const projected_vertex_t& a, const projected_vertex_t& b);
+bool edge_record_less(const scan_event_t& a, const scan_event_t& b, std::span<const projected_vertex_t> vertices);
+varying_t interpolate(const varying_t& from, const varying_t& to, double factor);
+
+template <texture::format_t Format, bool Replacement, bool Masked>
+void write_color(const color_state_t& state, const vector4f_t& source, std::byte* pixel);
+
+void shade_sample(draw_context_t& draw, std::int64_t x, std::int64_t y, float depth, float reciprocal_w, bool front_facing, std::span<const varying_t> inputs, std::span<const flat_t> flat_inputs);
+
+template <typename T>
+T require_vertex_output(
+    const std::optional<software_shader::value_t>& output,
+    std::uint32_t location
+);
+
+template <typename T>
+T require_vertex_output(
+    const std::optional<software_shader::value_t>& output,
+    std::uint32_t location
+) {
+    if (!output) {
+        throw std::runtime_error(std::format(
+            "vertex shader did not write output location {} required by the fragment shader",
+            location
+        ));
+    }
+    return std::get<T>(*output);
+}
+
 static_assert(std::numeric_limits<float>::is_iec559 && std::numeric_limits<float>::digits == 24);
 static_assert(std::numeric_limits<double>::is_iec559 && std::numeric_limits<double>::digits == 53);
 
@@ -41,6 +79,64 @@ raster_bounds_t::raster_bounds_t(int width, int height, const m03gintxczohr63y44
 
 bool raster_bounds_t::empty() const {
     return m_end_x <= m_first_x || m_end_y <= m_first_y;
+}
+
+template <typename T, std::size_t N>
+software_shader::value_t read_vertex_input(const type_erased_array::type_erased_array_t& stream, std::uint32_t vertex_index) {
+    if constexpr (N == 1) { return stream.read<T>(vertex_index); }
+    else { return shader::vector_t<T, N>(stream.read<std::array<T, N>>(vertex_index)); }
+}
+
+vertex_input_t::vertex_input_t(const type_erased_array::type_erased_array_t& stream, const vertex_attribute_t& attribute, shader::shader_data_type_t type):
+    stream(stream)
+{
+    validate_vertex_attribute(attribute, type);
+    const auto select = [&]<typename T>() {
+        switch (attribute.component_count()) {
+            case 1: return &read_vertex_input<T, 1>;
+            case 2: return &read_vertex_input<T, 2>;
+            case 3: return &read_vertex_input<T, 3>;
+            case 4: return &read_vertex_input<T, 4>;
+            default: throw std::logic_error("unsupported validated vertex component count");
+        }
+    };
+    switch (attribute.type()) {
+        case vertex_attribute_type_t::R32: { read = select.template operator()<float>(); } break;
+        case vertex_attribute_type_t::I32: { read = select.template operator()<std::int32_t>(); } break;
+        case vertex_attribute_type_t::U32: { read = select.template operator()<std::uint32_t>(); } break;
+        default: throw std::logic_error("unsupported validated vertex attribute type");
+    }
+}
+
+color_state_t::color_state_t(const material_t& material, texture::format_t format):
+    rgb(material.blend_color()), alpha(material.blend_alpha()), constant(material.blend_constant()), mask(material.color_write())
+{
+    if (mask == color_mask_t::none) { return; }
+    const auto replaces = [](const blend_equation_t& equation) {
+        return equation.source == blend_factor_t::one && equation.destination == blend_factor_t::zero && equation.operation == blend_op_t::add;
+    };
+    const bool replacement = !material.blend() || (replaces(rgb) && replaces(alpha));
+    const auto select = [&]<texture::format_t Format>() {
+        if (replacement) {
+            return mask == color_mask_t::all ? &write_color<Format, true, false> : &write_color<Format, true, true>;
+        }
+        return mask == color_mask_t::all ? &write_color<Format, false, false> : &write_color<Format, false, true>;
+    };
+    switch (format) {
+        case texture::format_t::rgba8_unorm: { write = select.template operator()<texture::format_t::rgba8_unorm>(); } break;
+        case texture::format_t::rgba8_srgb: { write = select.template operator()<texture::format_t::rgba8_srgb>(); } break;
+        default: throw std::invalid_argument("color preparation requires an RGBA8 attachment");
+    }
+}
+
+draw_context_t::draw_context_t(const material_t& material, const raster_bounds_t& bounds, const framebuffer_t& framebuffer, scratch_t& scratch):
+    material(material), bounds(bounds), framebuffer(framebuffer), scratch(scratch), color(material, framebuffer.format())
+{
+}
+
+draw_context_t::~draw_context_t() {
+    scratch.m_prepared_program.reset();
+    scratch.m_vertex_bindings.clear();
 }
 
 void clear(clipping_buffer_t& buffer) {
@@ -126,12 +222,7 @@ void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t 
         throw std::logic_error("clipping has inconsistent varying counts");
     }
     for (std::size_t i = 0; i < first.m_outputs.size(); ++i) {
-        const auto& [location, from] = first.m_outputs[i];
-        const auto& [other_location, to] = second.m_outputs[i];
-        if (location != other_location || from.index() != to.index()) {
-            throw std::logic_error("clipping has inconsistent varying locations or types");
-        }
-        destination.m_values.emplace_back(location, interpolate(from, to, factor));
+        destination.m_values.push_back(interpolate(first.m_outputs[i], second.m_outputs[i], factor));
     }
     destination.m_vertices.push_back({position, {offset, first.m_outputs.size()}});
 }
@@ -314,10 +405,7 @@ int compare_record(const projected_vertex_t& a, const projected_vertex_t& b) {
     const auto& first = a.m_source.m_outputs;
     const auto& second = b.m_source.m_outputs;
     for (std::size_t i = 0; i < std::min(first.size(), second.size()); ++i) {
-        if (first[i].first != second[i].first) {
-            return first[i].first < second[i].first ? -1 : 1;
-        }
-        const int comparison = compare_varying(first[i].second, second[i].second);
+        const int comparison = compare_varying(first[i], second[i]);
         if (comparison != 0) {
             return comparison;
         }
@@ -339,8 +427,8 @@ bool edge_record_less(const scan_event_t& a, const scan_event_t& b, std::span<co
 
 pipeline_vertex_view_t view(const pipeline_vertex_t& vertex, const varying_values_t& values, const flat_values_t& flat_values) {
     return {vertex.m_clip_position,
-        std::span<const varying_entry_t>(values).subspan(vertex.m_outputs[0], vertex.m_outputs[1]),
-        std::span<const flat_entry_t>(flat_values).subspan(vertex.m_flat_outputs[0], vertex.m_flat_outputs[1])};
+        std::span<const varying_t>(values).subspan(vertex.m_outputs[0], vertex.m_outputs[1]),
+        std::span<const flat_t>(flat_values).subspan(vertex.m_flat_outputs[0], vertex.m_flat_outputs[1])};
 }
 
 double clip_distance(const pipeline_vertex_view_t& vertex, std::size_t plane) {
@@ -608,7 +696,7 @@ std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> ver
     outputs.clear();
     const auto first_outputs = vertices[sample.m_vertices[0]].m_source.m_outputs;
     for (std::size_t output = 0; output < first_outputs.size(); ++output) {
-        const auto& [location, first] = first_outputs[output];
+        const auto& first = first_outputs[output];
         const auto interpolated = std::visit([&](const auto& first_value) -> varying_t {
             using type_t = std::remove_cvref_t<decltype(first_value)>;
             if constexpr (std::is_same_v<type_t, noperspective_t>) {
@@ -617,7 +705,7 @@ std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> ver
                     double result = 0;
                     for (std::size_t i = 0; i < sample.m_count; ++i) {
                         const auto& vertex = vertices[sample.m_vertices[i]];
-                        const auto& payload = std::get<noperspective_t>(vertex.m_source.m_outputs[output].second);
+                        const auto& payload = std::get<noperspective_t>(vertex.m_source.m_outputs[output]);
                         result += sample.m_weights[i] * (payload.numerators[axis] / double(vertex.m_source.m_clip_position[3]));
                     }
                     components[axis] = float(result);
@@ -635,10 +723,7 @@ std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> ver
                     double minimum = std::numeric_limits<double>::infinity(), maximum = -minimum;
                     for (std::size_t i = 0; i < sample.m_count; ++i) {
                         const auto& vertex = vertices[sample.m_vertices[i]];
-                        if (vertex.m_source.m_outputs.size() != first_outputs.size() || vertex.m_source.m_outputs[output].first != location) {
-                            throw std::logic_error("rasterization has inconsistent varying counts or locations");
-                        }
-                        const auto& typed = std::get<type_t>(vertex.m_source.m_outputs[output].second);
+                        const auto& typed = std::get<type_t>(vertex.m_source.m_outputs[output]);
                         const double value = [&] {
                             if constexpr (std::is_same_v<type_t, float>) {
                                 return double(typed);
@@ -666,7 +751,7 @@ std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> ver
             }
         },
             first);
-        outputs.emplace_back(location, interpolated);
+        outputs.push_back(interpolated);
     }
     return {ndc_z * 0.5 + 0.5, reciprocal};
 }
@@ -719,29 +804,6 @@ void validate_vertex_attribute(
     }
 }
 
-void set_vertex_input(
-    software_shader::vertex_io_t& io,
-    const shader::shader_interface_element_t& input,
-    const type_erased_array::type_erased_array_t& stream,
-    const vertex_attribute_t& attribute,
-    std::uint32_t vertex_index
-) {
-    switch (attribute.type()) {
-        case vertex_attribute_type_t::R32: {
-            set_vertex_input_components<float>(io, input.index, stream, vertex_index, attribute.component_count());
-        } break;
-        case vertex_attribute_type_t::I32: {
-            set_vertex_input_components<std::int32_t>(io, input.index, stream, vertex_index, attribute.component_count());
-        } break;
-        case vertex_attribute_type_t::U32: {
-            set_vertex_input_components<std::uint32_t>(io, input.index, stream, vertex_index, attribute.component_count());
-        } break;
-        default: {
-            throw std::logic_error("unsupported validated vertex attribute type");
-        }
-    }
-}
-
 bool supported_fragment_input(const shader::shader_interface_element_t& input) {
     const auto type = input.type;
     const bool integer = type.scalar() == shader::shader_scalar_type_t::signed_integer || type.scalar() == shader::shader_scalar_type_t::unsigned_integer;
@@ -755,37 +817,37 @@ bool supported_fragment_input(const shader::shader_interface_element_t& input) {
 }
 
 varying_t vertex_output(
-    const software_shader::vertex_io_t& io,
+    const std::optional<software_shader::value_t>& output,
     const shader::shader_interface_element_t& input
 ) {
     if (input.type == shader::shader_data_type<float>()) {
-        return require_vertex_output<float>(io, input.index);
+        return require_vertex_output<float>(output, input.index);
     }
     if (input.type == shader::shader_data_type<vector2f_t>()) {
-        return require_vertex_output<vector2f_t>(io, input.index);
+        return require_vertex_output<vector2f_t>(output, input.index);
     }
     if (input.type == shader::shader_data_type<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>()) {
-        return require_vertex_output<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>(io, input.index);
+        return require_vertex_output<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>(output, input.index);
     }
     if (input.type == shader::shader_data_type<vector4f_t>()) {
-        return require_vertex_output<vector4f_t>(io, input.index);
+        return require_vertex_output<vector4f_t>(output, input.index);
     }
     throw std::logic_error("unsupported validated fragment input type");
 }
 
-flat_t flat_output(const software_shader::vertex_io_t& io, const shader::shader_interface_element_t& input) {
-    if (input.type == shader::shader_data_type<float>()) { return require_vertex_output<float>(io, input.index); }
-    if (input.type == shader::shader_data_type<shader::vector_t<float, 2>>()) { return require_vertex_output<shader::vector_t<float, 2>>(io, input.index); }
-    if (input.type == shader::shader_data_type<shader::vector_t<float, 3>>()) { return require_vertex_output<shader::vector_t<float, 3>>(io, input.index); }
-    if (input.type == shader::shader_data_type<shader::vector_t<float, 4>>()) { return require_vertex_output<shader::vector_t<float, 4>>(io, input.index); }
-    if (input.type == shader::shader_data_type<std::int32_t>()) { return require_vertex_output<std::int32_t>(io, input.index); }
-    if (input.type == shader::shader_data_type<shader::vector_t<std::int32_t, 2>>()) { return require_vertex_output<shader::vector_t<std::int32_t, 2>>(io, input.index); }
-    if (input.type == shader::shader_data_type<shader::vector_t<std::int32_t, 3>>()) { return require_vertex_output<shader::vector_t<std::int32_t, 3>>(io, input.index); }
-    if (input.type == shader::shader_data_type<shader::vector_t<std::int32_t, 4>>()) { return require_vertex_output<shader::vector_t<std::int32_t, 4>>(io, input.index); }
-    if (input.type == shader::shader_data_type<std::uint32_t>()) { return require_vertex_output<std::uint32_t>(io, input.index); }
-    if (input.type == shader::shader_data_type<shader::vector_t<std::uint32_t, 2>>()) { return require_vertex_output<shader::vector_t<std::uint32_t, 2>>(io, input.index); }
-    if (input.type == shader::shader_data_type<shader::vector_t<std::uint32_t, 3>>()) { return require_vertex_output<shader::vector_t<std::uint32_t, 3>>(io, input.index); }
-    if (input.type == shader::shader_data_type<shader::vector_t<std::uint32_t, 4>>()) { return require_vertex_output<shader::vector_t<std::uint32_t, 4>>(io, input.index); }
+flat_t flat_output(const std::optional<software_shader::value_t>& output, const shader::shader_interface_element_t& input) {
+    if (input.type == shader::shader_data_type<float>()) { return require_vertex_output<float>(output, input.index); }
+    if (input.type == shader::shader_data_type<shader::vector_t<float, 2>>()) { return require_vertex_output<shader::vector_t<float, 2>>(output, input.index); }
+    if (input.type == shader::shader_data_type<shader::vector_t<float, 3>>()) { return require_vertex_output<shader::vector_t<float, 3>>(output, input.index); }
+    if (input.type == shader::shader_data_type<shader::vector_t<float, 4>>()) { return require_vertex_output<shader::vector_t<float, 4>>(output, input.index); }
+    if (input.type == shader::shader_data_type<std::int32_t>()) { return require_vertex_output<std::int32_t>(output, input.index); }
+    if (input.type == shader::shader_data_type<shader::vector_t<std::int32_t, 2>>()) { return require_vertex_output<shader::vector_t<std::int32_t, 2>>(output, input.index); }
+    if (input.type == shader::shader_data_type<shader::vector_t<std::int32_t, 3>>()) { return require_vertex_output<shader::vector_t<std::int32_t, 3>>(output, input.index); }
+    if (input.type == shader::shader_data_type<shader::vector_t<std::int32_t, 4>>()) { return require_vertex_output<shader::vector_t<std::int32_t, 4>>(output, input.index); }
+    if (input.type == shader::shader_data_type<std::uint32_t>()) { return require_vertex_output<std::uint32_t>(output, input.index); }
+    if (input.type == shader::shader_data_type<shader::vector_t<std::uint32_t, 2>>()) { return require_vertex_output<shader::vector_t<std::uint32_t, 2>>(output, input.index); }
+    if (input.type == shader::shader_data_type<shader::vector_t<std::uint32_t, 3>>()) { return require_vertex_output<shader::vector_t<std::uint32_t, 3>>(output, input.index); }
+    if (input.type == shader::shader_data_type<shader::vector_t<std::uint32_t, 4>>()) { return require_vertex_output<shader::vector_t<std::uint32_t, 4>>(output, input.index); }
     throw std::logic_error("unsupported validated flat input type");
 }
 
@@ -816,51 +878,8 @@ std::optional<screen_vertex_t> project(
     };
 }
 
-void set_fragment_inputs(
-    software_shader::fragment_io_t& io,
-    std::span<const varying_entry_t> inputs
-) {
-    for (const auto& [location, input] : inputs) {
-        std::visit([&](const auto& typed_input) {
-            if constexpr (!std::is_same_v<std::remove_cvref_t<decltype(typed_input)>, noperspective_t>) {
-                io.input(location, typed_input);
-            } else {
-                throw std::logic_error("unresolved noperspective fragment input");
-            }
-        }, input);
-    }
-}
-
 float sanitize_unorm(float component) {
     return std::isnan(component) ? 0.0F : std::clamp(component, 0.0F, 1.0F);
-}
-
-std::uint8_t to_unorm8(float component) {
-    if (std::isnan(component) || component == -std::numeric_limits<float>::infinity()) {
-        return 0;
-    }
-    if (component == std::numeric_limits<float>::infinity()) {
-        return 255;
-    }
-    const float clamped = std::clamp(component, 0.0F, 1.0F);
-    return static_cast<std::uint8_t>(std::floor(clamped * 255.0F + 0.5F));
-}
-
-rgba8_t to_rgba8(const vector4f_t& color) {
-    return {
-        .red = to_unorm8(color[0]),
-        .green = to_unorm8(color[1]),
-        .blue = to_unorm8(color[2]),
-        .alpha = to_unorm8(color[3])
-    };
-}
-
-float decode_srgb(float component) {
-    return component <= 0.04045F ? component / 12.92F : std::pow((component + 0.055F) / 1.055F, 2.4F);
-}
-
-float encode_srgb(float component) {
-    return component <= 0.0031308F ? component * 12.92F : 1.055F * std::pow(component, 1.0F / 2.4F) - 0.055F;
 }
 
 float blend_factor_component(blend_factor_t factor, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component) {
@@ -904,19 +923,10 @@ float blend_component(const blend_equation_t& blend_equation, const vector4f_t& 
     }
 }
 
-void write_color(const material_t& material, color_encoding_t encoding, const vector4f_t& source, std::byte* pixel) {
-    const auto color_mask = material.color_write();
-    if (color_mask == color_mask_t::none) {
-        return;
-    }
-    const auto replaces = [](const blend_equation_t& equation) {
-        return equation.source == blend_factor_t::one && equation.destination == blend_factor_t::zero && equation.operation == blend_op_t::add;
-    };
-    const bool replacement = !material.blend() || (replaces(material.blend_color()) && replaces(material.blend_alpha()));
-    if (replacement && encoding == color_encoding_t::linear && color_mask == color_mask_t::all) {
-        const auto stored = to_rgba8(source);
-        pixel[0] = std::byte(stored.red); pixel[1] = std::byte(stored.green);
-        pixel[2] = std::byte(stored.blue); pixel[3] = std::byte(stored.alpha);
+template <texture::format_t Format, bool Replacement, bool Masked>
+void write_color(const color_state_t& state, const vector4f_t& source, std::byte* pixel) {
+    if constexpr (Replacement && !Masked) {
+        texture::encode_rgba8<Format>(source, std::span<std::byte, 4>(pixel, 4));
         return;
     }
     const vector4f_t sanitized_source {
@@ -924,36 +934,23 @@ void write_color(const material_t& material, color_encoding_t encoding, const ve
         sanitize_unorm(source[2]), sanitize_unorm(source[3])
     };
     vector4f_t result = sanitized_source;
-    if (!replacement) {
-        vector4f_t destination {std::to_integer<unsigned>(pixel[0]) / 255.0F, std::to_integer<unsigned>(pixel[1]) / 255.0F, std::to_integer<unsigned>(pixel[2]) / 255.0F, std::to_integer<unsigned>(pixel[3]) / 255.0F};
-        if (encoding == color_encoding_t::srgb) {
-            for (std::size_t component = 0; component < 3; ++component) {
-                destination[component] = decode_srgb(destination[component]);
-            }
-        }
-        const auto color_equation = material.blend_color();
-        const auto alpha_equation = material.blend_alpha();
-        const auto& constant = material.blend_constant();
-        // Both equations read the original inputs, before any channel is stored.
+    if constexpr (!Replacement) {
+        const auto destination = texture::decode_rgba8<Format>(std::span<const std::byte, 4>(pixel, 4));
+        // Both equations use the original destination before any channel is stored.
         for (std::size_t component = 0; component < 4; ++component) {
-            result[component] = sanitize_unorm(blend_component(component == 3 ? alpha_equation : color_equation, sanitized_source, destination, constant, component));
+            result[component] = sanitize_unorm(blend_component(component == 3 ? state.alpha : state.rgb, sanitized_source, destination, state.constant, component));
         }
     }
-    if (encoding == color_encoding_t::srgb) {
-        for (std::size_t component = 0; component < 3; ++component) {
-            result[component] = encode_srgb(result[component]);
-        }
-    }
-    const auto stored = to_rgba8(result);
-    if (color_mask == color_mask_t::all) {
-        pixel[0] = std::byte(stored.red); pixel[1] = std::byte(stored.green);
-        pixel[2] = std::byte(stored.blue); pixel[3] = std::byte(stored.alpha);
+    if constexpr (!Masked) {
+        texture::encode_rgba8<Format>(result, std::span<std::byte, 4>(pixel, 4));
     } else {
-        // Masking affects storage only; disabled bytes never round-trip through float.
-        if ((color_mask & color_mask_t::red) != color_mask_t::none) { pixel[0] = std::byte(stored.red); }
-        if ((color_mask & color_mask_t::green) != color_mask_t::none) { pixel[1] = std::byte(stored.green); }
-        if ((color_mask & color_mask_t::blue) != color_mask_t::none) { pixel[2] = std::byte(stored.blue); }
-        if ((color_mask & color_mask_t::alpha) != color_mask_t::none) { pixel[3] = std::byte(stored.alpha); }
+        std::array<std::byte, 4> stored;
+        texture::encode_rgba8<Format>(result, stored);
+        // Disabled bytes never round-trip through float.
+        if ((state.mask & color_mask_t::red) != color_mask_t::none) { pixel[0] = stored[0]; }
+        if ((state.mask & color_mask_t::green) != color_mask_t::none) { pixel[1] = stored[1]; }
+        if ((state.mask & color_mask_t::blue) != color_mask_t::none) { pixel[2] = stored[2]; }
+        if ((state.mask & color_mask_t::alpha) != color_mask_t::none) { pixel[3] = stored[3]; }
     }
 }
 
@@ -1029,7 +1026,7 @@ void validate_feedback(const material_t& material, const framebuffer_t& framebuf
             if (binding.type.category() != software_shader::shader::shader_data_category_t::texture_2d) {
                 continue;
             }
-            const auto& texture = material.bindings().texture(binding.index);
+            const auto& texture = material.texture(binding.index);
             for (std::size_t level = 0; level < texture.level_count(); ++level) {
                 const auto sampled = texture.view(level).bytes();
                 if (storage_overlaps(sampled, framebuffer.pixels().bytes()) ||
@@ -1042,21 +1039,14 @@ void validate_feedback(const material_t& material, const framebuffer_t& framebuf
     }
 }
 
-void shade_sample(
-    const material_t& material,
-    const raster_bounds_t& bounds,
-    const framebuffer_t& framebuffer,
-    std::int64_t x,
-    std::int64_t y,
-    float depth,
-    float reciprocal_w,
-    bool front_facing,
-    std::span<const varying_entry_t> inputs,
-    software_shader::fragment_io_t& io,
-    software_shader::execution_context_t& execution_context,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric,
-    std::span<const flat_entry_t> flat_inputs
-) {
+void shade_sample(draw_context_t& draw, std::int64_t x, std::int64_t y, float depth, float reciprocal_w, bool front_facing, std::span<const varying_t> inputs, std::span<const flat_t> flat_inputs) {
+    const auto& material = draw.material;
+    const auto& bounds = draw.bounds;
+    const auto& framebuffer = draw.framebuffer;
+    auto& scratch = draw.scratch;
+    auto& io = scratch.m_fragment_io;
+    auto& metric = *draw.metric;
+
     if (x < bounds.m_first_x || y < bounds.m_first_y || bounds.m_end_x <= x || bounds.m_end_y <= y) {
         return;
     }
@@ -1071,14 +1061,22 @@ void shade_sample(
             reciprocal_w}),
         front_facing
     );
-    set_fragment_inputs(io, inputs);
-    for (const auto& [location, input] : flat_inputs) {
-        std::visit([&](const auto& typed) { io.input(location, typed); }, input);
+    for (std::size_t i = 0; i < inputs.size(); ++i) {
+        std::visit([&](const auto& input) {
+            if constexpr (!std::is_same_v<std::remove_cvref_t<decltype(input)>, noperspective_t>) {
+                scratch.m_fragment_values[scratch.m_interpolated_inputs[i]] = input;
+            } else {
+                throw std::logic_error("unresolved noperspective fragment input");
+            }
+        }, inputs[i]);
+    }
+    for (std::size_t i = 0; i < flat_inputs.size(); ++i) {
+        std::visit([&](const auto& input) { scratch.m_fragment_values[scratch.m_flat_inputs[i]] = input; }, flat_inputs[i]);
     }
     metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
         ++metric.m_invocations;
     });
-    material.program()->run(material.bindings(), io, execution_context);
+    scratch.m_prepared_program.run(scratch.m_fragment_values, scratch.m_fragment_outputs, io, scratch.m_execution_context);
     if (io.discarded()) {
         metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
             ++metric.m_discards;
@@ -1113,24 +1111,18 @@ void shade_sample(
         framebuffer.depth()[index] = depth;
         metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept { ++metric.m_depth_writes; });
     }
-    if (const auto color = io.color(); color && material.color_write() != color_mask_t::none) {
-        write_color(material, framebuffer.encoding(), *color, framebuffer.pixels().bytes().data() + index * 4);
+    if (const auto color = io.color(); color && draw.color.write) {
+        draw.color.write(draw.color, *color, framebuffer.pixels().bytes().data() + index * 4);
         metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
             ++metric.m_color_writes;
         });
     }
 }
 
-void rasterize_point(
-    const material_t& material,
-    const raster_bounds_t& bounds,
-    const framebuffer_t& framebuffer,
-    const pipeline_vertex_view_t& vertex,
-    varying_values_t& fragment_inputs,
-    software_shader::fragment_io_t& fragment_io,
-    software_shader::execution_context_t& execution_context,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
-) {
+void rasterize_point(draw_context_t& draw, const pipeline_vertex_view_t& vertex) {
+    const auto& bounds = draw.bounds;
+    auto& fragment_inputs = draw.scratch.m_fragment_inputs;
+
     if (!inside_clip_volume(vertex)) {
         return;
     }
@@ -1151,19 +1143,13 @@ void rasterize_point(
             const auto dx = x - center_x;
             const auto dy = y - center_y;
             if (dx * dx + dy * dy <= radius_squared) {
-                shade_sample(
-                    material,
-                    bounds,
-                    framebuffer,
+                shade_sample(draw,
                     x,
                     y,
                     depth,
                     screen->m_reciprocal_w,
                     true,
                     fragment_inputs,
-                    fragment_io,
-                    execution_context,
-                    metric,
                     vertex.m_flat_outputs
                 );
             }
@@ -1171,18 +1157,12 @@ void rasterize_point(
     }
 }
 
-void rasterize_line(
-    const material_t& material,
-    const raster_bounds_t& bounds,
-    const framebuffer_t& framebuffer,
-    const pipeline_vertex_view_t& first,
-    const pipeline_vertex_view_t& second,
-    clipping_workspace_t& clipping,
-    varying_values_t& fragment_inputs,
-    software_shader::fragment_io_t& fragment_io,
-    software_shader::execution_context_t& execution_context,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
-) {
+void rasterize_line(draw_context_t& draw, const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second) {
+    const auto& material = draw.material;
+    const auto& bounds = draw.bounds;
+    auto& clipping = draw.scratch.m_clipping;
+    auto& fragment_inputs = draw.scratch.m_fragment_inputs;
+
     const auto flat_inputs = material.provoking_vertex() == provoking_vertex_t::first ? first.m_flat_outputs : second.m_flat_outputs;
     const auto clipped_index = clip_line(first, second, clipping);
     if (!clipped_index) {
@@ -1230,24 +1210,16 @@ void rasterize_line(
         }
         const sample_t sample {x, y, {0, 1, 0, 0}, {1.0 - factor, factor, 0.0, 0.0}, 2};
         const auto depth_w = interpolate_sample(endpoints, sample, fragment_inputs);
-        shade_sample(material, bounds, framebuffer, x, y, float(depth_w[0]), float(depth_w[1]), true, fragment_inputs, fragment_io, execution_context, metric, flat_inputs);
+        shade_sample(draw, x, y, float(depth_w[0]), float(depth_w[1]), true, fragment_inputs, flat_inputs);
     }
 }
 
-void rasterize_triangle(
-    const material_t& material,
-    const raster_bounds_t& bounds,
-    const framebuffer_t& framebuffer,
-    const pipeline_vertex_view_t& first,
-    const pipeline_vertex_view_t& second,
-    const pipeline_vertex_view_t& third,
-    raster_workspace_t& workspace,
-    varying_values_t& fragment_inputs,
-    software_shader::fragment_io_t& fragment_io,
-    software_shader::execution_context_t& execution_context,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric,
-    std::span<const flat_entry_t> flat_inputs
-) {
+void rasterize_triangle(draw_context_t& draw, const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, std::span<const flat_t> flat_inputs) {
+    const auto& material = draw.material;
+    const auto& bounds = draw.bounds;
+    auto& workspace = draw.scratch.m_raster;
+    auto& fragment_inputs = draw.scratch.m_fragment_inputs;
+
     prepare_triangle(first, second, third, bounds.m_view_width, bounds.m_view_height, workspace);
     if (workspace.m_empty) {
         return;
@@ -1261,19 +1233,13 @@ void rasterize_triangle(
     }
     visit_samples(workspace, bounds.m_end_x, bounds.m_end_y, [&](const sample_t& sample) {
         const auto depth_w = interpolate_sample(workspace.m_vertices, sample, fragment_inputs);
-        shade_sample(
-            material,
-            bounds,
-            framebuffer,
+        shade_sample(draw,
             sample.m_x,
             sample.m_y,
             float(depth_w[0]),
             float(depth_w[1]),
             front_facing,
             fragment_inputs,
-            fragment_io,
-            execution_context,
-            metric,
             flat_inputs
         );
     }, bounds.m_first_x, bounds.m_first_y);

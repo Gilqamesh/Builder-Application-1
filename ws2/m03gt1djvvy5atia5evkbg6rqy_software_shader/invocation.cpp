@@ -40,6 +40,14 @@ void bindings_t::clear_sampler(std::uint32_t binding) {
     m_samplers.erase(binding);
 }
 
+const value_t& bindings_t::uniform_value(std::uint32_t binding) const {
+    const auto iterator = m_uniforms.find(binding);
+    if (iterator == m_uniforms.end()) {
+        throw std::invalid_argument(std::format("software shader uniform binding {} is missing", binding));
+    }
+    return iterator->second;
+}
+
 vertex_io_t::vertex_io_t(std::int32_t vertex_index, std::int32_t instance_index):
     m_vertex_index(vertex_index),
     m_instance_index(instance_index),

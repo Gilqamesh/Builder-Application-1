@@ -99,7 +99,7 @@ std::vector<render_item_t> make_workload(std::string_view name) {
     material->sampler(0, std::make_shared<texture::sampler_t>(texture::filter_t::linear, texture::address_mode_t::clamp_to_edge, texture::address_mode_t::clamp_to_edge));
     if (name == "mipmapped_fill") {
         // Static source generation belongs to setup; this workload measures sampling.
-        auto target = std::make_shared<texture::texture_t>(material->bindings().texture(0));
+        auto target = std::make_shared<texture::texture_t>(material->texture(0));
         target->generate_mipmaps();
         material->texture(0, target);
         material->sampler(0, std::make_shared<texture::sampler_t>(texture::sampler_description_t {texture::filter_t::linear, texture::filter_t::linear, texture::filter_t::linear}));
@@ -253,8 +253,8 @@ json_t benchmark_t::run_workload(std::string_view workload) const {
     framebuffer_t normal_buffer(normal_pixels, m_size, m_size), measured_buffer(measured_pixels, m_size, m_size);
     normal_buffer.depth(normal_depth); measured_buffer.depth(measured_depth);
     if (workload == "translucent_srgb" || workload == "two_pass_srgb") {
-        normal_buffer.encoding(color_encoding_t::srgb);
-        measured_buffer.encoding(color_encoding_t::srgb);
+        normal_buffer.format(texture::format_t::rgba8_srgb);
+        measured_buffer.format(texture::format_t::rgba8_srgb);
     }
     const bool mipmaps = workload == "mipmapped_two_pass";
     const bool two_pass = workload == "two_pass_linear" || workload == "two_pass_srgb" || mipmaps;

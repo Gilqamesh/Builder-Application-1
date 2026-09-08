@@ -141,7 +141,7 @@ void software_renderer_t::draw(
     if (!geometry) {
         throw std::invalid_argument("software_renderer_t::draw requires geometry");
     }
-    geometry->finalize();
+    geometry->validate();
     const auto material = render_item.material();
     if (!material) {
         throw std::invalid_argument("software_renderer_t::draw requires a material");
@@ -153,32 +153,38 @@ void software_renderer_t::draw(
         throw std::invalid_argument("software_renderer_t::draw requires a stencil attachment when stencil testing is enabled");
     }
     const auto& program = *material->program();
-    const auto& bindings = material->bindings();
-    program.validate_bindings(bindings);
+    auto& scratch = m_scratch;
+    draw_context_t draw(*material, bounds, m_framebuffer, scratch);
+    scratch.m_prepared_program.prepare(program, *material);
     validate_feedback(*material, m_framebuffer);
 
     const auto object_to_world = render_item.object_to_world();
     const auto world_to_clip = camera.world_to_clip();
-    const auto& framebuffer = m_framebuffer;
     const auto mesh = geometry->mesh();
     const auto& streams = mesh->vertex_streams();
     const auto attributes = mesh->vertex_attributes();
+    scratch.m_vertex_bindings.clear();
     for (const auto& input : program.vertex_interface().inputs()) {
         if (streams.size() <= input.index) {
             throw std::invalid_argument("shader vertex input location has no corresponding mesh stream");
         }
-        validate_vertex_attribute(attributes[input.index], input.type);
+        scratch.m_vertex_bindings.emplace_back(streams[input.index], attributes[input.index], input.type);
     }
-    auto& scratch = m_scratch;
     scratch.m_interpolated_inputs.clear();
     scratch.m_flat_inputs.clear();
-    for (const auto& input : program.fragment_interface().inputs()) {
+    const auto fragment_inputs = program.fragment_interface().inputs();
+    for (std::size_t index = 0; index < fragment_inputs.size(); ++index) {
+        const auto& input = fragment_inputs[index];
         if (!supported_fragment_input(input)) {
             throw std::invalid_argument("software renderer requires float scalar/vector interpolation or flat float/int32/uint32 inputs");
         }
-        (input.interpolation == shader::interpolation_t::flat ? scratch.m_flat_inputs : scratch.m_interpolated_inputs).push_back(input);
+        (input.interpolation == shader::interpolation_t::flat ? scratch.m_flat_inputs : scratch.m_interpolated_inputs).push_back(index);
     }
 
+    scratch.m_vertex_inputs.resize(program.vertex_interface().inputs().size());
+    scratch.m_vertex_outputs.resize(program.vertex_interface().outputs().size());
+    scratch.m_fragment_values.resize(fragment_inputs.size());
+    scratch.m_fragment_outputs.resize(program.fragment_interface().outputs().size());
     preparation_metric.stop();
     const auto indices = geometry->indices();
     auto vertex_metric = draw_metric.metric<vertex_metrics_t>();
@@ -199,21 +205,23 @@ void software_renderer_t::draw(
 
         auto& io = scratch.m_vertex_io;
         io.reset(static_cast<std::int32_t>(vertex_index), 0);
-        for (const auto& input : program.vertex_interface().inputs()) {
-            set_vertex_input(io, input, streams[input.index], attributes[input.index], vertex_index);
+        for (std::size_t index = 0; index < scratch.m_vertex_bindings.size(); ++index) {
+            const auto& input = scratch.m_vertex_bindings[index];
+            scratch.m_vertex_inputs[index] = input.read(input.stream, vertex_index);
         }
         vertex_metric.update<vertex_metrics_t>([](vertex_metrics_t& metric) noexcept {
             ++metric.m_invocations;
         });
-        program.run(bindings, io, scratch.m_execution_context);
+        scratch.m_prepared_program.run(scratch.m_vertex_inputs, scratch.m_vertex_outputs, io, scratch.m_execution_context);
         const vector4f_t clip_position = io.position();
         if (!finite(clip_position)) {
             throw std::runtime_error("vertex shader produced a non-finite clip position");
         }
 
         const std::size_t output_offset = scratch.m_vertex_values.size();
-        for (const auto& input : scratch.m_interpolated_inputs) {
-            auto output = vertex_output(io, input);
+        for (const auto index : scratch.m_interpolated_inputs) {
+            const auto& input = fragment_inputs[index];
+            auto output = vertex_output(scratch.m_vertex_outputs[program.fragment_sources()[index]], input);
             if (input.interpolation == shader::interpolation_t::noperspective) {
                 noperspective_t noperspective;
                 noperspective.count = shader_component_count(input.type);
@@ -229,11 +237,11 @@ void software_renderer_t::draw(
                 }, output);
                 output = noperspective;
             }
-            scratch.m_vertex_values.emplace_back(input.index, output);
+            scratch.m_vertex_values.push_back(output);
         }
         const auto flat_offset = scratch.m_flat_values.size();
-        for (const auto& input : scratch.m_flat_inputs) {
-            scratch.m_flat_values.emplace_back(input.index, flat_output(io, input));
+        for (const auto index : scratch.m_flat_inputs) {
+            scratch.m_flat_values.push_back(flat_output(scratch.m_vertex_outputs[program.fragment_sources()[index]], fragment_inputs[index]));
         }
         scratch.m_vertex_results.push_back({
             .m_clip_position = clip_position,
@@ -244,52 +252,20 @@ void software_renderer_t::draw(
 
     vertex_metric.stop();
     auto raster_metric = draw_metric.metric<raster_metrics_t>();
+    draw.metric = &raster_metric;
     const auto vertex = [&](std::size_t index) {
         return view(scratch.m_vertex_results[index], scratch.m_vertex_values, scratch.m_flat_values);
     };
     const auto submit_line = [&](std::size_t first, std::size_t second) {
-        rasterize_line(
-            *material,
-            bounds,
-            framebuffer,
-            vertex(first),
-            vertex(second),
-            scratch.m_clipping,
-            scratch.m_fragment_inputs,
-            scratch.m_fragment_io,
-            scratch.m_execution_context,
-            raster_metric
-        );
+        rasterize_line(draw, vertex(first), vertex(second));
     };
     const auto submit_triangle = [&](std::size_t first, std::size_t second, std::size_t third, std::size_t provoking) {
-        rasterize_triangle(
-            *material,
-            bounds,
-            framebuffer,
-            vertex(first),
-            vertex(second),
-            vertex(third),
-            scratch.m_raster,
-            scratch.m_fragment_inputs,
-            scratch.m_fragment_io,
-            scratch.m_execution_context,
-            raster_metric,
-            vertex(provoking).m_flat_outputs
-        );
+        rasterize_triangle(draw, vertex(first), vertex(second), vertex(third), vertex(provoking).m_flat_outputs);
     };
     switch (geometry->primitive_topology()) {
         case vertex_primitive_topology_t::point: {
             for (std::size_t index = 0; index < indices.size(); ++index) {
-                rasterize_point(
-                    *material,
-                    bounds,
-                    framebuffer,
-                    vertex(index),
-                    scratch.m_fragment_inputs,
-                    scratch.m_fragment_io,
-                    scratch.m_execution_context,
-                    raster_metric
-                );
+                rasterize_point(draw, vertex(index));
             }
         } break;
         case vertex_primitive_topology_t::line: {
@@ -316,7 +292,7 @@ void software_renderer_t::draw(
         case vertex_primitive_topology_t::triangle_strip: {
             for (std::size_t index = 0; index + 2 < indices.size(); ++index) {
                 const auto provoking = material->provoking_vertex() == provoking_vertex_t::first ? index : index + 2;
-                if (index % 2 == 0) {
+                if (index % 2 != 0) {
                     submit_triangle(index + 1, index, index + 2, provoking);
                 } else {
                     submit_triangle(index, index + 1, index + 2, provoking);

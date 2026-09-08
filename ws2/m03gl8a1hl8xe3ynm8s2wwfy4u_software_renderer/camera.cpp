@@ -188,9 +188,9 @@ m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<float, 4, 4> camera_t::world_to_clip
     return result;
 }
 
-m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> camera_t::to_view(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& world_position) const {
+m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> camera_t::world_to_framebuffer(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& world_position) const {
     if (!std::ranges::all_of(world_position, [](float component) { return std::isfinite(component); })) {
-        throw std::invalid_argument("camera_t::to_view requires a finite world position");
+        throw std::invalid_argument("camera_t::world_to_framebuffer requires a finite world position");
     }
     const auto matrix = world_to_clip();
     const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 4> point {world_position[0], world_position[1], world_position[2], 1};
@@ -199,7 +199,7 @@ m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> camera_t::to_view(const m0
         for (std::size_t column = 0; column < 4; ++column) { clip[row] += double(matrix(row, column)) * point[column]; }
     }
     if (!(0 < clip[3])) {
-        throw std::invalid_argument("camera_t::to_view requires positive clip W");
+        throw std::invalid_argument("camera_t::world_to_framebuffer requires positive clip W");
     }
     const double width = std::int64_t(m_view_rect[0][1]) - std::int64_t(m_view_rect[0][0]);
     const double height = std::int64_t(m_view_rect[1][1]) - std::int64_t(m_view_rect[1][0]);
@@ -209,7 +209,7 @@ m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> camera_t::to_view(const m0
         float((clip[2] / clip[3] + 1) / 2)
     };
     if (!std::ranges::all_of(result, [](float component) { return std::isfinite(component); })) {
-        throw std::out_of_range("camera_t::to_view result cannot be represented as finite floats");
+        throw std::out_of_range("camera_t::world_to_framebuffer result cannot be represented as finite floats");
     }
     return result;
 }

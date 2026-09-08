@@ -154,6 +154,18 @@ void test_explicit_lod_execution() {
             expect_near((*fragment_io.color())[component], expected[component]);
         }
     }
+    software_shader::prepared_program_t prepared;
+    prepared.prepare(program, bindings);
+    std::size_t preparation_allocations;
+    {
+        software_shader::allocation_probe_t probe;
+        for (int iteration = 0; iteration < 20; ++iteration) {
+            prepared.reset();
+            prepared.prepare(program, bindings);
+        }
+        preparation_allocations = probe.count();
+    }
+    test::expect(std::equal_to<>(), preparation_allocations, std::size_t(0));
     bindings.uniform(0, std::numeric_limits<float>::quiet_NaN());
     test::expect_throws([&] { program.run(bindings, vertex_io); });
     test::expect(std::identity(), !vertex_io.output<vector4f_t>(0));
@@ -900,10 +912,147 @@ void test_context_allocation_and_preparation_failure() {
     }
 }
 
+void test_prepared_execution() {
+    shader::vertex_shader_ast_builder_t vertex;
+    const auto input = vertex.input<float>(7);
+    const auto enabled = vertex.input<bool>(15);
+    const auto divisor = vertex.input<std::int32_t>(31);
+    const auto local = vertex.local(1.0F);
+    vertex.branch(enabled, [&] { vertex.assign(local, local + input); });
+    vertex.position(vector4f_t({0, 0, 0, 1}));
+    vertex.output(11, local + vertex.uniform<float>(88));
+    vertex.branch(enabled, [&] { vertex.output(200, std::int32_t(8) / divisor); });
+    shader::fragment_shader_ast_builder_t fragment;
+    fragment.color(vector4f_t(1));
+    fragment.output(29, fragment.input<float>(11));
+    fragment.branch(!fragment.front_facing(), [&] { fragment.discard(); });
+    software_shader::program_t program(std::move(vertex).finalize(), std::move(fragment).finalize());
+    software_shader::bindings_t bindings;
+    bindings.uniform(88, 0.25F);
+    software_shader::prepared_program_t prepared;
+    software_shader::execution_context_t context;
+    software_shader::vertex_io_t vertex_io(0, 0);
+    software_shader::fragment_io_t fragment_io(vector4f_t(0), true);
+    std::array<software_shader::value_t, 3> inputs {3.0F, true, std::int32_t(2)};
+    std::array<std::optional<software_shader::value_t>, 2> outputs;
+    std::array<software_shader::value_t, 1> fragment_inputs;
+    std::array<std::optional<software_shader::value_t>, 1> fragment_outputs;
+    prepared.prepare(program, bindings);
+    test::expect(std::equal_to<>(), program.fragment_sources()[0], std::size_t(0));
+    prepared.run(inputs, outputs, vertex_io, context);
+    test::expect(std::equal_to<>(), std::get<float>(*outputs[0]), 4.25F);
+    test::expect(std::equal_to<>(), std::get<std::int32_t>(*outputs[1]), std::int32_t(4));
+    // Prepared uniforms are a snapshot; preparing again observes replacement.
+    bindings.uniform(88, 0.5F);
+    inputs[1] = false;
+    prepared.run(inputs, outputs, vertex_io, context);
+    test::expect(std::equal_to<>(), std::get<float>(*outputs[0]), 1.25F);
+    test::expect(std::logical_not<>(), outputs[1].has_value());
+    prepared.prepare(program, bindings);
+    prepared.run(inputs, outputs, vertex_io, context);
+    test::expect(std::equal_to<>(), std::get<float>(*outputs[0]), 1.5F);
+    fragment_inputs[0] = *outputs[0];
+    prepared.run(fragment_inputs, fragment_outputs, fragment_io, context);
+    test::expect(std::equal_to<>(), std::get<float>(*fragment_outputs[0]), 1.5F);
+    std::size_t allocations;
+    {
+        software_shader::allocation_probe_t probe;
+        for (int iteration = 0; iteration < 20; ++iteration) {
+            prepared.run(inputs, outputs, vertex_io, context);
+            prepared.run(fragment_inputs, fragment_outputs, fragment_io, context);
+        }
+        allocations = probe.count();
+    }
+    test::expect(std::equal_to<>(), allocations, std::size_t(0));
+    shader::vertex_shader_ast_builder_t plain_vertex;
+    plain_vertex.position(vector4f_t{0, 0, 0, 1});
+    software_shader::program_t plain_program(std::move(plain_vertex).finalize(), trivial_fragment());
+    {
+        software_shader::allocation_probe_t probe;
+        for (int iteration = 0; iteration < 20; ++iteration) {
+            prepared.reset();
+            prepared.prepare(plain_program, bindings);
+            prepared.prepare(program, bindings);
+            prepared.run(inputs, outputs, vertex_io, context);
+            prepared.run(fragment_inputs, fragment_outputs, fragment_io, context);
+        }
+        allocations = probe.count();
+    }
+    test::expect(std::equal_to<>(), allocations, std::size_t(0));
+    fragment_io.reset(vector4f_t(0), false);
+    prepared.run(fragment_inputs, fragment_outputs, fragment_io, context);
+    test::expect(std::identity(), fragment_io.discarded());
+    test::expect(std::logical_not<>(), fragment_io.color().has_value());
+    test::expect(std::logical_not<>(), fragment_outputs[0].has_value());
+    inputs[1] = true;
+    inputs[2] = std::int32_t(0);
+    test::expect_throws<std::domain_error>([&] { prepared.run(inputs, outputs, vertex_io, context); });
+    for (const auto& output : outputs) { test::expect(std::logical_not<>(), output.has_value()); }
+    test::expect_throws<std::logic_error>([&] { (void)vertex_io.position(); });
+    inputs[2] = std::int32_t(4);
+    prepared.run(inputs, outputs, vertex_io, context);
+    test::expect(std::equal_to<>(), std::get<float>(*outputs[0]), 4.5F);
+    test::expect_throws<std::invalid_argument>([&] { prepared.run(std::span(inputs).first(2), outputs, vertex_io, context); });
+    for (const auto& output : outputs) { test::expect(std::logical_not<>(), output.has_value()); }
+    software_shader::bindings_t missing;
+    test::expect_throws<std::invalid_argument>([&] { prepared.prepare(program, missing); });
+    test::expect_throws<std::logic_error>([&] { prepared.run(inputs, outputs, vertex_io, context); });
+    prepared.prepare(program, bindings);
+    prepared.run(inputs, outputs, vertex_io, context);
+    test::expect(std::equal_to<>(), std::get<float>(*outputs[0]), 4.5F);
+    auto copied = prepared;
+    auto moved = std::move(copied);
+    test::expect_throws<std::logic_error>([&] { copied.run(inputs, outputs, vertex_io, context); });
+    moved.run(inputs, outputs, vertex_io, context);
+    test::expect(std::equal_to<>(), std::get<float>(*outputs[0]), 4.5F);
+    copied = std::move(moved);
+    test::expect_throws<std::logic_error>([&] { moved.run(inputs, outputs, vertex_io, context); });
+    copied.run(inputs, outputs, vertex_io, context);
+    test::expect(std::equal_to<>(), std::get<float>(*outputs[0]), 4.5F);
+    bindings.uniform(88, 0.75F);
+    software_shader::prepared_program_t replacement;
+    replacement.prepare(program, bindings);
+    bool assignment_failed = false;
+    try {
+        software_shader::allocation_probe_t probe(0);
+        copied = replacement;
+    } catch (const std::bad_alloc&) { assignment_failed = true; }
+    test::expect(std::identity(), assignment_failed);
+    copied.run(inputs, outputs, vertex_io, context);
+    test::expect(std::equal_to<>(), std::get<float>(*outputs[0]), 4.5F);
+    copied = replacement;
+    copied.run(inputs, outputs, vertex_io, context);
+    test::expect(std::equal_to<>(), std::get<float>(*outputs[0]), 4.75F);
+    bindings.uniform(88, 0.5F);
+    software_shader::execution_context_t fresh_context;
+    outputs[0] = 99.0F;
+    bool failed = false;
+    try {
+        software_shader::allocation_probe_t probe(0);
+        prepared.run(inputs, outputs, vertex_io, fresh_context);
+    } catch (const std::bad_alloc&) { failed = true; }
+    test::expect(std::identity(), failed);
+    for (const auto& output : outputs) { test::expect(std::logical_not<>(), output.has_value()); }
+    test::expect_throws<std::logic_error>([&] { (void)vertex_io.position(); });
+    prepared.run(inputs, outputs, vertex_io, fresh_context);
+    test::expect(std::equal_to<>(), std::get<float>(*outputs[0]), 4.5F);
+    prepared.reset();
+    test::expect_throws<std::logic_error>([&] { prepared.run(inputs, outputs, vertex_io, context); });
+    // Standalone execution continues to validate all reflected inputs.
+    vertex_io.input(7, 3.0F);
+    vertex_io.input(15, true);
+    vertex_io.input(31, std::int32_t(4));
+    program.run(bindings, vertex_io, context);
+    test::expect(std::equal_to<>(), *vertex_io.output<float>(11), 4.5F);
+    vertex_io.reset(0, 0);
+    test::expect_throws<std::invalid_argument>([&] { program.run(bindings, vertex_io, context); });
+}
+
 } // namespace
 
 int main() {
     return test::run([] {
+        test_prepared_execution();
         test_context_reuse_and_lowering();
         test_compiled_short_circuit_and_failures();
         test_compiled_nested_loops();

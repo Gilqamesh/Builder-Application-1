@@ -30,43 +30,29 @@ const std::shared_ptr<const software_shader::program_t>& material_t::program() c
 }
 
 void material_t::texture(std::uint32_t location, std::shared_ptr<texture::texture_t> value) {
-    if (!value) {
-        m_bindings.clear_texture(location);
-        m_textures.erase(location);
-        return;
+    if (value) { m_textures.insert_or_assign(location, std::move(value)); }
+    else { m_textures.erase(location); }
+}
+
+const texture::texture_t& material_t::texture(std::uint32_t location) const {
+    const auto iterator = m_textures.find(location);
+    if (iterator == m_textures.end()) {
+        throw std::invalid_argument(std::format("material texture binding {} is missing", location));
     }
-
-    auto textures = m_textures;
-    auto bindings = m_bindings;
-    textures.insert_or_assign(location, std::move(value));
-    bindings.texture(location, *textures.at(location));
-
-    static_assert(noexcept(m_textures.swap(textures)));
-    static_assert(noexcept(std::swap(m_bindings, bindings)));
-    m_textures.swap(textures);
-    std::swap(m_bindings, bindings);
+    return *iterator->second;
 }
 
 void material_t::sampler(std::uint32_t location, std::shared_ptr<texture::sampler_t> value) {
-    if (!value) {
-        m_bindings.clear_sampler(location);
-        m_samplers.erase(location);
-        return;
-    }
-
-    auto samplers = m_samplers;
-    auto bindings = m_bindings;
-    samplers.insert_or_assign(location, std::move(value));
-    bindings.sampler(location, *samplers.at(location));
-
-    static_assert(noexcept(m_samplers.swap(samplers)));
-    static_assert(noexcept(std::swap(m_bindings, bindings)));
-    m_samplers.swap(samplers);
-    std::swap(m_bindings, bindings);
+    if (value) { m_samplers.insert_or_assign(location, std::move(value)); }
+    else { m_samplers.erase(location); }
 }
 
-const software_shader::bindings_t& material_t::bindings() const {
-    return m_bindings;
+const texture::sampler_t& material_t::sampler(std::uint32_t location) const {
+    const auto iterator = m_samplers.find(location);
+    if (iterator == m_samplers.end()) {
+        throw std::invalid_argument(std::format("material sampler binding {} is missing", location));
+    }
+    return *iterator->second;
 }
 
 void material_t::depth_test(bool enabled) {
@@ -225,6 +211,8 @@ void material_t::color_write(color_mask_t color_mask) {
 color_mask_t material_t::color_write() const {
     return m_color_write;
 }
+
+
 
 void material_t::validate_stencil_state(const stencil_state_t& stencil_state) {
     switch (stencil_state.comparison) {

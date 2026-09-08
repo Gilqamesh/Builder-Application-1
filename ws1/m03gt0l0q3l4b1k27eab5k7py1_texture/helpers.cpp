@@ -82,46 +82,35 @@ float decode_binary16(std::uint16_t bits) {
     return std::bit_cast<float>(result);
 }
 
-float decode_srgb(float encoded) {
-    if (encoded <= 0.04045f) {
-        return encoded / 12.92f;
+color_t decode_texel(format_t format, std::span<const std::byte> bytes) {
+    if (bytes.size() != bytes_per_texel(format)) {
+        throw std::invalid_argument("decode_texel requires exactly one texel of storage");
     }
-    return std::pow((encoded + 0.055f) / 1.055f, 2.4f);
-}
-
-color_t decode_texel(const const_pixel_view_t& pixels, std::size_t x, std::size_t y) {
-    const auto texel_size = bytes_per_texel(pixels.format());
-    const auto offset = (y * pixels.width() + x) * texel_size;
-    const auto bytes = pixels.bytes();
     color_t result;
 
-    switch (pixels.format()) {
-        case format_t::rgba8_unorm:
-        case format_t::rgba8_srgb: {
-            for (std::size_t component = 0; component < 4; ++component) {
-                result[component] = static_cast<float>(read_u8(bytes, offset + component)) / 255.0f;
-            }
-            if (pixels.format() == format_t::rgba8_srgb) {
-                for (std::size_t component = 0; component < 3; ++component) {
-                    result[component] = decode_srgb(result[component]);
-                }
-            }
-        } break;
+    switch (format) {
+        case format_t::rgba8_unorm: return decode_rgba8<format_t::rgba8_unorm>(bytes.first<4>());
+        case format_t::rgba8_srgb: return decode_rgba8<format_t::rgba8_srgb>(bytes.first<4>());
         case format_t::rgba16_float: {
             for (std::size_t component = 0; component < 4; ++component) {
-                result[component] = decode_binary16(read_u16(bytes, offset + component * 2));
+                result[component] = decode_binary16(read_u16(bytes, component * 2));
             }
         } break;
         case format_t::rgba32_float: {
             for (std::size_t component = 0; component < 4; ++component) {
-                result[component] = std::bit_cast<float>(read_u32(bytes, offset + component * 4));
+                result[component] = std::bit_cast<float>(read_u32(bytes, component * 4));
             }
         } break;
         default:
-            throw std::invalid_argument("sample: unknown texture format");
+            throw std::invalid_argument("decode_texel: unknown texture format");
     }
 
     return result;
+}
+
+color_t decode_texel(const const_pixel_view_t& pixels, std::size_t x, std::size_t y) {
+    const auto texel_size = bytes_per_texel(pixels.format());
+    return decode_texel(pixels.format(), pixels.bytes().subspan((y * pixels.width() + x) * texel_size, texel_size));
 }
 
 double reduce_coordinate(float coordinate, address_mode_t address_mode) {
@@ -255,25 +244,28 @@ std::uint16_t encode_binary16(float component) {
     return static_cast<std::uint16_t>(sign | (std::uint32_t(half_exponent) << 10) | rounded);
 }
 
-void encode_texel(const pixel_view_t& pixels, std::size_t x, std::size_t y, const color_t& color) {
-    const auto texel_size = bytes_per_texel(pixels.format());
-    auto bytes = pixels.bytes().subspan((y * pixels.width() + x) * texel_size, texel_size);
+void encode_texel(format_t format, const color_t& color, std::span<std::byte> bytes) {
+    const auto texel_size = bytes_per_texel(format);
+    if (bytes.size() != texel_size) {
+        throw std::invalid_argument("encode_texel requires exactly one texel of storage");
+    }
+    switch (format) {
+        case format_t::rgba8_unorm: { encode_rgba8<format_t::rgba8_unorm>(color, bytes.first<4>()); return; }
+        case format_t::rgba8_srgb: { encode_rgba8<format_t::rgba8_srgb>(color, bytes.first<4>()); return; }
+        default: break;
+    }
     for (std::size_t component = 0; component < 4; ++component) {
-        float channel = color[component];
-        if (pixels.format() == format_t::rgba8_unorm || pixels.format() == format_t::rgba8_srgb) {
-            channel = std::isnan(channel) ? 0.0F : std::clamp(channel, 0.0F, 1.0F);
-            if (pixels.format() == format_t::rgba8_srgb && component < 3) {
-                channel = channel <= 0.0031308F ? 12.92F * channel : 1.055F * std::pow(channel, 1.0F / 2.4F) - 0.055F;
-            }
-            bytes[component] = std::byte(static_cast<unsigned char>(std::floor(channel * 255.0F + 0.5F)));
-        } else {
-            const auto bits = pixels.format() == format_t::rgba16_float ? std::uint32_t(encode_binary16(channel)) : std::bit_cast<std::uint32_t>(channel);
-            const auto component_size = texel_size / 4;
-            for (std::size_t byte = 0; byte < component_size; ++byte) {
-                bytes[component * component_size + byte] = std::byte((bits >> (byte * 8)) & 0xffU);
-            }
+        const auto bits = format == format_t::rgba16_float ? std::uint32_t(encode_binary16(color[component])) : std::bit_cast<std::uint32_t>(color[component]);
+        const auto component_size = texel_size / 4;
+        for (std::size_t byte = 0; byte < component_size; ++byte) {
+            bytes[component * component_size + byte] = std::byte((bits >> (byte * 8)) & 0xffU);
         }
     }
+}
+
+void encode_texel(const pixel_view_t& pixels, std::size_t x, std::size_t y, const color_t& color) {
+    const auto texel_size = bytes_per_texel(pixels.format());
+    encode_texel(pixels.format(), color, pixels.bytes().subspan((y * pixels.width() + x) * texel_size, texel_size));
 }
 
 } // namespace m03gt0l0q3l4b1k27eab5k7py1_texture

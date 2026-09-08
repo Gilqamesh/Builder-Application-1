@@ -1,5 +1,6 @@
 #include "helpers.h"
 #include "invocation.h"
+#include "software_shader.h"
 
 #include <algorithm>
 #include <array>
@@ -13,13 +14,20 @@
 
 namespace m03gt1djvvy5atia5evkbg6rqy_software_shader {
 
+struct prepared_invocation_t {
+    std::span<const binding_value_t> bindings;
+    std::span<const value_t> inputs;
+    std::span<std::optional<value_t>> outputs;
+};
+
 enum class kernel_operation_t { input, uniform, output, component, construct, swizzle, negate, logical_not, absolute, square_root, floor, ceil, fract, sine, cosine, normalize, length, add, subtract, multiply, divide, modulo, equal, not_equal, less, less_equal, greater, greater_equal, dot, cross, power, reflect, minimum, maximum, step, clamp, mix, smoothstep, matrix_product };
 
 struct kernel_arguments_t {
     const shader::shader_interface_t& interface;
     std::span<const value_t> slots;
     std::span<const operand_t> operands;
-    const bindings_t& bindings;
+    const bindings_t* bindings;
+    const prepared_invocation_t* prepared;
     vertex_io_t* vertex_io;
     fragment_io_t* fragment_io;
 };
@@ -63,7 +71,7 @@ public:
     std::vector<instruction_t> instructions;
     std::vector<operand_t> operands;
     std::vector<value_t> constants;
-    std::vector<shader::shader_data_type_t> slot_types;
+    std::size_t slot_count = 0;
     std::size_t local_count = 0;
 
 private:
@@ -71,11 +79,11 @@ private:
     void collect(const shader::shader_block_t& block);
     void lower(const shader::shader_block_t& block);
     operand_t lower(const shader::shader_expression_node_t& expression);
-    std::size_t slot(shader::shader_data_type_t type);
+    std::size_t slot();
     std::size_t emit(opcode_t opcode, std::optional<std::size_t> destination, std::span<const operand_t> inputs, std::optional<std::size_t> target = std::nullopt, std::size_t kernel_index = 0);
     std::size_t emit(opcode_t opcode, std::optional<std::size_t> destination, std::initializer_list<operand_t> inputs, std::optional<std::size_t> target = std::nullopt, std::size_t kernel_index = 0);
-    operand_t compute(kernel_operation_t operation, shader::shader_data_type_t result_type, std::span<const operand_t> inputs, std::initializer_list<shader::shader_data_type_t> types);
-    operand_t compute(kernel_operation_t operation, shader::shader_data_type_t result_type, std::initializer_list<operand_t> inputs, std::initializer_list<shader::shader_data_type_t> types);
+    operand_t compute(kernel_operation_t operation, std::span<const operand_t> inputs, std::initializer_list<shader::shader_data_type_t> types);
+    operand_t compute(kernel_operation_t operation, std::initializer_list<operand_t> inputs, std::initializer_list<shader::shader_data_type_t> types);
     std::size_t interface_index(std::span<const shader::shader_interface_element_t> elements, std::uint32_t index, shader::shader_data_type_t type) const;
 
     const shader::shader_interface_t& m_interface;
@@ -119,11 +127,21 @@ template <typename IO>
 void validate_inputs(const shader::shader_interface_t& interface, const IO& io);
 int binding_namespace(shader::shader_data_type_t type);
 template <typename IO>
-void execute_stage(const stage_code_t& code, const bindings_t& bindings, IO& io, std::vector<value_t>& slots, std::vector<std::uint8_t>& local_initialized);
+void execute_stage(const stage_code_t& code, const bindings_t* bindings, IO& io, std::vector<value_t>& slots, std::vector<std::uint8_t>& local_initialized, const prepared_invocation_t* prepared);
 
 } // namespace m03gt1djvvy5atia5evkbg6rqy_software_shader
 
 namespace std {
+
+template <>
+struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::prepared_invocation_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gt1djvvy5atia5evkbg6rqy_software_shader::prepared_invocation_t& invocation, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "inputs={} outputs={}", invocation.inputs.size(), invocation.outputs.size());
+        return out;
+    }
+};
 
 template <>
 struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::kernel_operation_t> {
@@ -170,7 +188,7 @@ struct formatter<m03gt1djvvy5atia5evkbg6rqy_software_shader::compiler_t> {
     constexpr auto parse(std::format_parse_context& context) { return context.begin(); }
     auto format(const m03gt1djvvy5atia5evkbg6rqy_software_shader::compiler_t& value, auto& context) const {
         auto out = context.out();
-        out = std::format_to(out, "instructions={} slots={} locals={}", value.instructions.size(), value.slot_types.size(), value.local_count);
+        out = std::format_to(out, "instructions={} slots={} locals={}", value.instructions.size(), value.slot_count, value.local_count);
         return out;
     }
 };
@@ -289,14 +307,18 @@ value_t evaluate_kernel(const kernel_arguments_t& arguments) {
         return std::get<R>(arguments.slots[arguments.operands[index].index]);
     };
     if constexpr (Operation == kernel_operation_t::input) {
+        if (arguments.prepared) { return std::get<T>(arguments.prepared->inputs[arguments.operands[0].index]); }
         const auto location = arguments.interface.inputs()[arguments.operands[0].index].index;
         return arguments.vertex_io ? arguments.vertex_io->input<T>(location) : arguments.fragment_io->input<T>(location);
     } else if constexpr (Operation == kernel_operation_t::uniform) {
-        return arguments.bindings.uniform<T>(arguments.interface.bindings()[arguments.operands[0].index].index);
+        if (arguments.prepared) { return std::get<T>(std::get<value_t>(arguments.prepared->bindings[arguments.operands[0].index])); }
+        return arguments.bindings->uniform<T>(arguments.interface.bindings()[arguments.operands[0].index].index);
     } else if constexpr (Operation == kernel_operation_t::output) {
         const auto location = arguments.interface.outputs()[arguments.operands[0].index].index;
         const auto& output = read.template operator()<T>(1);
-        if (arguments.vertex_io) {
+        if (arguments.prepared) {
+            arguments.prepared->outputs[arguments.operands[0].index] = output;
+        } else if (arguments.vertex_io) {
             arguments.vertex_io->output(location, output);
         } else {
             arguments.fragment_io->output(location, output);
@@ -468,18 +490,25 @@ void validate_inputs(const shader::shader_interface_t& interface, const IO& io) 
 
 
 template <typename IO>
-void execute_stage(const stage_code_t& code, const bindings_t& bindings, IO& io, std::vector<value_t>& slots, std::vector<std::uint8_t>& local_initialized) {
+void execute_stage(const stage_code_t& code, const bindings_t* bindings, IO& io, std::vector<value_t>& slots, std::vector<std::uint8_t>& local_initialized, const prepared_invocation_t* prepared) {
     // Result invalidation precedes allocation, validation, and interpretation.
     io.clear_results();
+    if (prepared) { std::ranges::fill(prepared->outputs, std::nullopt); }
     try {
         constexpr auto stage = std::same_as<IO, vertex_io_t> ? shader::shader_stage_t::vertex : shader::shader_stage_t::fragment;
         if (code.interface().stage() != stage) { throw std::invalid_argument("execution_context_t::execute stage does not match invocation IO"); }
         if (slots.size() < code.slot_count()) { slots.resize(code.slot_count()); }
         if (local_initialized.size() < code.local_count()) { local_initialized.resize(code.local_count()); }
         std::fill_n(local_initialized.begin(), code.local_count(), std::uint8_t(0));
-        io.reserve_outputs(code.interface().outputs().size());
-        validate_inputs(code.interface(), io);
-        validate_interface_bindings(code.interface(), bindings);
+        if (prepared) {
+            if (prepared->inputs.size() != code.interface().inputs().size() || prepared->outputs.size() != code.interface().outputs().size()) {
+                throw std::invalid_argument("prepared shader IO sizes do not match the reflected stage interface");
+            }
+        } else {
+            io.reserve_outputs(code.interface().outputs().size());
+            validate_inputs(code.interface(), io);
+            validate_interface_bindings(code.interface(), *bindings);
+        }
         vertex_io_t* vertex_io = nullptr;
         fragment_io_t* fragment_io = nullptr;
         if constexpr (std::same_as<IO, vertex_io_t>) { vertex_io = &io; }
@@ -512,7 +541,7 @@ void execute_stage(const stage_code_t& code, const bindings_t& bindings, IO& io,
                     slots[*instruction.destination] = slots[operands[0].index];
                 } break;
                 case opcode_t::kernel: {
-                    const auto result = entries[instruction.kernel_index].evaluate({code.interface(), slots, operands, bindings, vertex_io, fragment_io});
+                    const auto result = entries[instruction.kernel_index].evaluate({code.interface(), slots, operands, bindings, prepared, vertex_io, fragment_io});
                     // Assignment establishes the active variant alternative after context reuse.
                     if (instruction.destination) { slots[*instruction.destination] = result; }
                 } break;
@@ -531,15 +560,15 @@ void execute_stage(const stage_code_t& code, const bindings_t& bindings, IO& io,
                 case opcode_t::sample:
                 case opcode_t::sample_lod: {
                     const auto reflected = code.interface().bindings();
-                    const auto& texture = bindings.texture(reflected[operands[0].index].index);
-                    const auto& sampler = bindings.sampler(reflected[operands[1].index].index);
+                    const auto& texture = prepared ? *std::get<const texture::texture_t*>(prepared->bindings[operands[0].index]) : bindings->texture(reflected[operands[0].index].index);
+                    const auto& sampler = prepared ? *std::get<const texture::sampler_t*>(prepared->bindings[operands[1].index]) : bindings->sampler(reflected[operands[1].index].index);
                     const auto coordinates = std::get<shader::vector_t<float, 2>>(slots[operands[2].index]);
                     slots[*instruction.destination] = instruction.opcode == opcode_t::sample ? texture::sample(texture, sampler, coordinates) : texture::sample_lod(texture, sampler, coordinates, std::get<float>(slots[operands[3].index]));
                 } break;
                 case opcode_t::jump: { position = *instruction.target; } break;
                 case opcode_t::jump_if_false: { if (!std::get<bool>(slots[operands[0].index])) { position = *instruction.target; } } break;
                 case opcode_t::jump_if_true: { if (std::get<bool>(slots[operands[0].index])) { position = *instruction.target; } } break;
-                case opcode_t::discard: { if constexpr (std::same_as<IO, fragment_io_t>) { io.discard(); complete = true; } else { throw std::logic_error("invalid compiled discard"); } } break;
+                case opcode_t::discard: { if constexpr (std::same_as<IO, fragment_io_t>) { io.discard(); if (prepared) { std::ranges::fill(prepared->outputs, std::nullopt); } complete = true; } else { throw std::logic_error("invalid compiled discard"); } } break;
                 case opcode_t::finish: { complete = true; } break;
             }
         }
@@ -549,6 +578,7 @@ void execute_stage(const stage_code_t& code, const bindings_t& bindings, IO& io,
         }
     } catch (...) {
         io.clear_results();
+        if (prepared) { std::ranges::fill(prepared->outputs, std::nullopt); }
         throw;
     }
 }
@@ -576,7 +606,7 @@ compiler_t::compiler_t(const shader::shader_ast_t& ast):
     m_interface(ast.interface())
 {
     collect(ast.root());
-    local_count = slot_types.size();
+    local_count = slot_count;
     lower(ast.root());
     emit(opcode_t::finish, std::nullopt, {});
 }
@@ -584,17 +614,17 @@ compiler_t::compiler_t(const shader::shader_ast_t& ast):
 void compiler_t::visit(const shader::shader_constant_node_t& node) {
     const auto [entry, inserted] = m_constants.try_emplace(&node, constants.size());
     if (inserted) { constants.push_back(literal_value(node.value())); }
-    const auto destination = slot(node.type());
+    const auto destination = slot();
     emit(opcode_t::constant, destination, {{operand_kind_t::constant, entry->second}});
     m_result = {operand_kind_t::slot, destination};
 }
 
 void compiler_t::visit(const shader::shader_input_node_t& node) {
-    m_result = compute(kernel_operation_t::input, node.type(), {{operand_kind_t::input, interface_index(m_interface.inputs(), node.location(), node.type())}}, {node.type()});
+    m_result = compute(kernel_operation_t::input, {{operand_kind_t::input, interface_index(m_interface.inputs(), node.location(), node.type())}}, {node.type()});
 }
 
 void compiler_t::visit(const shader::shader_uniform_node_t& node) {
-    m_result = compute(kernel_operation_t::uniform, node.type(), {{operand_kind_t::binding, interface_index(m_interface.bindings(), node.binding(), node.type())}}, {node.type()});
+    m_result = compute(kernel_operation_t::uniform, {{operand_kind_t::binding, interface_index(m_interface.bindings(), node.binding(), node.type())}}, {node.type()});
 }
 
 void compiler_t::visit(const shader::shader_resource_node_t& node) {
@@ -602,26 +632,26 @@ void compiler_t::visit(const shader::shader_resource_node_t& node) {
 }
 
 void compiler_t::visit(const shader::shader_builtin_node_t& node) {
-    const auto destination = slot(node.type());
+    const auto destination = slot();
     emit(opcode_t::builtin, destination, {{operand_kind_t::builtin, static_cast<std::size_t>(node.builtin())}});
     m_result = {operand_kind_t::slot, destination};
 }
 
 void compiler_t::visit(const shader::shader_local_node_t& node) {
-    const auto destination = slot(node.type());
+    const auto destination = slot();
     emit(opcode_t::read_local, destination, {{operand_kind_t::slot, m_locals.at(&node)}});
     m_result = {operand_kind_t::slot, destination};
 }
 
 void compiler_t::visit(const shader::shader_unary_node_t& node) {
     const auto input = lower(node.expression());
-    m_result = compute(operation(node.operation()), node.type(), {input}, {node.expression().type()});
+    m_result = compute(operation(node.operation()), {input}, {node.expression().type()});
 }
 
 void compiler_t::visit(const shader::shader_binary_node_t& node) {
     const auto left = lower(node.lhs());
     if (node.operation() == shader::shader_binary_operation_t::logical_and || node.operation() == shader::shader_binary_operation_t::logical_or) {
-        const auto destination = slot(node.type());
+        const auto destination = slot();
         emit(opcode_t::copy, destination, {left});
         const auto branch = emit(node.operation() == shader::shader_binary_operation_t::logical_and ? opcode_t::jump_if_false : opcode_t::jump_if_true, std::nullopt, {left});
         const auto right = lower(node.rhs());
@@ -646,10 +676,10 @@ void compiler_t::visit(const shader::shader_binary_node_t& node) {
         case kernel_operation_t::cross:
         case kernel_operation_t::power:
         case kernel_operation_t::reflect: {
-            m_result = compute(selected, node.type(), {left, right}, {node.lhs().type()});
+            m_result = compute(selected, {left, right}, {node.lhs().type()});
         } break;
         default: {
-            m_result = compute(selected, node.type(), {left, right}, {node.lhs().type(), node.rhs().type()});
+            m_result = compute(selected, {left, right}, {node.lhs().type(), node.rhs().type()});
         } break;
     }
 }
@@ -664,17 +694,17 @@ void compiler_t::visit(const shader::shader_construct_node_t& node) {
         } else {
             const std::size_t count = std::size_t(type.rows()) * type.columns();
             for (std::size_t index = 0; index < count; ++index) {
-                components.push_back(compute(kernel_operation_t::component, {shader::shader_data_category_t::scalar, type.scalar()}, {input, {operand_kind_t::component, index}}, {type}));
+                components.push_back(compute(kernel_operation_t::component, {input, {operand_kind_t::component, index}}, {type}));
             }
         }
     }
-    m_result = compute(kernel_operation_t::construct, node.type(), components, {node.type()});
+    m_result = compute(kernel_operation_t::construct, components, {node.type()});
 }
 
 void compiler_t::visit(const shader::shader_swizzle_node_t& node) {
     std::vector<operand_t> components {lower(node.expression())};
     for (const auto component : node.components()) { components.push_back({operand_kind_t::component, component}); }
-    m_result = compute(kernel_operation_t::swizzle, node.type(), components, {node.type(), node.expression().type()});
+    m_result = compute(kernel_operation_t::swizzle, components, {node.type(), node.expression().type()});
 }
 
 void compiler_t::visit(const shader::shader_call_node_t& node) {
@@ -683,17 +713,17 @@ void compiler_t::visit(const shader::shader_call_node_t& node) {
     for (const auto* expression : expressions) { inputs.push_back(lower(*expression)); }
     switch (node.operation()) {
         case shader::shader_call_operation_t::clamp: {
-            m_result = compute(kernel_operation_t::clamp, node.type(), inputs, {expressions[0]->type(), expressions[1]->type(), expressions[2]->type()});
+            m_result = compute(kernel_operation_t::clamp, inputs, {expressions[0]->type(), expressions[1]->type(), expressions[2]->type()});
         } break;
         case shader::shader_call_operation_t::mix: {
-            m_result = compute(kernel_operation_t::mix, node.type(), inputs, {node.type()});
+            m_result = compute(kernel_operation_t::mix, inputs, {node.type()});
         } break;
         case shader::shader_call_operation_t::smoothstep: {
-            m_result = compute(kernel_operation_t::smoothstep, node.type(), {inputs[2], inputs[0], inputs[1]}, {expressions[2]->type(), expressions[0]->type(), expressions[1]->type()});
+            m_result = compute(kernel_operation_t::smoothstep, {inputs[2], inputs[0], inputs[1]}, {expressions[2]->type(), expressions[0]->type(), expressions[1]->type()});
         } break;
         case shader::shader_call_operation_t::sample:
         case shader::shader_call_operation_t::sample_lod: {
-            const auto destination = slot(node.type());
+            const auto destination = slot();
             emit(node.operation() == shader::shader_call_operation_t::sample ? opcode_t::sample : opcode_t::sample_lod, destination, inputs);
             m_result = {operand_kind_t::slot, destination};
         } break;
@@ -764,7 +794,7 @@ void compiler_t::visit(const shader::shader_discard_statement_t&) {
 void compiler_t::collect(const shader::shader_expression_node_t& expression) {
     if (!m_collected.insert(&expression).second) { return; }
     if (const auto* local = dynamic_cast<const shader::shader_local_node_t*>(&expression)) {
-        m_locals.emplace(local, slot(expression.type()));
+        m_locals.emplace(local, slot());
     }
     for (const auto* operand : expression.operands()) { collect(*operand); }
 }
@@ -795,9 +825,8 @@ operand_t compiler_t::lower(const shader::shader_expression_node_t& expression) 
     return m_result;
 }
 
-std::size_t compiler_t::slot(shader::shader_data_type_t type) {
-    slot_types.push_back(type);
-    return slot_types.size() - 1;
+std::size_t compiler_t::slot() {
+    return slot_count++;
 }
 
 std::size_t compiler_t::emit(opcode_t opcode, std::optional<std::size_t> destination, std::span<const operand_t> inputs, std::optional<std::size_t> target, std::size_t kernel_index) {
@@ -811,14 +840,14 @@ std::size_t compiler_t::emit(opcode_t opcode, std::optional<std::size_t> destina
     return emit(opcode, destination, std::span(inputs.begin(), inputs.size()), target, kernel_index);
 }
 
-operand_t compiler_t::compute(kernel_operation_t operation, shader::shader_data_type_t result_type, std::span<const operand_t> inputs, std::initializer_list<shader::shader_data_type_t> types) {
-    const auto destination = slot(result_type);
+operand_t compiler_t::compute(kernel_operation_t operation, std::span<const operand_t> inputs, std::initializer_list<shader::shader_data_type_t> types) {
+    const auto destination = slot();
     emit(opcode_t::kernel, destination, inputs, std::nullopt, select_kernel(operation, types));
     return {operand_kind_t::slot, destination};
 }
 
-operand_t compiler_t::compute(kernel_operation_t operation, shader::shader_data_type_t result_type, std::initializer_list<operand_t> inputs, std::initializer_list<shader::shader_data_type_t> types) {
-    return compute(operation, result_type, std::span(inputs.begin(), inputs.size()), types);
+operand_t compiler_t::compute(kernel_operation_t operation, std::initializer_list<operand_t> inputs, std::initializer_list<shader::shader_data_type_t> types) {
+    return compute(operation, std::span(inputs.begin(), inputs.size()), types);
 }
 
 std::size_t compiler_t::interface_index(std::span<const shader::shader_interface_element_t> elements, std::uint32_t index, shader::shader_data_type_t type) const {
@@ -835,7 +864,7 @@ stage_code_t::stage_code_t(const shader::shader_ast_t& ast):
     m_instructions = std::move(compiler.instructions);
     m_operands = std::move(compiler.operands);
     m_constants = std::move(compiler.constants);
-    m_slot_count = compiler.slot_types.size();
+    m_slot_count = compiler.slot_count;
     m_local_count = compiler.local_count;
 }
 
@@ -855,658 +884,349 @@ shader::matrix_t<float, 4, 4> identity_matrix() {
     return {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F};
 }
 
+template <typename T, kernel_operation_t... Operations>
+constexpr std::array<kernel_entry_t, sizeof...(Operations)> make_kernels() {
+    return {make_kernel<Operations, T>()...};
+}
+
+template <typename T, typename U, kernel_operation_t... Operations>
+constexpr std::array<kernel_entry_t, sizeof...(Operations)> make_binary_kernels() {
+    return {make_kernel<Operations, T, U>()...};
+}
+
+template <typename T, typename U, typename V, kernel_operation_t... Operations>
+constexpr std::array<kernel_entry_t, sizeof...(Operations)> make_ternary_kernels() {
+    return {make_kernel<Operations, T, U, V>()...};
+}
+
+template <std::size_t... Counts>
+constexpr auto join_kernels(const std::array<kernel_entry_t, Counts>&... families) {
+    constexpr auto count = [] {
+        std::size_t result = 0;
+        for (const auto size : std::array<std::size_t, sizeof...(Counts)>{Counts...}) result += size;
+        return result;
+    }();
+    std::array<kernel_entry_t, count> result;
+    auto next = result.begin();
+    for (const auto family : {std::span<const kernel_entry_t>(families)...}) {
+        next = std::copy(family.begin(), family.end(), next);
+    }
+    return result;
+}
+
 std::span<const kernel_entry_t> kernels() {
-    // Numeric instruction indices reference this immutable table. Selection occurs during compilation.
-    static const kernel_entry_t entries[] {
-        make_kernel<kernel_operation_t::input, bool>(),
-        make_kernel<kernel_operation_t::uniform, bool>(),
-        make_kernel<kernel_operation_t::output, bool>(),
-        make_kernel<kernel_operation_t::component, bool>(),
-        make_kernel<kernel_operation_t::construct, bool>(),
-        make_kernel<kernel_operation_t::equal, bool>(),
-        make_kernel<kernel_operation_t::not_equal, bool>(),
-        make_kernel<kernel_operation_t::logical_not, bool>(),
-        make_kernel<kernel_operation_t::input, std::int32_t>(),
-        make_kernel<kernel_operation_t::uniform, std::int32_t>(),
-        make_kernel<kernel_operation_t::output, std::int32_t>(),
-        make_kernel<kernel_operation_t::component, std::int32_t>(),
-        make_kernel<kernel_operation_t::construct, std::int32_t>(),
-        make_kernel<kernel_operation_t::equal, std::int32_t>(),
-        make_kernel<kernel_operation_t::not_equal, std::int32_t>(),
-        make_kernel<kernel_operation_t::negate, std::int32_t>(),
-        make_kernel<kernel_operation_t::add, std::int32_t, std::int32_t>(),
-        make_kernel<kernel_operation_t::subtract, std::int32_t, std::int32_t>(),
-        make_kernel<kernel_operation_t::divide, std::int32_t, std::int32_t>(),
-        make_kernel<kernel_operation_t::multiply, std::int32_t, std::int32_t>(),
-        make_kernel<kernel_operation_t::modulo, std::int32_t, std::int32_t>(),
-        make_kernel<kernel_operation_t::minimum, std::int32_t, std::int32_t>(),
-        make_kernel<kernel_operation_t::maximum, std::int32_t, std::int32_t>(),
-        make_kernel<kernel_operation_t::clamp, std::int32_t, std::int32_t, std::int32_t>(),
-        make_kernel<kernel_operation_t::less, std::int32_t>(),
-        make_kernel<kernel_operation_t::less_equal, std::int32_t>(),
-        make_kernel<kernel_operation_t::greater, std::int32_t>(),
-        make_kernel<kernel_operation_t::greater_equal, std::int32_t>(),
-        make_kernel<kernel_operation_t::absolute, std::int32_t>(),
-        make_kernel<kernel_operation_t::input, std::uint32_t>(),
-        make_kernel<kernel_operation_t::uniform, std::uint32_t>(),
-        make_kernel<kernel_operation_t::output, std::uint32_t>(),
-        make_kernel<kernel_operation_t::component, std::uint32_t>(),
-        make_kernel<kernel_operation_t::construct, std::uint32_t>(),
-        make_kernel<kernel_operation_t::equal, std::uint32_t>(),
-        make_kernel<kernel_operation_t::not_equal, std::uint32_t>(),
-        make_kernel<kernel_operation_t::negate, std::uint32_t>(),
-        make_kernel<kernel_operation_t::add, std::uint32_t, std::uint32_t>(),
-        make_kernel<kernel_operation_t::subtract, std::uint32_t, std::uint32_t>(),
-        make_kernel<kernel_operation_t::divide, std::uint32_t, std::uint32_t>(),
-        make_kernel<kernel_operation_t::multiply, std::uint32_t, std::uint32_t>(),
-        make_kernel<kernel_operation_t::modulo, std::uint32_t, std::uint32_t>(),
-        make_kernel<kernel_operation_t::minimum, std::uint32_t, std::uint32_t>(),
-        make_kernel<kernel_operation_t::maximum, std::uint32_t, std::uint32_t>(),
-        make_kernel<kernel_operation_t::clamp, std::uint32_t, std::uint32_t, std::uint32_t>(),
-        make_kernel<kernel_operation_t::less, std::uint32_t>(),
-        make_kernel<kernel_operation_t::less_equal, std::uint32_t>(),
-        make_kernel<kernel_operation_t::greater, std::uint32_t>(),
-        make_kernel<kernel_operation_t::greater_equal, std::uint32_t>(),
-        make_kernel<kernel_operation_t::input, float>(),
-        make_kernel<kernel_operation_t::uniform, float>(),
-        make_kernel<kernel_operation_t::output, float>(),
-        make_kernel<kernel_operation_t::component, float>(),
-        make_kernel<kernel_operation_t::construct, float>(),
-        make_kernel<kernel_operation_t::equal, float>(),
-        make_kernel<kernel_operation_t::not_equal, float>(),
-        make_kernel<kernel_operation_t::negate, float>(),
-        make_kernel<kernel_operation_t::add, float, float>(),
-        make_kernel<kernel_operation_t::subtract, float, float>(),
-        make_kernel<kernel_operation_t::divide, float, float>(),
-        make_kernel<kernel_operation_t::multiply, float, float>(),
-        make_kernel<kernel_operation_t::minimum, float, float>(),
-        make_kernel<kernel_operation_t::maximum, float, float>(),
-        make_kernel<kernel_operation_t::clamp, float, float, float>(),
-        make_kernel<kernel_operation_t::less, float>(),
-        make_kernel<kernel_operation_t::less_equal, float>(),
-        make_kernel<kernel_operation_t::greater, float>(),
-        make_kernel<kernel_operation_t::greater_equal, float>(),
-        make_kernel<kernel_operation_t::absolute, float>(),
-        make_kernel<kernel_operation_t::square_root, float>(),
-        make_kernel<kernel_operation_t::floor, float>(),
-        make_kernel<kernel_operation_t::ceil, float>(),
-        make_kernel<kernel_operation_t::fract, float>(),
-        make_kernel<kernel_operation_t::sine, float>(),
-        make_kernel<kernel_operation_t::cosine, float>(),
-        make_kernel<kernel_operation_t::power, float>(),
-        make_kernel<kernel_operation_t::reflect, float>(),
-        make_kernel<kernel_operation_t::mix, float>(),
-        make_kernel<kernel_operation_t::step, float, float>(),
-        make_kernel<kernel_operation_t::smoothstep, float, float, float>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<bool, 2>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<bool, 2>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<bool, 2>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<bool, 2>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<bool, 2>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<bool, 2>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<bool, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, bool, shader::vector_t<bool, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<bool, 2>, shader::vector_t<bool, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<bool, 3>, shader::vector_t<bool, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<bool, 4>, shader::vector_t<bool, 2>>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<bool, 3>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<bool, 3>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<bool, 3>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<bool, 3>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<bool, 3>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<bool, 3>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<bool, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, bool, shader::vector_t<bool, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<bool, 2>, shader::vector_t<bool, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<bool, 3>, shader::vector_t<bool, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<bool, 4>, shader::vector_t<bool, 3>>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<bool, 4>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<bool, 4>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<bool, 4>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<bool, 4>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<bool, 4>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<bool, 4>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<bool, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, bool, shader::vector_t<bool, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<bool, 2>, shader::vector_t<bool, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<bool, 3>, shader::vector_t<bool, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<bool, 4>, shader::vector_t<bool, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::negate, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::int32_t, 2>, std::int32_t>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::int32_t, 2>, std::int32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>, std::int32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::int32_t, 2>, std::int32_t>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::int32_t, 2>, std::int32_t>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::int32_t, 2>, std::int32_t>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::int32_t, 2>, std::int32_t>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::int32_t, 2>, std::int32_t>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 2>, std::int32_t, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 2>, std::int32_t, std::int32_t>(),
-        make_kernel<kernel_operation_t::absolute, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, std::int32_t, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 2>>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::negate, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::int32_t, 3>, std::int32_t>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::int32_t, 3>, std::int32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>, std::int32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::int32_t, 3>, std::int32_t>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::int32_t, 3>, std::int32_t>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::int32_t, 3>, std::int32_t>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::int32_t, 3>, std::int32_t>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::int32_t, 3>, std::int32_t>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 3>, std::int32_t, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 3>, std::int32_t, std::int32_t>(),
-        make_kernel<kernel_operation_t::absolute, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, std::int32_t, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 3>>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::negate, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::int32_t, 4>, std::int32_t>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::int32_t, 4>, std::int32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>, std::int32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::int32_t, 4>, std::int32_t>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::int32_t, 4>, std::int32_t>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::int32_t, 4>, std::int32_t>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::int32_t, 4>, std::int32_t>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::int32_t, 4>, std::int32_t>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 4>, std::int32_t, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::int32_t, 4>, std::int32_t, std::int32_t>(),
-        make_kernel<kernel_operation_t::absolute, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, std::int32_t, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::negate, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::uint32_t, 2>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::uint32_t, 2>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::uint32_t, 2>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::uint32_t, 2>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::uint32_t, 2>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::uint32_t, 2>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::uint32_t, 2>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 2>, std::uint32_t, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 2>, std::uint32_t, std::uint32_t>(),
-        make_kernel<kernel_operation_t::swizzle, std::uint32_t, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 2>>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::negate, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::uint32_t, 3>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::uint32_t, 3>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::uint32_t, 3>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::uint32_t, 3>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::uint32_t, 3>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::uint32_t, 3>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::uint32_t, 3>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 3>, std::uint32_t, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 3>, std::uint32_t, std::uint32_t>(),
-        make_kernel<kernel_operation_t::swizzle, std::uint32_t, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 3>>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::negate, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<std::uint32_t, 4>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<std::uint32_t, 4>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<std::uint32_t, 4>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<std::uint32_t, 4>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::modulo, shader::vector_t<std::uint32_t, 4>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<std::uint32_t, 4>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<std::uint32_t, 4>, std::uint32_t>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 4>, std::uint32_t, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<std::uint32_t, 4>, std::uint32_t, std::uint32_t>(),
-        make_kernel<kernel_operation_t::swizzle, std::uint32_t, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::negate, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<float, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<float, 2>, float>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<float, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<float, 2>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<float, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<float, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<float, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<float, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 2>, shader::vector_t<float, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 2>, shader::vector_t<float, 2>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<float, 2>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<float, 2>, float>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<float, 2>, float>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<float, 2>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 2>, float, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 2>, float, float>(),
-        make_kernel<kernel_operation_t::absolute, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::square_root, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::floor, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::ceil, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::fract, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::sine, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::cosine, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::power, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::reflect, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::mix, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::normalize, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::length, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::dot, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::step, shader::vector_t<float, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 2>, shader::vector_t<float, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 2>, shader::vector_t<float, 2>, float>(),
-        make_kernel<kernel_operation_t::step, float, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 2>, float, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 2>, float, float>(),
-        make_kernel<kernel_operation_t::swizzle, float, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<float, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<float, 3>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<float, 4>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::matrix_t<float, 2, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::negate, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<float, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<float, 3>, float>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<float, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<float, 3>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<float, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<float, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<float, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<float, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 3>, shader::vector_t<float, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 3>, shader::vector_t<float, 3>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<float, 3>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<float, 3>, float>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<float, 3>, float>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<float, 3>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 3>, float, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 3>, float, float>(),
-        make_kernel<kernel_operation_t::absolute, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::square_root, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::floor, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::ceil, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::fract, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::sine, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::cosine, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::power, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::reflect, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::mix, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::normalize, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::length, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::dot, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::cross, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::step, shader::vector_t<float, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 3>, shader::vector_t<float, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 3>, shader::vector_t<float, 3>, float>(),
-        make_kernel<kernel_operation_t::step, float, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 3>, float, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 3>, float, float>(),
-        make_kernel<kernel_operation_t::swizzle, float, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<float, 2>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<float, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<float, 4>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::matrix_t<float, 2, 2>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::input, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::uniform, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::output, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::component, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::construct, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::equal, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::negate, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<float, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::add, shader::vector_t<float, 4>, float>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<float, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::subtract, shader::vector_t<float, 4>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<float, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<float, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<float, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<float, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 4>, shader::vector_t<float, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 4>, shader::vector_t<float, 4>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::vector_t<float, 4>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::vector_t<float, 4>, float>(),
-        make_kernel<kernel_operation_t::minimum, shader::vector_t<float, 4>, float>(),
-        make_kernel<kernel_operation_t::maximum, shader::vector_t<float, 4>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 4>, float, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::vector_t<float, 4>, float, float>(),
-        make_kernel<kernel_operation_t::absolute, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::square_root, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::floor, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::ceil, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::fract, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::sine, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::cosine, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::power, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::reflect, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::mix, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::normalize, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::length, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::dot, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::step, shader::vector_t<float, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 4>, shader::vector_t<float, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 4>, shader::vector_t<float, 4>, float>(),
-        make_kernel<kernel_operation_t::step, float, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 4>, float, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::smoothstep, shader::vector_t<float, 4>, float, float>(),
-        make_kernel<kernel_operation_t::swizzle, float, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<float, 2>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<float, 3>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::vector_t<float, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::swizzle, shader::matrix_t<float, 2, 2>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::uniform, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::output, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::component, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::construct, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::equal, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::negate, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::add, shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::subtract, shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 2, 2>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::matrix_t<float, 2, 2>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 2>, float, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 2>, float, float>(),
-        make_kernel<kernel_operation_t::step, shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::step, float, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::uniform, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::output, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::component, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::construct, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::equal, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::negate, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::add, shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::subtract, shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 2, 3>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::matrix_t<float, 2, 3>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 3>, float, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 3>, float, float>(),
-        make_kernel<kernel_operation_t::step, shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::step, float, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::uniform, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::output, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::component, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::construct, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::equal, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::negate, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::add, shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::subtract, shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 2, 4>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::matrix_t<float, 2, 4>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 4>, float, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 2, 4>, float, float>(),
-        make_kernel<kernel_operation_t::step, shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::step, float, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::uniform, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::output, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::component, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::construct, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::equal, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::negate, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::add, shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::subtract, shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 3, 2>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::matrix_t<float, 3, 2>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 2>, float, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 2>, float, float>(),
-        make_kernel<kernel_operation_t::step, shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::step, float, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::uniform, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::output, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::component, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::construct, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::equal, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::negate, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::add, shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::subtract, shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 3, 3>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::matrix_t<float, 3, 3>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 3>, float, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 3>, float, float>(),
-        make_kernel<kernel_operation_t::step, shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::step, float, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::uniform, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::output, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::component, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::construct, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::equal, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::negate, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::add, shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::subtract, shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 3, 4>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::matrix_t<float, 3, 4>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 4>, float, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 3, 4>, float, float>(),
-        make_kernel<kernel_operation_t::step, shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::step, float, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::uniform, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::output, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::component, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::construct, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::equal, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::negate, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::add, shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::subtract, shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 4, 2>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::matrix_t<float, 4, 2>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 2>, float, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 2>, float, float>(),
-        make_kernel<kernel_operation_t::step, shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::step, float, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 2>, shader::vector_t<float, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 2, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 2, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 2, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::uniform, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::output, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::component, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::construct, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::equal, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::negate, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::add, shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::subtract, shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 4, 3>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::matrix_t<float, 4, 3>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 3>, float, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 3>, float, float>(),
-        make_kernel<kernel_operation_t::step, shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::step, float, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 3>, shader::vector_t<float, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 3, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 3, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 3, 4>>(),
-        make_kernel<kernel_operation_t::input, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::uniform, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::output, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::component, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::construct, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::equal, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::not_equal, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::negate, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::add, shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::subtract, shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>, float>(),
-        make_kernel<kernel_operation_t::divide, shader::matrix_t<float, 4, 4>, float>(),
-        make_kernel<kernel_operation_t::multiply, shader::matrix_t<float, 4, 4>, float>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 4>, float, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::clamp, shader::matrix_t<float, 4, 4>, float, float>(),
-        make_kernel<kernel_operation_t::step, shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::step, float, shader::matrix_t<float, 4, 4>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 4>, shader::vector_t<float, 4>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 2>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 3>>(),
-        make_kernel<kernel_operation_t::matrix_product, shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>>(),
-    };
+    using enum kernel_operation_t;
+    static const auto entries = join_kernels(
+        make_kernels<bool, input, uniform, output, component, construct, equal, not_equal, logical_not>(),
+        make_kernels<std::int32_t, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<std::int32_t, std::int32_t, add, subtract, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<std::int32_t, std::int32_t, std::int32_t, clamp>(),
+        make_kernels<std::int32_t, less, less_equal, greater, greater_equal, absolute>(),
+        make_kernels<std::uint32_t, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<std::uint32_t, std::uint32_t, add, subtract, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<std::uint32_t, std::uint32_t, std::uint32_t, clamp>(),
+        make_kernels<std::uint32_t, less, less_equal, greater, greater_equal>(),
+        make_kernels<float, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<float, float, add, subtract, divide, multiply, minimum, maximum>(),
+        make_ternary_kernels<float, float, float, clamp>(),
+        make_kernels<float, less, less_equal, greater, greater_equal, absolute, square_root, floor, ceil, fract, sine, cosine, power, reflect, mix>(),
+        make_binary_kernels<float, float, step>(),
+        make_ternary_kernels<float, float, float, smoothstep>(),
+        make_kernels<shader::vector_t<bool, 2>, input, uniform, output, component, construct, equal, not_equal>(),
+        make_binary_kernels<bool, shader::vector_t<bool, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<bool, 2>, shader::vector_t<bool, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<bool, 3>, shader::vector_t<bool, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<bool, 4>, shader::vector_t<bool, 2>, swizzle>(),
+        make_kernels<shader::vector_t<bool, 3>, input, uniform, output, component, construct, equal, not_equal>(),
+        make_binary_kernels<bool, shader::vector_t<bool, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<bool, 2>, shader::vector_t<bool, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<bool, 3>, shader::vector_t<bool, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<bool, 4>, shader::vector_t<bool, 3>, swizzle>(),
+        make_kernels<shader::vector_t<bool, 4>, input, uniform, output, component, construct, equal, not_equal>(),
+        make_binary_kernels<bool, shader::vector_t<bool, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<bool, 2>, shader::vector_t<bool, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<bool, 3>, shader::vector_t<bool, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<bool, 4>, shader::vector_t<bool, 4>, swizzle>(),
+        make_kernels<shader::vector_t<std::int32_t, 2>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>, add>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 2>, std::int32_t, add>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>, subtract>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 2>, std::int32_t, subtract>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>, std::int32_t, clamp>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 2>, std::int32_t, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 2>, std::int32_t, shader::vector_t<std::int32_t, 2>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 2>, std::int32_t, std::int32_t, clamp>(),
+        make_kernels<shader::vector_t<std::int32_t, 2>, absolute>(),
+        make_binary_kernels<std::int32_t, shader::vector_t<std::int32_t, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 2>, swizzle>(),
+        make_kernels<shader::vector_t<std::int32_t, 3>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>, add>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 3>, std::int32_t, add>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>, subtract>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 3>, std::int32_t, subtract>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>, std::int32_t, clamp>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 3>, std::int32_t, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 3>, std::int32_t, shader::vector_t<std::int32_t, 3>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 3>, std::int32_t, std::int32_t, clamp>(),
+        make_kernels<shader::vector_t<std::int32_t, 3>, absolute>(),
+        make_binary_kernels<std::int32_t, shader::vector_t<std::int32_t, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 3>, swizzle>(),
+        make_kernels<shader::vector_t<std::int32_t, 4>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>, add>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 4>, std::int32_t, add>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>, subtract>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 4>, std::int32_t, subtract>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>, std::int32_t, clamp>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 4>, std::int32_t, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 4>, std::int32_t, shader::vector_t<std::int32_t, 4>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::int32_t, 4>, std::int32_t, std::int32_t, clamp>(),
+        make_kernels<shader::vector_t<std::int32_t, 4>, absolute>(),
+        make_binary_kernels<std::int32_t, shader::vector_t<std::int32_t, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::int32_t, 4>, shader::vector_t<std::int32_t, 4>, swizzle>(),
+        make_kernels<shader::vector_t<std::uint32_t, 2>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>, add>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 2>, std::uint32_t, add>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>, subtract>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 2>, std::uint32_t, subtract>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>, std::uint32_t, clamp>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 2>, std::uint32_t, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 2>, std::uint32_t, shader::vector_t<std::uint32_t, 2>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 2>, std::uint32_t, std::uint32_t, clamp>(),
+        make_binary_kernels<std::uint32_t, shader::vector_t<std::uint32_t, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 2>, swizzle>(),
+        make_kernels<shader::vector_t<std::uint32_t, 3>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>, add>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 3>, std::uint32_t, add>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>, subtract>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 3>, std::uint32_t, subtract>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>, std::uint32_t, clamp>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 3>, std::uint32_t, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 3>, std::uint32_t, shader::vector_t<std::uint32_t, 3>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 3>, std::uint32_t, std::uint32_t, clamp>(),
+        make_binary_kernels<std::uint32_t, shader::vector_t<std::uint32_t, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 3>, swizzle>(),
+        make_kernels<shader::vector_t<std::uint32_t, 4>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>, add>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 4>, std::uint32_t, add>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>, subtract>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 4>, std::uint32_t, subtract>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>, std::uint32_t, clamp>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 4>, std::uint32_t, divide, multiply, modulo, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 4>, std::uint32_t, shader::vector_t<std::uint32_t, 4>, clamp>(),
+        make_ternary_kernels<shader::vector_t<std::uint32_t, 4>, std::uint32_t, std::uint32_t, clamp>(),
+        make_binary_kernels<std::uint32_t, shader::vector_t<std::uint32_t, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<std::uint32_t, 4>, shader::vector_t<std::uint32_t, 4>, swizzle>(),
+        make_kernels<shader::vector_t<float, 2>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::vector_t<float, 2>, shader::vector_t<float, 2>, add>(),
+        make_binary_kernels<shader::vector_t<float, 2>, float, add>(),
+        make_binary_kernels<shader::vector_t<float, 2>, shader::vector_t<float, 2>, subtract>(),
+        make_binary_kernels<shader::vector_t<float, 2>, float, subtract>(),
+        make_binary_kernels<shader::vector_t<float, 2>, shader::vector_t<float, 2>, divide, multiply, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<float, 2>, shader::vector_t<float, 2>, shader::vector_t<float, 2>, clamp>(),
+        make_ternary_kernels<shader::vector_t<float, 2>, shader::vector_t<float, 2>, float, clamp>(),
+        make_binary_kernels<shader::vector_t<float, 2>, float, divide, multiply, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<float, 2>, float, shader::vector_t<float, 2>, clamp>(),
+        make_ternary_kernels<shader::vector_t<float, 2>, float, float, clamp>(),
+        make_kernels<shader::vector_t<float, 2>, absolute, square_root, floor, ceil, fract, sine, cosine, power, reflect, mix, normalize, length, dot>(),
+        make_binary_kernels<shader::vector_t<float, 2>, shader::vector_t<float, 2>, step>(),
+        make_ternary_kernels<shader::vector_t<float, 2>, shader::vector_t<float, 2>, shader::vector_t<float, 2>, smoothstep>(),
+        make_ternary_kernels<shader::vector_t<float, 2>, shader::vector_t<float, 2>, float, smoothstep>(),
+        make_binary_kernels<float, shader::vector_t<float, 2>, step>(),
+        make_ternary_kernels<shader::vector_t<float, 2>, float, shader::vector_t<float, 2>, smoothstep>(),
+        make_ternary_kernels<shader::vector_t<float, 2>, float, float, smoothstep>(),
+        make_binary_kernels<float, shader::vector_t<float, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<float, 2>, shader::vector_t<float, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<float, 3>, shader::vector_t<float, 2>, swizzle>(),
+        make_binary_kernels<shader::vector_t<float, 4>, shader::vector_t<float, 2>, swizzle>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 2>, shader::vector_t<float, 2>, swizzle>(),
+        make_kernels<shader::vector_t<float, 3>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::vector_t<float, 3>, shader::vector_t<float, 3>, add>(),
+        make_binary_kernels<shader::vector_t<float, 3>, float, add>(),
+        make_binary_kernels<shader::vector_t<float, 3>, shader::vector_t<float, 3>, subtract>(),
+        make_binary_kernels<shader::vector_t<float, 3>, float, subtract>(),
+        make_binary_kernels<shader::vector_t<float, 3>, shader::vector_t<float, 3>, divide, multiply, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<float, 3>, shader::vector_t<float, 3>, shader::vector_t<float, 3>, clamp>(),
+        make_ternary_kernels<shader::vector_t<float, 3>, shader::vector_t<float, 3>, float, clamp>(),
+        make_binary_kernels<shader::vector_t<float, 3>, float, divide, multiply, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<float, 3>, float, shader::vector_t<float, 3>, clamp>(),
+        make_ternary_kernels<shader::vector_t<float, 3>, float, float, clamp>(),
+        make_kernels<shader::vector_t<float, 3>, absolute, square_root, floor, ceil, fract, sine, cosine, power, reflect, mix, normalize, length, dot, cross>(),
+        make_binary_kernels<shader::vector_t<float, 3>, shader::vector_t<float, 3>, step>(),
+        make_ternary_kernels<shader::vector_t<float, 3>, shader::vector_t<float, 3>, shader::vector_t<float, 3>, smoothstep>(),
+        make_ternary_kernels<shader::vector_t<float, 3>, shader::vector_t<float, 3>, float, smoothstep>(),
+        make_binary_kernels<float, shader::vector_t<float, 3>, step>(),
+        make_ternary_kernels<shader::vector_t<float, 3>, float, shader::vector_t<float, 3>, smoothstep>(),
+        make_ternary_kernels<shader::vector_t<float, 3>, float, float, smoothstep>(),
+        make_binary_kernels<float, shader::vector_t<float, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<float, 2>, shader::vector_t<float, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<float, 3>, shader::vector_t<float, 3>, swizzle>(),
+        make_binary_kernels<shader::vector_t<float, 4>, shader::vector_t<float, 3>, swizzle>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 2>, shader::vector_t<float, 3>, swizzle>(),
+        make_kernels<shader::vector_t<float, 4>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::vector_t<float, 4>, shader::vector_t<float, 4>, add>(),
+        make_binary_kernels<shader::vector_t<float, 4>, float, add>(),
+        make_binary_kernels<shader::vector_t<float, 4>, shader::vector_t<float, 4>, subtract>(),
+        make_binary_kernels<shader::vector_t<float, 4>, float, subtract>(),
+        make_binary_kernels<shader::vector_t<float, 4>, shader::vector_t<float, 4>, divide, multiply, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<float, 4>, shader::vector_t<float, 4>, shader::vector_t<float, 4>, clamp>(),
+        make_ternary_kernels<shader::vector_t<float, 4>, shader::vector_t<float, 4>, float, clamp>(),
+        make_binary_kernels<shader::vector_t<float, 4>, float, divide, multiply, minimum, maximum>(),
+        make_ternary_kernels<shader::vector_t<float, 4>, float, shader::vector_t<float, 4>, clamp>(),
+        make_ternary_kernels<shader::vector_t<float, 4>, float, float, clamp>(),
+        make_kernels<shader::vector_t<float, 4>, absolute, square_root, floor, ceil, fract, sine, cosine, power, reflect, mix, normalize, length, dot>(),
+        make_binary_kernels<shader::vector_t<float, 4>, shader::vector_t<float, 4>, step>(),
+        make_ternary_kernels<shader::vector_t<float, 4>, shader::vector_t<float, 4>, shader::vector_t<float, 4>, smoothstep>(),
+        make_ternary_kernels<shader::vector_t<float, 4>, shader::vector_t<float, 4>, float, smoothstep>(),
+        make_binary_kernels<float, shader::vector_t<float, 4>, step>(),
+        make_ternary_kernels<shader::vector_t<float, 4>, float, shader::vector_t<float, 4>, smoothstep>(),
+        make_ternary_kernels<shader::vector_t<float, 4>, float, float, smoothstep>(),
+        make_binary_kernels<float, shader::vector_t<float, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<float, 2>, shader::vector_t<float, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<float, 3>, shader::vector_t<float, 4>, swizzle>(),
+        make_binary_kernels<shader::vector_t<float, 4>, shader::vector_t<float, 4>, swizzle>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 2>, shader::vector_t<float, 4>, swizzle>(),
+        make_kernels<shader::matrix_t<float, 2, 2>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>, add, subtract, divide>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 2>, float, divide, multiply>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 2>, float, shader::matrix_t<float, 2, 2>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 2>, float, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>, step>(),
+        make_binary_kernels<float, shader::matrix_t<float, 2, 2>, step>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 2>, shader::vector_t<float, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 2>, shader::matrix_t<float, 2, 4>, matrix_product>(),
+        make_kernels<shader::matrix_t<float, 2, 3>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>, add, subtract, divide>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 3>, float, divide, multiply>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 3>, float, shader::matrix_t<float, 2, 3>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 3>, float, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 2, 3>, step>(),
+        make_binary_kernels<float, shader::matrix_t<float, 2, 3>, step>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 3>, shader::vector_t<float, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 3, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 3, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 3>, shader::matrix_t<float, 3, 4>, matrix_product>(),
+        make_kernels<shader::matrix_t<float, 2, 4>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>, add, subtract, divide>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 4>, float, divide, multiply>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 4>, float, shader::matrix_t<float, 2, 4>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 2, 4>, float, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 2, 4>, step>(),
+        make_binary_kernels<float, shader::matrix_t<float, 2, 4>, step>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 4>, shader::vector_t<float, 4>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 4, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 4, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 2, 4>, shader::matrix_t<float, 4, 4>, matrix_product>(),
+        make_kernels<shader::matrix_t<float, 3, 2>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>, add, subtract, divide>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 2>, float, divide, multiply>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 2>, float, shader::matrix_t<float, 3, 2>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 2>, float, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 3, 2>, step>(),
+        make_binary_kernels<float, shader::matrix_t<float, 3, 2>, step>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 2>, shader::vector_t<float, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 2, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 2, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 2>, shader::matrix_t<float, 2, 4>, matrix_product>(),
+        make_kernels<shader::matrix_t<float, 3, 3>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>, add, subtract, divide>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 3>, float, divide, multiply>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 3>, float, shader::matrix_t<float, 3, 3>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 3>, float, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>, step>(),
+        make_binary_kernels<float, shader::matrix_t<float, 3, 3>, step>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 3>, shader::vector_t<float, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 3>, shader::matrix_t<float, 3, 4>, matrix_product>(),
+        make_kernels<shader::matrix_t<float, 3, 4>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>, add, subtract, divide>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 4>, float, divide, multiply>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 4>, float, shader::matrix_t<float, 3, 4>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 3, 4>, float, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 3, 4>, step>(),
+        make_binary_kernels<float, shader::matrix_t<float, 3, 4>, step>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 4>, shader::vector_t<float, 4>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 4, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 4, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 3, 4>, shader::matrix_t<float, 4, 4>, matrix_product>(),
+        make_kernels<shader::matrix_t<float, 4, 2>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>, add, subtract, divide>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 2>, float, divide, multiply>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 2>, float, shader::matrix_t<float, 4, 2>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 2>, float, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 4, 2>, step>(),
+        make_binary_kernels<float, shader::matrix_t<float, 4, 2>, step>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 2>, shader::vector_t<float, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 2, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 2, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 2>, shader::matrix_t<float, 2, 4>, matrix_product>(),
+        make_kernels<shader::matrix_t<float, 4, 3>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>, add, subtract, divide>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 3>, float, divide, multiply>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 3>, float, shader::matrix_t<float, 4, 3>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 3>, float, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 4, 3>, step>(),
+        make_binary_kernels<float, shader::matrix_t<float, 4, 3>, step>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 3>, shader::vector_t<float, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 3, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 3, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 3>, shader::matrix_t<float, 3, 4>, matrix_product>(),
+        make_kernels<shader::matrix_t<float, 4, 4>, input, uniform, output, component, construct, equal, not_equal, negate>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>, add, subtract, divide>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 4>, float, divide, multiply>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 4>, float, shader::matrix_t<float, 4, 4>, clamp>(),
+        make_ternary_kernels<shader::matrix_t<float, 4, 4>, float, float, clamp>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>, step>(),
+        make_binary_kernels<float, shader::matrix_t<float, 4, 4>, step>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 4>, shader::vector_t<float, 4>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 2>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 3>, matrix_product>(),
+        make_binary_kernels<shader::matrix_t<float, 4, 4>, shader::matrix_t<float, 4, 4>, matrix_product>()
+    );
     return entries;
 }
 
@@ -1663,12 +1383,68 @@ void validate_program_link(const shader::shader_ast_t& vertex, const shader::sha
     collect(fragment.interface());
 }
 
-void execute_stage(const stage_code_t& code, const bindings_t& bindings, vertex_io_t& io, std::vector<value_t>& slots, std::vector<std::uint8_t>& local_initialized) {
-    execute_stage<vertex_io_t>(code, bindings, io, slots, local_initialized);
+program_t::execution_context_t::execution_context_t() = default;
+std::size_t program_t::execution_context_t::slot_capacity() const { return m_slots.capacity(); }
+std::size_t program_t::execution_context_t::local_capacity() const { return m_local_initialized.capacity(); }
+
+void program_t::execution_context_t::run(const program_t& program, const bindings_t& bindings, vertex_io_t& io) {
+    execute_stage(program.m_vertex, &bindings, io, m_slots, m_local_initialized, nullptr);
 }
 
-void execute_stage(const stage_code_t& code, const bindings_t& bindings, fragment_io_t& io, std::vector<value_t>& slots, std::vector<std::uint8_t>& local_initialized) {
-    execute_stage<fragment_io_t>(code, bindings, io, slots, local_initialized);
+void program_t::execution_context_t::run(const program_t& program, const bindings_t& bindings, fragment_io_t& io) {
+    execute_stage(program.m_fragment, &bindings, io, m_slots, m_local_initialized, nullptr);
+}
+
+program_t::execution_context_t::prepared_t::prepared_t() = default;
+
+program_t::execution_context_t::prepared_t& program_t::execution_context_t::prepared_t::operator=(const prepared_t& other) {
+    if (this != &other) {
+        prepared_t copy(other);
+        *this = std::move(copy);
+    }
+    return *this;
+}
+
+program_t::execution_context_t::prepared_t::prepared_t(prepared_t&& other) noexcept:
+    m_program(std::exchange(other.m_program, nullptr)),
+    m_vertex_bindings(std::move(other.m_vertex_bindings)),
+    m_fragment_bindings(std::move(other.m_fragment_bindings))
+{
+}
+
+program_t::execution_context_t::prepared_t& program_t::execution_context_t::prepared_t::operator=(prepared_t&& other) noexcept {
+    if (this != &other) {
+        m_program = std::exchange(other.m_program, nullptr);
+        m_vertex_bindings = std::move(other.m_vertex_bindings);
+        m_fragment_bindings = std::move(other.m_fragment_bindings);
+    }
+    return *this;
+}
+
+void program_t::execution_context_t::prepared_t::reset() {
+    m_program = nullptr;
+    m_vertex_bindings.clear();
+    m_fragment_bindings.clear();
+}
+
+void program_t::execution_context_t::prepared_t::run(std::span<const value_t> inputs, std::span<std::optional<value_t>> outputs, vertex_io_t& io, execution_context_t& context) const {
+    if (!m_program) {
+        io.clear_results();
+        std::ranges::fill(outputs, std::nullopt);
+        throw std::logic_error("prepared shader run requires successful preparation");
+    }
+    const prepared_invocation_t invocation {m_vertex_bindings, inputs, outputs};
+    execute_stage(m_program->m_vertex, nullptr, io, context.m_slots, context.m_local_initialized, &invocation);
+}
+
+void program_t::execution_context_t::prepared_t::run(std::span<const value_t> inputs, std::span<std::optional<value_t>> outputs, fragment_io_t& io, execution_context_t& context) const {
+    if (!m_program) {
+        io.clear_results();
+        std::ranges::fill(outputs, std::nullopt);
+        throw std::logic_error("prepared shader run requires successful preparation");
+    }
+    const prepared_invocation_t invocation {m_fragment_bindings, inputs, outputs};
+    execute_stage(m_program->m_fragment, nullptr, io, context.m_slots, context.m_local_initialized, &invocation);
 }
 
 } // namespace m03gt1djvvy5atia5evkbg6rqy_software_shader

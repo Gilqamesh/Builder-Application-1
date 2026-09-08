@@ -51,15 +51,27 @@ reporting are outside frame timing. Each profiling-enabled/disabled pair must
 produce identical color, depth, stencil, and texture levels. Stage reports include
 warm-up; sample summaries exclude it.
 
-Use matching compiler options for performance-relevant dependencies when comparing
-changes. Builder's default build is not optimized; the benchmark's compiler macros
-describe only its own translation unit. Keep the actual build command with local
-results. A suitable compilation command for each renderer/shader dependency source is:
+## Reproducible optimized build
+
+From Builder-Layout:
 
 ```sh
-g++ -std=c++23 -O2 -g -Wall -Wextra "${include_flags[@]}" -c source.cpp -o source.o
+BUILDER_BUILD_MODE=optimized ./cli m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer:benchmark \
+    --output "$PWD/artifacts/renderer-runs/optimized-001" \
+    --size 128 --warmup 3 --samples 20 --runs 5 --report
 ```
 
-Apply the same options to shader, software_shader, texture, software_renderer,
-profiling, byte_stream, structure_of_arrays, and type_erased_array. Link their objects
-with the existing platform dependencies. Run correctness suites with the same build.
+Builder owns compiler selection, options, dependency discovery, library validation,
+and linking. Its optimized mode applies `-O2 -g` to C and C++ sources throughout
+that build, including dependency libraries and public API validation. The toolchain
+uses C++23. Unset or `debug` mode retains the default `-g` compilation; unsupported
+mode names fail. Configuration affects compiled artifact keys, so switching back
+can reuse the earlier mode's completed artifacts.
+
+Keep compiler output alongside benchmark results when comparing builds. Use
+identical compiler configurations, workload arguments, and machine conditions.
+Give separate workspaces separate `BUILDER_ARTIFACT_ROOT` directories. Builder's
+`docs/repository-model.md` owns configuration and
+artifact semantics; the renderer adds no independent dependency list or flags.
+Full-frame timings include preparation and resource resolution; shader invocation
+improvements alone do not establish a full-frame speedup.

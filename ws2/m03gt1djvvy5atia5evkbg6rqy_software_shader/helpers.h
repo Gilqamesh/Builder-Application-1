@@ -3,6 +3,8 @@
 
 # include "value.h"
 
+# include <m03gt0l0q3l4b1k27eab5k7py1_texture/api.h>
+
 # include <algorithm>
 # include <cstddef>
 # include <cstdint>
@@ -18,8 +20,8 @@
 namespace m03gt1djvvy5atia5evkbg6rqy_software_shader {
 
 class bindings_t;
-class vertex_io_t;
-class fragment_io_t;
+
+using binding_value_t = std::variant<value_t, const m03gt0l0q3l4b1k27eab5k7py1_texture::texture_t*, const m03gt0l0q3l4b1k27eab5k7py1_texture::sampler_t*>;
 
 // Module-local executable representation; constructed only by lowering a validated AST.
 enum class operand_kind_t { slot, constant, input, output, binding, builtin, component };
@@ -64,8 +66,6 @@ private:
 shader::matrix_t<float, 4, 4> identity_matrix();
 void validate_interface_bindings(const shader::shader_interface_t& interface, const bindings_t& bindings);
 void validate_program_link(const shader::shader_ast_t& vertex, const shader::shader_ast_t& fragment);
-void execute_stage(const stage_code_t& code, const bindings_t& bindings, vertex_io_t& io, std::vector<value_t>& slots, std::vector<std::uint8_t>& local_initialized);
-void execute_stage(const stage_code_t& code, const bindings_t& bindings, fragment_io_t& io, std::vector<value_t>& slots, std::vector<std::uint8_t>& local_initialized);
 
 template <typename T>
 std::size_t find_location(std::span<T> values, std::uint32_t location);

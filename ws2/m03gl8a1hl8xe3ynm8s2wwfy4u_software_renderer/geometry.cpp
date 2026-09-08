@@ -32,15 +32,15 @@ geometry_t::geometry_t(std::shared_ptr<index_buffer_t> index_buffer, index_range
     }
 }
 
-void geometry_t::finalize() {
+void geometry_t::validate() const {
     if (!m_mesh) {
-        throw std::runtime_error("geometry_t::finalize: mesh is not set");
+        throw std::runtime_error("geometry_t::validate: mesh is not set");
     }
 
     const auto indices = this->indices();
 
     if (indices.empty()) {
-        throw std::runtime_error("geometry_t::finalize: does not support geometry with no indices");
+        throw std::runtime_error("geometry_t::validate: does not support geometry with no indices");
     }
 
     std::size_t expected_index_count_divisor = 1;
@@ -75,31 +75,26 @@ void geometry_t::finalize() {
             expected_minimum_index_count = 3;
         } break;
         default: {
-            throw std::runtime_error(std::format("geometry_t::finalize: unknown vertex_primitive_topology_t: {}", m_primitive_topology));
+            throw std::runtime_error(std::format("geometry_t::validate: unknown vertex_primitive_topology_t: {}", m_primitive_topology));
         }
     }
 
     if (indices.size() < expected_minimum_index_count) {
-        throw std::runtime_error(std::format("geometry_t::finalize: index count ({}) is less than expected minimum index count ({}) for vertex_primitive_topology_t: {}", indices.size(), expected_minimum_index_count, m_primitive_topology));
+        throw std::runtime_error(std::format("geometry_t::validate: index count ({}) is less than expected minimum index count ({}) for vertex_primitive_topology_t: {}", indices.size(), expected_minimum_index_count, m_primitive_topology));
     }
 
     if (indices.size() % expected_index_count_divisor != 0) {
-        throw std::runtime_error(std::format("geometry_t::finalize: index count ({}) is not divisible by expected index count divisor ({}) for vertex_primitive_topology_t: {}", indices.size(), expected_index_count_divisor, m_primitive_topology));
+        throw std::runtime_error(std::format("geometry_t::validate: index count ({}) is not divisible by expected index count divisor ({}) for vertex_primitive_topology_t: {}", indices.size(), expected_index_count_divisor, m_primitive_topology));
     }
 
     const auto& vertex_streams = m_mesh->vertex_streams();
     if (vertex_streams.size() == 0) {
-        throw std::runtime_error("geometry_t::finalize: does not support mesh with no vertex streams");
+        throw std::runtime_error("geometry_t::validate: does not support mesh with no vertex streams");
     }
-    const auto vertex_count = vertex_streams[0].element_count();
-    for (std::size_t i = 1; i < vertex_streams.size(); ++i) {
-        if (vertex_streams[i].element_count() != vertex_count) {
-            throw std::runtime_error(std::format("geometry_t::finalize: vertex stream {} element count ({}) does not match vertex stream 0 element count ({})", i, vertex_streams[i].element_count(), vertex_count));
-        }
-    }
+    const auto vertex_count = m_mesh->number_of_vertices();
     for (auto index : indices) {
         if (vertex_count <= index) {
-            throw std::runtime_error(std::format("geometry_t::finalize: index ({}) is out of bounds for vertex count ({})", index, vertex_count));
+            throw std::runtime_error(std::format("geometry_t::validate: index ({}) is out of bounds for vertex count ({})", index, vertex_count));
         }
     }
 }

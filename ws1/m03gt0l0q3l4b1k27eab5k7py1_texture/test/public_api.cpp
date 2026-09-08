@@ -576,8 +576,47 @@ void test_explicit_lod_filters() {
     test::expect(std::identity(), !std::format("{}", sampler_description_t{}).empty());
 }
 
+void test_texel_conversion() {
+    using namespace m03gt0l0q3l4b1k27eab5k7py1_texture;
+    std::array<std::byte, 4> bytes;
+    encode_texel(format_t::rgba8_srgb, color_t{0.003F, 0.0031308F, 0.0033F, 0.5F}, bytes);
+    test::expect(std::identity(), bytes == (std::array<std::byte, 4>{std::byte{10}, std::byte{10}, std::byte{11}, std::byte{128}}));
+    for (unsigned channel = 0; channel < 256; ++channel) {
+        bytes.fill(std::byte(channel));
+        const auto original = bytes;
+        const auto color = decode_texel(format_t::rgba8_srgb, bytes);
+        encode_texel(format_t::rgba8_srgb, color, bytes);
+        test::expect(std::identity(), bytes == original);
+    }
+    // Both entry points share conversion semantics, including alpha and non-finite values.
+    for (const auto format : {format_t::rgba8_unorm, format_t::rgba8_srgb}) {
+        for (const auto channel : {0.003F, 0.5F, -1.0F, 2.0F, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {
+            const color_t color{channel, channel, channel, channel};
+            std::array<std::byte, 4> specialized;
+            encode_texel(format, color, bytes);
+            if (format == format_t::rgba8_unorm) {
+                encode_rgba8<format_t::rgba8_unorm>(color, specialized);
+                expect_color(decode_rgba8<format_t::rgba8_unorm>(specialized), decode_texel(format, bytes));
+            } else {
+                encode_rgba8<format_t::rgba8_srgb>(color, specialized);
+                expect_color(decode_rgba8<format_t::rgba8_srgb>(specialized), decode_texel(format, bytes));
+            }
+            test::expect(std::identity(), specialized == bytes);
+        }
+    }
+    const auto original = bytes;
+    test::expect_throws<std::invalid_argument>([&] { encode_texel(format_t::rgba8_unorm, color_t(1), std::span(bytes).first(3)); });
+    test::expect(std::identity(), bytes == original);
+    test::expect_throws<std::invalid_argument>([&] { (void)decode_texel(format_t::rgba32_float, bytes); });
+    std::array<std::byte, 16> floating;
+    const color_t color{-2, 0.5F, 8, 1};
+    encode_texel(format_t::rgba32_float, color, floating);
+    expect_color(decode_texel(format_t::rgba32_float, floating), color);
+}
+
 int main() {
     return test::run([] {
+        test_texel_conversion();
         test_pixel_views();
         test_mip_storage_and_generation();
         test_mip_half_rounding();

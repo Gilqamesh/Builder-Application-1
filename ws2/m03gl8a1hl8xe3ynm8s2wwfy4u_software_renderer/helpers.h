@@ -46,10 +46,8 @@ using varying_t = std::variant<float, vector2f_t, shader::vector_t<float, 3>, ve
 using flat_t = std::variant<float, vector2f_t, shader::vector_t<float, 3>, vector4f_t,
     std::int32_t, shader::vector_t<std::int32_t, 2>, shader::vector_t<std::int32_t, 3>, shader::vector_t<std::int32_t, 4>,
     std::uint32_t, shader::vector_t<std::uint32_t, 2>, shader::vector_t<std::uint32_t, 3>, shader::vector_t<std::uint32_t, 4>>;
-using flat_entry_t = std::pair<std::uint32_t, flat_t>;
-using flat_values_t = std::vector<flat_entry_t>;
-using varying_entry_t = std::pair<std::uint32_t, varying_t>;
-using varying_values_t = std::vector<varying_entry_t>;
+using flat_values_t = std::vector<flat_t>;
+using varying_values_t = std::vector<varying_t>;
 using grid_point_t = std::array<std::int64_t, 2>;
 using triangle_t = std::array<std::size_t, 3>;
 // Unreduced nonnegative numerator and positive denominator.
@@ -85,8 +83,8 @@ struct pipeline_vertex_t {
 
 struct pipeline_vertex_view_t {
     vector4f_t m_clip_position;
-    std::span<const varying_entry_t> m_outputs;
-    std::span<const flat_entry_t> m_flat_outputs {};
+    std::span<const varying_t> m_outputs;
+    std::span<const flat_t> m_flat_outputs {};
 };
 
 struct clipping_buffer_t {
@@ -137,7 +135,14 @@ struct screen_vertex_t {
     double m_y;
     double m_ndc_z;
     double m_reciprocal_w;
-    std::span<const varying_entry_t> m_outputs;
+    std::span<const varying_t> m_outputs;
+};
+
+struct vertex_input_t {
+    const type_erased_array::type_erased_array_t& stream;
+    software_shader::value_t (*read)(const type_erased_array::type_erased_array_t&, std::uint32_t);
+
+    vertex_input_t(const type_erased_array::type_erased_array_t& stream, const vertex_attribute_t& attribute, shader::shader_data_type_t type);
 };
 
 // Renderer-owned storage retains its peak capacities across draws.
@@ -145,41 +150,49 @@ struct scratch_t {
     std::vector<pipeline_vertex_t> m_vertex_results;
     varying_values_t m_vertex_values;
     flat_values_t m_flat_values;
-    std::vector<shader::shader_interface_element_t> m_interpolated_inputs;
-    std::vector<shader::shader_interface_element_t> m_flat_inputs;
+    std::vector<std::size_t> m_interpolated_inputs;
+    std::vector<std::size_t> m_flat_inputs;
     clipping_workspace_t m_clipping;
     raster_workspace_t m_raster;
     varying_values_t m_fragment_inputs;
+    software_shader::prepared_program_t m_prepared_program;
+    std::vector<vertex_input_t> m_vertex_bindings;
+    std::vector<software_shader::value_t> m_vertex_inputs;
+    std::vector<software_shader::value_t> m_fragment_values;
+    std::vector<std::optional<software_shader::value_t>> m_vertex_outputs;
+    std::vector<std::optional<software_shader::value_t>> m_fragment_outputs;
     software_shader::execution_context_t m_execution_context;
     software_shader::vertex_io_t m_vertex_io {0, 0};
     software_shader::fragment_io_t m_fragment_io {vector4f_t(0.0F), true};
 };
 
+// A draw's color equations and attachment-specific storage operation.
+struct color_state_t {
+    blend_equation_t rgb;
+    blend_equation_t alpha;
+    vector4f_t constant;
+    color_mask_t mask;
+    void (*write)(const color_state_t&, const vector4f_t&, std::byte*) = nullptr;
+
+    color_state_t(const material_t& material, texture::format_t format);
+};
+
+// Borrows one draw's state; destruction releases prepared shader resources.
+struct draw_context_t {
+    const material_t& material;
+    const raster_bounds_t& bounds;
+    const framebuffer_t& framebuffer;
+    scratch_t& scratch;
+    color_state_t color;
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t* metric = nullptr;
+
+    draw_context_t(const material_t& material, const raster_bounds_t& bounds, const framebuffer_t& framebuffer, scratch_t& scratch);
+    ~draw_context_t();
+    draw_context_t(const draw_context_t&) = delete;
+    draw_context_t& operator=(const draw_context_t&) = delete;
+};
+
 void clear(clipping_buffer_t& buffer);
-
-void append_vertex(clipping_buffer_t& destination, const pipeline_vertex_view_t& source);
-
-varying_t interpolate(const varying_t& from, const varying_t& to, double factor);
-
-void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t first, pipeline_vertex_view_t second, std::size_t plane);
-
-bool between(grid_point_t p, grid_point_t a, grid_point_t b);
-
-bool opposite(edge_value_t a, edge_value_t b);
-
-bool intersects(grid_point_t a, grid_point_t b, grid_point_t c, grid_point_t d);
-
-bool simple_boundary(const raster_workspace_t& workspace);
-
-bool triangulate(raster_workspace_t& workspace);
-
-bool crossed_facing(std::span<const projected_vertex_t> vertices);
-
-int compare_varying(const varying_t& a, const varying_t& b);
-
-int compare_record(const projected_vertex_t& a, const projected_vertex_t& b);
-
-bool edge_record_less(const scan_event_t& a, const scan_event_t& b, std::span<const projected_vertex_t> vertices);
 
 pipeline_vertex_view_t view(const pipeline_vertex_t& vertex, const varying_values_t& values, const flat_values_t& flat_values = {});
 
@@ -225,49 +238,16 @@ void validate_vertex_attribute(
     shader::shader_data_type_t input_type
 );
 
-template <typename T>
-T read_scalar(
-    const type_erased_array::type_erased_array_t& stream,
-    std::uint32_t vertex_index
-);
 
-template <typename T, std::size_t N>
-shader::vector_t<T, N> read_vector(
-    const type_erased_array::type_erased_array_t& stream,
-    std::uint32_t vertex_index
-);
-
-template <typename T>
-void set_vertex_input_components(
-    software_shader::vertex_io_t& io,
-    std::uint32_t location,
-    const type_erased_array::type_erased_array_t& stream,
-    std::uint32_t vertex_index,
-    std::size_t component_count
-);
-
-void set_vertex_input(
-    software_shader::vertex_io_t& io,
-    const shader::shader_interface_element_t& input,
-    const type_erased_array::type_erased_array_t& stream,
-    const vertex_attribute_t& attribute,
-    std::uint32_t vertex_index
-);
 
 bool supported_fragment_input(const shader::shader_interface_element_t& input);
 
-template <typename T>
-T require_vertex_output(
-    const software_shader::vertex_io_t& io,
-    std::uint32_t location
-);
-
 varying_t vertex_output(
-    const software_shader::vertex_io_t& io,
+    const std::optional<software_shader::value_t>& output,
     const shader::shader_interface_element_t& input
 );
 
-flat_t flat_output(const software_shader::vertex_io_t& io, const shader::shader_interface_element_t& input);
+flat_t flat_output(const std::optional<software_shader::value_t>& output, const shader::shader_interface_element_t& input);
 
 std::optional<screen_vertex_t> project(
     const pipeline_vertex_view_t& vertex,
@@ -275,25 +255,13 @@ std::optional<screen_vertex_t> project(
     std::int64_t height
 );
 
-void set_fragment_inputs(
-    software_shader::fragment_io_t& io,
-    std::span<const varying_entry_t> inputs
-);
-
 // Sanitizes NaN/infinities and clamps finite values without vector normalization.
 float sanitize_unorm(float component);
 
-std::uint8_t to_unorm8(float component);
-
-rgba8_t to_rgba8(const vector4f_t& color);
-
 // Transfer functions consume finite [0,1] components.
-float decode_srgb(float component);
-float encode_srgb(float component);
 
 float blend_factor_component(blend_factor_t factor, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component);
 float blend_component(const blend_equation_t& blend_equation, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component);
-void write_color(const material_t& material, color_encoding_t encoding, const vector4f_t& source, std::byte* pixel);
 
 float depth_clear_value(float depth);
 
@@ -307,60 +275,11 @@ bool storage_overlaps(std::span<const std::byte> left, std::span<const std::byte
 
 void validate_feedback(const material_t& material, const framebuffer_t& framebuffer);
 
-void shade_sample(
-    const material_t& material,
-    const raster_bounds_t& bounds,
-    const framebuffer_t& framebuffer,
-    std::int64_t x,
-    std::int64_t y,
-    float depth,
-    float reciprocal_w,
-    bool front_facing,
-    std::span<const varying_entry_t> inputs,
-    software_shader::fragment_io_t& io,
-    software_shader::execution_context_t& execution_context,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric,
-    std::span<const flat_entry_t> flat_inputs = {}
-);
+void rasterize_point(draw_context_t& draw, const pipeline_vertex_view_t& vertex);
 
-void rasterize_point(
-    const material_t& material,
-    const raster_bounds_t& bounds,
-    const framebuffer_t& framebuffer,
-    const pipeline_vertex_view_t& vertex,
-    varying_values_t& fragment_inputs,
-    software_shader::fragment_io_t& fragment_io,
-    software_shader::execution_context_t& execution_context,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
-);
+void rasterize_line(draw_context_t& draw, const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second);
 
-void rasterize_line(
-    const material_t& material,
-    const raster_bounds_t& bounds,
-    const framebuffer_t& framebuffer,
-    const pipeline_vertex_view_t& first,
-    const pipeline_vertex_view_t& second,
-    clipping_workspace_t& clipping,
-    varying_values_t& fragment_inputs,
-    software_shader::fragment_io_t& fragment_io,
-    software_shader::execution_context_t& execution_context,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric
-);
-
-void rasterize_triangle(
-    const material_t& material,
-    const raster_bounds_t& bounds,
-    const framebuffer_t& framebuffer,
-    const pipeline_vertex_view_t& first,
-    const pipeline_vertex_view_t& second,
-    const pipeline_vertex_view_t& third,
-    raster_workspace_t& workspace,
-    varying_values_t& fragment_inputs,
-    software_shader::fragment_io_t& fragment_io,
-    software_shader::execution_context_t& execution_context,
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric,
-    std::span<const flat_entry_t> flat_inputs = {}
-);
+void rasterize_triangle(draw_context_t& draw, const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, std::span<const flat_t> flat_inputs);
 
 // The renderer and validation consume the same pre-shading coverage events.
 template <typename emit_type_t>
@@ -404,69 +323,20 @@ template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::screen_vertex_t>;
 
 template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_input_t>;
+
+template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scratch_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_state_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::draw_context_t>;
 
 } // namespace std
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
-
-template <typename T>
-T read_scalar(
-    const type_erased_array::type_erased_array_t& stream,
-    std::uint32_t vertex_index
-) {
-    return stream.read<T>(vertex_index);
-}
-
-template <typename T, std::size_t N>
-shader::vector_t<T, N> read_vector(
-    const type_erased_array::type_erased_array_t& stream,
-    std::uint32_t vertex_index
-) {
-    return shader::vector_t<T, N>(stream.read<std::array<T, N>>(vertex_index));
-}
-
-template <typename T>
-void set_vertex_input_components(
-    software_shader::vertex_io_t& io,
-    std::uint32_t location,
-    const type_erased_array::type_erased_array_t& stream,
-    std::uint32_t vertex_index,
-    std::size_t component_count
-) {
-    switch (component_count) {
-        case 1: {
-            io.input(location, read_scalar<T>(stream, vertex_index));
-        } break;
-        case 2: {
-            io.input(location, read_vector<T, 2>(stream, vertex_index));
-        } break;
-        case 3: {
-            io.input(location, read_vector<T, 3>(stream, vertex_index));
-        } break;
-        case 4: {
-            io.input(location, read_vector<T, 4>(stream, vertex_index));
-        } break;
-        default: {
-            throw std::logic_error("unsupported validated vertex component count");
-        }
-    }
-}
-
-template <typename T>
-T require_vertex_output(
-    const software_shader::vertex_io_t& io,
-    std::uint32_t location
-) {
-    const auto output = io.output<T>(location);
-    if (!output) {
-        throw std::runtime_error(std::format(
-            "vertex shader did not write output location {} required by the fragment shader",
-            location
-        ));
-    }
-    return *output;
-}
 
 template <typename emit_type_t>
 void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, emit_type_t&& emit, std::int64_t clip_first_x, std::int64_t clip_first_y) {
@@ -490,10 +360,15 @@ void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64
             const auto end_x = sample_bound({std::max({a[0], b[0], c[0]}) + 1, 1}, width);
             const auto first_y = std::max(clip_first_y, sample_bound({std::min({a[1], b[1], c[1]}), 1}, height));
             const auto end_y = sample_bound({std::max({a[1], b[1], c[1]}) + 1, 1}, height);
+            const grid_point_t origin {first_x * subpixels + center_offset, first_y * subpixels + center_offset};
+            std::array row_values {edge(b, c, origin), edge(c, a, origin), edge(a, b, origin)};
+            const std::array step_x {edge_value_t(b[1] - c[1]) * subpixels, edge_value_t(c[1] - a[1]) * subpixels, edge_value_t(a[1] - b[1]) * subpixels};
+            const std::array step_y {edge_value_t(c[0] - b[0]) * subpixels, edge_value_t(a[0] - c[0]) * subpixels, edge_value_t(b[0] - a[0]) * subpixels};
+            // An edge determinant is affine in X/Y. Wide-integer additions preserve
+            // exactly the same edge values and top/left decisions at every sample.
             for (auto y = first_y; y < end_y; ++y) {
+                auto values = row_values;
                 for (auto x = first_x; x < end_x; ++x) {
-                    const grid_point_t p {std::int64_t(x) * subpixels + center_offset, std::int64_t(y) * subpixels + center_offset};
-                    const std::array values {edge(b, c, p), edge(c, a, p), edge(a, b, p)};
                     bool covered = true;
                     for (std::size_t i = 0; i < 3; ++i) {
                         covered = covered && (0 < values[i] || (values[i] == 0 && top_left[i]));
@@ -507,7 +382,9 @@ void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64
                         };
                         emit(sample_t {x, y, {indices[0], indices[1], indices[2], 0}, weights, 3});
                     }
+                    for (std::size_t i = 0; i < 3; ++i) { values[i] += step_x[i]; }
                 }
+                for (std::size_t i = 0; i < 3; ++i) { row_values[i] += step_y[i]; }
             }
         }
         return;
@@ -741,6 +618,16 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::screen_vertex_t> 
 };
 
 template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_input_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_input_t& input, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "vertex input elements={}", input.stream.element_count());
+        return out;
+    }
+};
+
+template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scratch_t> {
     constexpr auto parse(std::format_parse_context& ctx) {
         return ctx.begin();
@@ -755,6 +642,27 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scratch_t> {
         out = std::format_to(out, ", raster: {}", scratch.m_raster);
         out = std::format_to(out, ", fragment_inputs: {}", scratch.m_fragment_inputs.size());
         out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_state_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_state_t& color, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "rgb={} alpha={}", color.rgb, color.alpha);
+        out = std::format_to(out, " constant={} mask={}", color.constant, color.mask);
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::draw_context_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::draw_context_t& draw, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "draw bounds={}", draw.bounds);
         return out;
     }
 };

@@ -209,7 +209,7 @@ game_t::game_t():
         geometry->mesh() = mesh;
 
         geometry->primitive_topology() = vertex_primitive_topology_t::triangle_fan;
-        geometry->finalize();
+        geometry->validate();
         render_item.geometry() = std::move(geometry);
 
         const auto material_index = rand() % materials.size();

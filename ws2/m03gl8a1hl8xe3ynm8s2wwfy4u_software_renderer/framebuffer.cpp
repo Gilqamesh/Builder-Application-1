@@ -79,21 +79,20 @@ std::span<std::uint8_t> framebuffer_t::stencil() const noexcept {
     return m_stencil;
 }
 
-void framebuffer_t::encoding(color_encoding_t encoding) {
-    switch (encoding) {
-        case color_encoding_t::linear:
-        case color_encoding_t::srgb: {
-            const auto format = encoding == color_encoding_t::linear ? texture::format_t::rgba8_unorm : texture::format_t::rgba8_srgb;
+void framebuffer_t::format(texture::format_t format) {
+    switch (format) {
+        case texture::format_t::rgba8_unorm:
+        case texture::format_t::rgba8_srgb: {
             m_pixels = texture::pixel_view_t(format, m_pixels.width(), m_pixels.height(), m_pixels.bytes());
         } break;
         default: {
-            throw std::invalid_argument(std::format("framebuffer_t::encoding rejects invalid encoding {}", encoding));
+            throw std::invalid_argument("framebuffer_t::format requires rgba8_unorm or rgba8_srgb");
         }
     }
 }
 
-color_encoding_t framebuffer_t::encoding() const {
-    return m_pixels.format() == texture::format_t::rgba8_srgb ? color_encoding_t::srgb : color_encoding_t::linear;
+texture::format_t framebuffer_t::format() const {
+    return m_pixels.format();
 }
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer

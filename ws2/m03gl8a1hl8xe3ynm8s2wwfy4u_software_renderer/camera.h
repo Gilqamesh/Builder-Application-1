@@ -113,7 +113,7 @@ public:
      * Requires a finite input, nonempty view rectangle, positive clip W, and
      * representable finite results. This operation does not perform visibility tests.
      */
-    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> to_view(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& world_position) const;
+    m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> world_to_framebuffer(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>& world_position) const;
 
 private:
     m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3> m_position;
