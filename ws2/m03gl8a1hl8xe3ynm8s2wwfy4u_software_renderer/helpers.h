@@ -16,14 +16,11 @@
 
 # include <algorithm>
 # include <array>
-# include <cmath>
 # include <cstddef>
 # include <cstdint>
 # include <format>
 # include <optional>
 # include <span>
-# include <stdexcept>
-# include <utility>
 # include <variant>
 # include <vector>
 
@@ -130,14 +127,6 @@ struct raster_workspace_t {
     bool m_front_facing = false;
 };
 
-struct screen_vertex_t {
-    double m_x;
-    double m_y;
-    double m_ndc_z;
-    double m_reciprocal_w;
-    std::span<const varying_t> m_outputs;
-};
-
 struct vertex_input_t {
     const type_erased_array::type_erased_array_t& stream;
     software_shader::value_t (*read)(const type_erased_array::type_erased_array_t&, std::uint32_t);
@@ -154,7 +143,6 @@ struct scratch_t {
     std::vector<std::size_t> m_flat_inputs;
     clipping_workspace_t m_clipping;
     raster_workspace_t m_raster;
-    varying_values_t m_fragment_inputs;
     software_shader::prepared_program_t m_prepared_program;
     std::vector<vertex_input_t> m_vertex_bindings;
     std::vector<software_shader::value_t> m_vertex_inputs;
@@ -192,13 +180,9 @@ struct draw_context_t {
     draw_context_t& operator=(const draw_context_t&) = delete;
 };
 
-void clear(clipping_buffer_t& buffer);
-
 pipeline_vertex_view_t view(const pipeline_vertex_t& vertex, const varying_values_t& values, const flat_values_t& flat_values = {});
 
 double clip_distance(const pipeline_vertex_view_t& vertex, std::size_t plane);
-
-bool inside_clip_volume(const pipeline_vertex_view_t& vertex);
 
 std::optional<std::size_t> clip_line(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, clipping_workspace_t& workspace);
 
@@ -209,8 +193,6 @@ double projectable_reciprocal_w(float w);
 std::int64_t snap(double screen, std::int64_t extent);
 
 edge_value_t edge(grid_point_t a, grid_point_t b, grid_point_t p);
-
-edge_value_t ceil_div(edge_value_t numerator, edge_value_t denominator);
 
 int compare_fraction(fraction_t a, fraction_t b);
 
@@ -224,21 +206,13 @@ void scanline_events(std::span<const projected_vertex_t> vertices, std::int64_t 
 
 sample_t span_sample(const scan_event_t& left, const scan_event_t& right, std::span<const projected_vertex_t> vertices, std::int64_t x, std::int64_t y);
 
-// Returns window depth and reciprocal W, and resolves each interpolated payload.
-std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, varying_values_t& outputs);
+// Writes interpolated payloads to the mapped fragment input slots, preserving other slots.
+// Returns window depth and reciprocal W.
+std::array<double, 2> interpolate_sample(std::span<const projected_vertex_t> vertices, const sample_t& sample, std::span<const std::size_t> input_slots, std::span<software_shader::value_t> outputs);
 
 bool finite(const vector4f_t& vector);
 
 std::size_t shader_component_count(shader::shader_data_type_t type);
-
-vertex_attribute_type_t expected_attribute_type(shader::shader_scalar_type_t type);
-
-void validate_vertex_attribute(
-    const vertex_attribute_t& attribute,
-    shader::shader_data_type_t input_type
-);
-
-
 
 bool supported_fragment_input(const shader::shader_interface_element_t& input);
 
@@ -249,29 +223,10 @@ varying_t vertex_output(
 
 flat_t flat_output(const std::optional<software_shader::value_t>& output, const shader::shader_interface_element_t& input);
 
-std::optional<screen_vertex_t> project(
-    const pipeline_vertex_view_t& vertex,
-    std::int64_t width,
-    std::int64_t height
-);
-
 // Sanitizes NaN/infinities and clamps finite values without vector normalization.
 float sanitize_unorm(float component);
 
-// Transfer functions consume finite [0,1] components.
-
-float blend_factor_component(blend_factor_t factor, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component);
-float blend_component(const blend_equation_t& blend_equation, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component);
-
 float depth_clear_value(float depth);
-
-bool depth_passes(comparison_t comparison, float incoming, float stored);
-
-bool stencil_passes(const stencil_state_t& stencil_state, std::uint8_t stored);
-
-void write_stencil(const stencil_state_t& stencil_state, stencil_op_t operation, std::uint8_t& stored, m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric);
-
-bool storage_overlaps(std::span<const std::byte> left, std::span<const std::byte> right);
 
 void validate_feedback(const material_t& material, const framebuffer_t& framebuffer);
 
@@ -318,9 +273,6 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::sample_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_workspace_t>;
-
-template <>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::screen_vertex_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_input_t>;
@@ -597,27 +549,6 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_workspace_
 };
 
 template <>
-struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::screen_vertex_t> {
-    constexpr auto parse(std::format_parse_context& ctx) {
-        return ctx.begin();
-    }
-
-    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::screen_vertex_t& vertex, auto& ctx) const {
-        auto out = ctx.out();
-
-        out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "x: {}", vertex.m_x);
-        out = std::format_to(out, ", y: {}", vertex.m_y);
-        out = std::format_to(out, ", ndc_z: {}", vertex.m_ndc_z);
-        out = std::format_to(out, ", reciprocal_w: {}", vertex.m_reciprocal_w);
-        out = std::format_to(out, ", outputs: {}", vertex.m_outputs.size());
-        out = std::format_to(out, " }}");
-
-        return out;
-    }
-};
-
-template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_input_t> {
     constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_input_t& input, auto& ctx) const {
@@ -640,7 +571,7 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scratch_t> {
         out = std::format_to(out, ", values: {}", scratch.m_vertex_values.size());
         out = std::format_to(out, ", clipping: {}", scratch.m_clipping);
         out = std::format_to(out, ", raster: {}", scratch.m_raster);
-        out = std::format_to(out, ", fragment_inputs: {}", scratch.m_fragment_inputs.size());
+        out = std::format_to(out, ", fragment_inputs: {}", scratch.m_fragment_values.size());
         out = std::format_to(out, " }}");
         return out;
     }

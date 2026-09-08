@@ -194,7 +194,6 @@ void software_renderer_t::draw(
     scratch.m_vertex_results.clear();
     scratch.m_flat_values.clear();
     scratch.m_vertex_values.clear();
-    scratch.m_fragment_inputs.clear();
     scratch.m_vertex_results.reserve(indices.size());
     scratch.m_vertex_io.object_to_world(object_to_world);
     scratch.m_vertex_io.world_to_clip(world_to_clip);

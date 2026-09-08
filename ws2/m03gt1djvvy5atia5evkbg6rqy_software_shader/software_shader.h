@@ -6,29 +6,28 @@
 
 # include <concepts>
 # include <cstddef>
-# include <utility>
 # include <variant>
 # include <cstdint>
 # include <format>
 # include <optional>
 # include <span>
+# include <stdexcept>
 # include <vector>
 
 namespace m03gt1djvvy5atia5evkbg6rqy_software_shader {
 
-template <typename T, typename V>
-concept uniform_provider = requires(const T& bindings, std::uint32_t location) {
-    { bindings.template uniform<V>(location) } -> std::same_as<V>;
-};
-
-/** @brief Reads typed uniform values and borrowed resources during preparation. */
+/**
+ * @brief Borrows current uniform values and resources during preparation.
+ *
+ * Uniform references need remain valid only until copied during prepare();
+ * preparation retains their values, never references to provider uniform storage.
+ */
 template <typename T>
 concept binding_provider = requires(const T& bindings, std::uint32_t location) {
+    { bindings.uniform_value(location) } -> std::same_as<const value_t&>;
     { bindings.texture(location) } -> std::same_as<const texture::texture_t&>;
     { bindings.sampler(location) } -> std::same_as<const texture::sampler_t&>;
-} && []<std::size_t... I>(std::index_sequence<I...>) {
-    return (uniform_provider<T, std::variant_alternative_t<I, value_t>> && ...);
-}(std::make_index_sequence<std::variant_size_v<value_t>>{});
+};
 
 /**
  * @brief Owns two immutable compiled shader stages and their reflected interfaces.
@@ -127,7 +126,8 @@ private:
  * prepare() copies uniform values and borrows the program, textures and samplers.
  * Keep these objects alive and unmoved until the next preparation or destruction;
  * changes to source bindings require preparation again. Texture contents remain live.
- * The binding provider is borrowed only during prepare(). Preparation reuses
+ * The binding provider is borrowed only during prepare(); no references to its
+ * uniform storage are retained. Preparation reuses
  * binding capacity; once sufficient, it allocates no binding storage. This excludes
  * allocations inside provider getters and exception construction.
  * Copies own independent uniform snapshots and share the same resource borrows.
@@ -208,11 +208,12 @@ void program_t::execution_context_t::prepared_t::resolve(const shader::shader_in
             case shader::shader_data_category_t::texture_2d: { resolved.emplace_back(&bindings.texture(binding.index)); } break;
             case shader::shader_data_category_t::sampler: { resolved.emplace_back(&bindings.sampler(binding.index)); } break;
             default: {
-                const auto found = [&]<std::size_t... I>(std::index_sequence<I...>) {
-                    return ((binding.type == shader::shader_data_type<std::variant_alternative_t<I, value_t>>() &&
-                        (resolved.emplace_back(value_t(bindings.template uniform<std::variant_alternative_t<I, value_t>>(binding.index))), true)) || ...);
-                }(std::make_index_sequence<std::variant_size_v<value_t>>{});
-                if (!found) { throw std::logic_error("prepared shader encountered an unsupported uniform type"); }
+                const auto& uniform = bindings.uniform_value(binding.index);
+                const auto type = std::visit([]<typename V>(const V&) { return shader::shader_data_type<V>(); }, uniform);
+                if (type != binding.type) {
+                    throw std::invalid_argument(std::format("prepared shader uniform binding {} has the wrong type", binding.index));
+                }
+                resolved.emplace_back(uniform);
             } break;
         }
     }

@@ -413,6 +413,8 @@ void test_bindings_own_uniforms_and_borrow_separate_resources() {
     source_uniform = 0.75F;
 
     test::expect(std::equal_to<>(), bindings.uniform<float>(0), 0.25F);
+    test::expect(std::equal_to<>(), std::get<float>(bindings.uniform_value(0)), 0.25F);
+    test::expect_throws<std::invalid_argument>([&] { (void)bindings.uniform_value(99); });
     test::expect(std::identity(), &bindings.texture(0) == &image);
     test::expect(std::identity(), &bindings.sampler(0) == &sampler);
 
@@ -776,6 +778,29 @@ void test_compiled_nested_loops() {
     }
 }
 
+// Implements only the three ordinary resource queries required by preparation.
+struct value_binding_provider_t {
+    software_shader::bindings_t bindings;
+
+    const software_shader::value_t& uniform_value(std::uint32_t location) const;
+    const texture::texture_t& texture(std::uint32_t location) const;
+    const texture::sampler_t& sampler(std::uint32_t location) const;
+};
+
+const software_shader::value_t& value_binding_provider_t::uniform_value(std::uint32_t location) const {
+    return bindings.uniform_value(location);
+}
+
+const texture::texture_t& value_binding_provider_t::texture(std::uint32_t location) const {
+    return bindings.texture(location);
+}
+
+const texture::sampler_t& value_binding_provider_t::sampler(std::uint32_t location) const {
+    return bindings.sampler(location);
+}
+
+static_assert(software_shader::binding_provider<value_binding_provider_t>);
+
 template <typename T>
 void test_compiled_value(T expected, software_shader::execution_context_t& context) {
     shader::vertex_shader_ast_builder_t vertex;
@@ -799,6 +824,22 @@ void test_compiled_value(T expected, software_shader::execution_context_t& conte
         test::expect(std::equal_to<>(), *vertex_io.output<T>(location), expected);
         test::expect(std::equal_to<>(), *fragment_io.output<T>(location), expected);
     }
+    software_shader::prepared_program_t prepared;
+    {
+        value_binding_provider_t provider;
+        provider.bindings.uniform(0, expected);
+        prepared.prepare(program, provider);
+        const auto& borrowed_uniform = provider.uniform_value(0);
+        provider.bindings.uniform(0, std::uint32_t(0));
+        test::expect(std::equal_to<>(), std::get<std::uint32_t>(borrowed_uniform), std::uint32_t(0));
+    }
+    // Both stages retain their snapshot after replacement and provider destruction.
+    const std::array<software_shader::value_t, 1> inputs {expected};
+    std::array<std::optional<software_shader::value_t>, 3> outputs;
+    prepared.run(inputs, outputs, vertex_io, context);
+    for (const auto& output : outputs) { test::expect(std::equal_to<>(), std::get<T>(*output), expected); }
+    prepared.run(inputs, outputs, fragment_io, context);
+    for (const auto& output : outputs) { test::expect(std::equal_to<>(), std::get<T>(*output), expected); }
 }
 
 void test_compiled_value_types() {
@@ -994,6 +1035,10 @@ void test_prepared_execution() {
     test::expect(std::equal_to<>(), std::get<float>(*outputs[0]), 4.5F);
     test::expect_throws<std::invalid_argument>([&] { prepared.run(std::span(inputs).first(2), outputs, vertex_io, context); });
     for (const auto& output : outputs) { test::expect(std::logical_not<>(), output.has_value()); }
+    bindings.uniform(88, std::uint32_t(7));
+    test::expect_throws<std::invalid_argument>([&] { prepared.prepare(program, bindings); });
+    test::expect_throws<std::logic_error>([&] { prepared.run(inputs, outputs, vertex_io, context); });
+    bindings.uniform(88, 0.5F);
     software_shader::bindings_t missing;
     test::expect_throws<std::invalid_argument>([&] { prepared.prepare(program, missing); });
     test::expect_throws<std::logic_error>([&] { prepared.run(inputs, outputs, vertex_io, context); });

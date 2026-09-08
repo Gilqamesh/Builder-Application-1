@@ -164,6 +164,15 @@ public:
     std::remove_cvref_t<T> uniform(std::uint32_t location) const;
 
     /**
+     * @brief Borrows the current uniform value; missing bindings fail.
+     *
+     * The reference observes subsequent replacement at this binding and remains
+     * valid until the material is moved from or destroyed. Preparation copies the value and
+     * retains no reference to it.
+     */
+    const software_shader::value_t& uniform_value(std::uint32_t location) const;
+
+    /**
      * @brief Replaces an owned texture binding, or removes it when the value is null.
      */
     void texture(std::uint32_t location, std::shared_ptr<texture::texture_t> value);
@@ -334,9 +343,7 @@ void material_t::uniform(std::uint32_t location, T value) {
 
 template <software_shader::shader::shader_value T>
 std::remove_cvref_t<T> material_t::uniform(std::uint32_t location) const {
-    const auto iterator = m_uniforms.find(location);
-    if (iterator == m_uniforms.end()) { throw std::invalid_argument(std::format("material uniform binding {} is missing", location)); }
-    const auto* uniform = std::get_if<std::remove_cvref_t<T>>(&iterator->second);
+    const auto* uniform = std::get_if<std::remove_cvref_t<T>>(&uniform_value(location));
     if (!uniform) { throw std::invalid_argument(std::format("material uniform binding {} has the wrong type", location)); }
     return *uniform;
 }

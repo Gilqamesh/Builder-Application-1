@@ -29,6 +29,14 @@ const std::shared_ptr<const software_shader::program_t>& material_t::program() c
     return m_program;
 }
 
+const software_shader::value_t& material_t::uniform_value(std::uint32_t location) const {
+    const auto iterator = m_uniforms.find(location);
+    if (iterator == m_uniforms.end()) {
+        throw std::invalid_argument(std::format("material uniform binding {} is missing", location));
+    }
+    return iterator->second;
+}
+
 void material_t::texture(std::uint32_t location, std::shared_ptr<texture::texture_t> value) {
     if (value) { m_textures.insert_or_assign(location, std::move(value)); }
     else { m_textures.erase(location); }

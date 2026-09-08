@@ -35,6 +35,15 @@ public:
     template <shader::shader_value T>
     std::remove_cvref_t<T> uniform(std::uint32_t binding) const;
 
+    /**
+     * @brief Borrows the current uniform value; missing bindings fail.
+     *
+     * The reference observes subsequent replacement at this binding. It remains
+     * valid until the provider is assigned, moved from, or destroyed.
+     * Preparation copies the value and retains no reference to it.
+     */
+    const value_t& uniform_value(std::uint32_t binding) const;
+
     void texture(std::uint32_t binding, const texture::texture_t& texture);
     void texture(std::uint32_t binding, texture::texture_t&& texture) = delete;
     void texture(std::uint32_t binding, const texture::texture_t&& texture) = delete;
@@ -48,8 +57,6 @@ public:
     void clear_sampler(std::uint32_t binding);
 
 private:
-    const value_t& uniform_value(std::uint32_t binding) const;
-
     std::unordered_map<std::uint32_t, value_t> m_uniforms;
     std::unordered_map<std::uint32_t, std::reference_wrapper<const texture::texture_t>> m_textures;
     std::unordered_map<std::uint32_t, std::reference_wrapper<const texture::sampler_t>> m_samplers;

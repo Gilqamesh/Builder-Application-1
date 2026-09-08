@@ -852,10 +852,14 @@ void test_material_resource_mapping() {
     test::expect(std::identity(), &live_bindings.texture(0) != saved_texture);
     test::expect(std::identity(), &material_copy.texture(0) == saved_texture);
     test::expect_throws<std::invalid_argument>([&] { (void)live_material->uniform<float>(12); });
+    test::expect_throws<std::invalid_argument>([&] { (void)live_bindings.uniform_value(12); });
     live_material->uniform(12, 1.0F);
+    const auto& borrowed_uniform = live_bindings.uniform_value(12);
+    test::expect(std::equal_to<>(), std::get<float>(borrowed_uniform), 1.0F);
     test::expect(std::identity(), live_bindings.uniform<float>(12) == 1.0F);
     test::expect_throws<std::invalid_argument>([&] { (void)live_material->uniform<std::int32_t>(12); });
     live_material->uniform(12, 2.0F);
+    test::expect(std::equal_to<>(), std::get<float>(borrowed_uniform), 2.0F);
     test::expect(std::identity(), live_bindings.uniform<float>(12) == 2.0F);
     auto mapped_material = make_material(make_unorm_texture(red), make_sampler(), program);
     mapped_material->texture(0, make_unorm_texture(texture_color));
@@ -1205,9 +1209,10 @@ void test_polygon(std::vector<raster::grid_point_t> points, const mask_t& expect
             require(count_samples(workspace, 8, 8) == expected);
             require(winding_oracle(workspace.m_vertices, 8, 8) == expected);
             std::vector<std::array<double, 3>> actual(64);
-            raster::varying_values_t output;
+            std::array<software_shader::value_t, 4> output;
+            const std::array<std::size_t, 4> input_slots {0, 1, 2, 3};
             raster::visit_samples(workspace, 8, 8, [&](const raster::sample_t& sample) {
-                const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, output);
+                const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, input_slots, output);
                 require(0.0 < dq[1]);
                 actual[sample.m_y * 8 + sample.m_x] = {dq[0], dq[1], std::get<float>(output[0])};
             });
@@ -1274,15 +1279,17 @@ void test_interpolation() {
     int hits = 0;
     raster::visit_samples(workspace, 32, 32, [&](const auto& sample) {
         ++hits;
-        raster::varying_values_t output;
-        const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, output);
+        std::array<software_shader::value_t, 5> output {std::uint32_t(0xfedcba98)};
+        const std::array<std::size_t, 4> input_slots {4, 1, 3, 2};
+        const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, input_slots, output);
+        require(std::get<std::uint32_t>(output[0]) == std::uint32_t(0xfedcba98));
         near(dq[0], 0.6);
         near(dq[1], 0.5);
-        near(std::get<float>(output[0]), 0.5);
+        near(std::get<float>(output[4]), 0.5);
         near(std::get<raster::vector2f_t>(output[1])[0], 0.5);
         near(std::get<raster::vector2f_t>(output[1])[1], 7.0);
-        near(std::get<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>(output[2])[2], 0.5);
-        near(std::get<raster::vector4f_t>(output[3])[3], 0.5);
+        near(std::get<m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>>(output[3])[2], 0.5);
+        near(std::get<raster::vector4f_t>(output[2])[3], 0.5);
     });
     require(hits == 1);
     // Triangle sample: grid (0,0),(1024,0),(0,1024), lambda=(3/4,1/8,1/8).
@@ -1293,8 +1300,9 @@ void test_interpolation() {
     raster::prepare_polygon(workspace);
     raster::visit_samples(workspace, 4, 4, [&](const auto& sample) {
         if (sample.m_x == 0 && sample.m_y == 0) {
-            raster::varying_values_t output;
-            const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, output);
+            std::array<software_shader::value_t, 4> output;
+            const std::array<std::size_t, 4> input_slots {0, 1, 2, 3};
+            const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, input_slots, output);
             near(dq[1], 27.0 / 32.0);
             near(dq[0], 11.0 / 32.0);
             near(std::get<float>(output[0]), 4.0 / 27.0);
@@ -1308,8 +1316,9 @@ void test_interpolation() {
         workspace.m_vertices[i].m_reciprocal_w = std::numeric_limits<float>::max();
     }
     raster::visit_samples(workspace, 4, 4, [&](const auto& sample) {
-        raster::varying_values_t output;
-        const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, output);
+        std::array<software_shader::value_t, 4> output;
+        const std::array<std::size_t, 4> input_slots {0, 1, 2, 3};
+        const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, input_slots, output);
         require(std::isfinite(float(dq[1])));
         require(std::get<float>(output[0]) == std::numeric_limits<float>::max());
     });
@@ -1394,9 +1403,9 @@ void test_plane_coverage() {
                         require(united.insert(p).second);
                     }
                     if (4 <= plane) {
-                        raster::varying_values_t outputs;
+                        std::span<software_shader::value_t> outputs;
                         raster::visit_samples(workspace, 32, 32, [&](const auto& sample) {
-                            const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, outputs);
+                            const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, {}, outputs);
                             const double ndc_z = plane == 6 ? double(sample.m_x - sample.m_y) / 16.0
                                                             : (plane == 4 ? -1.0 : 1.0) * (double(sample.m_x) + 0.5) / 16.0;
                             near(dq[0], 0.5 * ndc_z + 0.5);
@@ -3699,6 +3708,49 @@ void test_mixed_interpolation_on_points_and_lines() {
     }
 }
 
+void test_fragment_input_reuse() {
+    std::array<std::shared_ptr<material_t>, 2> materials;
+    for (std::size_t layout = 0; layout < materials.size(); ++layout) {
+        const std::uint32_t flat_location = layout == 0 ? 3 : 31;
+        const std::uint32_t smooth_location = layout == 0 ? 31 : 3;
+        shader::vertex_shader_ast_builder_t vertex;
+        vertex.position(vertex.construct<vector4f_t>(vertex.input<vector2f_t>(0), 0.0F, 1.0F));
+        vertex.output(flat_location, vertex.vertex_index());
+        vertex.output(smooth_location, vertex.uniform<float>(0));
+        vertex.output(17, vertex.uniform<vector2f_t>(1));
+        shader::fragment_shader_ast_builder_t fragment;
+        const auto flat = fragment.input<std::int32_t>(flat_location, shader::interpolation_t::flat);
+        const auto smooth = fragment.input<float>(smooth_location);
+        const auto linear = fragment.input<vector2f_t>(17, shader::interpolation_t::noperspective);
+        fragment.color(fragment.construct<vector4f_t>(smooth, linear, 1.0F));
+        fragment.branch(flat != fragment.uniform<std::int32_t>(2), [&] { fragment.color(vector4f_t({1, 0, 1, 1})); });
+        materials[layout] = std::make_shared<material_t>(std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize()));
+    }
+    std::vector<rgba8_t> pixels(16 * 16, clear_color);
+    software_renderer_t renderer(framebuffer_t(pixels, 16, 16));
+    const auto camera = make_camera(16, 16);
+    for (auto topology : {vertex_primitive_topology_t::point, vertex_primitive_topology_t::line, vertex_primitive_topology_t::triangle}) {
+        const auto indices = topology == vertex_primitive_topology_t::point ? std::vector<std::uint32_t>{2} :
+            (topology == vertex_primitive_topology_t::line ? std::vector<std::uint32_t>{0, 2} : std::vector<std::uint32_t>{0, 1, 2});
+        const auto geometry = make_geometry({{-0.75F, -0.75F}, {0.75F, -0.75F}, {0.0F, 0.75F}}, indices, topology);
+        for (std::size_t draw = 0; draw < 6; ++draw) {
+            const auto& material = materials[draw % materials.size()];
+            const bool first = draw % 3 == 0;
+            material->provoking_vertex(first ? provoking_vertex_t::first : provoking_vertex_t::last);
+            material->uniform(0, first ? 0.25F : 0.75F);
+            material->uniform(1, first ? vector2f_t({0.5F, 0.75F}) : vector2f_t({0.25F, 0.5F}));
+            material->uniform(2, std::int32_t(first ? indices.front() : indices.back()));
+            renderer.clear_color(clear_color, inactive_metric);
+            renderer.draw(camera, make_render_item(geometry, material), inactive_metric);
+            const rgba8_t expected = first ? rgba8_t{64, 128, 191, 255} : rgba8_t{191, 64, 128, 255};
+            require(colored_pixel_count(pixels) != 0);
+            for (const auto& pixel : pixels) {
+                if (!same_color(pixel, clear_color)) { expect_color(pixel, expected); }
+            }
+        }
+    }
+}
+
 void run_resource_tests() {
     test_rotation_and_item_transform();
     test_resource_model();
@@ -3714,6 +3766,7 @@ void run_framebuffer_tests() {
 }
 
 void run_pipeline_tests() {
+    test_fragment_input_reuse();
     test_mixed_interpolation_on_points_and_lines();
     test_interpolation_coverage_and_clip_planes();
     test_render_generate_sample_lod();
