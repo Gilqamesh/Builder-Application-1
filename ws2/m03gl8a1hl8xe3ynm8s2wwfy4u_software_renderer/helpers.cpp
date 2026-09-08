@@ -72,7 +72,7 @@ color_state_t::color_state_t(const material_t& material, texture::format_t forma
     const auto replaces = [](const blend_equation_t& equation) {
         return equation.source == blend_factor_t::one && equation.destination == blend_factor_t::zero && equation.operation == blend_op_t::add;
     };
-    const bool replacement = !material.blend() || (replaces(rgb) && replaces(alpha));
+    replacement = !material.blend() || (replaces(rgb) && replaces(alpha));
     const auto select = [&]<texture::format_t Format>() {
         if (replacement) {
             return mask == color_mask_t::all ? &write_color<Format, true, false> : &write_color<Format, true, true>;
@@ -108,7 +108,7 @@ double clip_distance(const pipeline_vertex_view_t& vertex, std::size_t plane) {
     return plane % 2 == 0 ? component + w : w - component;
 }
 
-std::optional<std::size_t> clip_line(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, clipping_workspace_t& workspace) {
+std::optional<std::size_t> clip_line(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, clipping_workspace_t& workspace, raster_metrics_t* counters) {
     clear(workspace.buffers[0]);
     append_vertex(workspace.buffers[0], first);
     append_vertex(workspace.buffers[0], second);
@@ -130,11 +130,11 @@ std::optional<std::size_t> clip_line(const pipeline_vertex_view_t& first, const 
             append_vertex(destination, on_plane);
             append_vertex(destination, on_plane);
         } else if (da < 0.0) {
-            append_intersection(destination, from, to, plane);
+            append_intersection(destination, from, to, plane, counters);
             append_vertex(destination, to);
         } else {
             append_vertex(destination, from);
-            append_intersection(destination, from, to, plane);
+            append_intersection(destination, from, to, plane, counters);
         }
         source_index = 1 - source_index;
     }
@@ -146,7 +146,7 @@ std::optional<std::size_t> clip_line(const pipeline_vertex_view_t& first, const 
     return source_index;
 }
 
-std::optional<std::size_t> clip_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, clipping_workspace_t& workspace) {
+std::optional<std::size_t> clip_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, clipping_workspace_t& workspace, raster_metrics_t* counters) {
     clear(workspace.buffers[0]);
     append_vertex(workspace.buffers[0], first);
     append_vertex(workspace.buffers[0], second);
@@ -163,11 +163,11 @@ std::optional<std::size_t> clip_triangle(const pipeline_vertex_view_t& first, co
             const double dc = clip_distance(current, plane);
             if (0.0 <= dc) {
                 if (dp < 0.0 && 0.0 < dc) {
-                    append_intersection(destination, previous, current, plane);
+                    append_intersection(destination, previous, current, plane, counters);
                 }
                 append_vertex(destination, current);
             } else if (0.0 < dp) {
-                append_intersection(destination, previous, current, plane);
+                append_intersection(destination, previous, current, plane, counters);
             }
             previous = current;
             dp = dc;
@@ -265,10 +265,10 @@ void prepare_polygon(raster_workspace_t& workspace) {
     }
 }
 
-void prepare_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, std::int64_t width, std::int64_t height, raster_workspace_t& workspace) {
+void prepare_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, std::int64_t width, std::int64_t height, raster_workspace_t& workspace, raster_metrics_t* counters) {
     workspace.empty = true;
     workspace.vertices.clear();
-    const auto clipped = clip_triangle(first, second, third, workspace.clipping);
+    const auto clipped = clip_triangle(first, second, third, workspace.clipping, counters);
     if (!clipped) {
         return;
     }
@@ -513,11 +513,14 @@ void rasterize_point(draw_context_t& draw, const pipeline_vertex_view_t& vertex)
     const auto& bounds = draw.bounds;
     auto& scratch = draw.scratch;
 
+    if (draw.counters) { ++draw.counters->points; }
     if (!inside_clip_volume(vertex)) {
+        if (draw.counters) { ++draw.counters->clipped_out; }
         return;
     }
     const auto screen = project(vertex, bounds.view_width, bounds.view_height);
     if (!screen) {
+        if (draw.counters) { ++draw.counters->clipped_out; }
         return;
     }
 
@@ -553,8 +556,10 @@ void rasterize_line(draw_context_t& draw, const pipeline_vertex_view_t& first, c
     auto& scratch = draw.scratch;
 
     const auto flat_inputs = material.provoking_vertex() == provoking_vertex_t::first ? first.flat_outputs : second.flat_outputs;
-    const auto clipped_index = clip_line(first, second, clipping);
+    if (draw.counters) { ++draw.counters->lines; }
+    const auto clipped_index = clip_line(first, second, clipping, draw.counters);
     if (!clipped_index) {
+        if (draw.counters) { ++draw.counters->clipped_out; }
         return;
     }
     const auto& clipped = clipping.buffers[*clipped_index];
@@ -563,6 +568,7 @@ void rasterize_line(draw_context_t& draw, const pipeline_vertex_view_t& first, c
     const auto first_screen = project(clipped_first, bounds.view_width, bounds.view_height);
     const auto second_screen = project(clipped_second, bounds.view_width, bounds.view_height);
     if (!first_screen || !second_screen) {
+        if (draw.counters) { ++draw.counters->clipped_out; }
         return;
     }
 
@@ -610,16 +616,35 @@ void rasterize_triangle(draw_context_t& draw, const pipeline_vertex_view_t& firs
     auto& workspace = draw.scratch.raster;
     auto& scratch = draw.scratch;
 
-    prepare_triangle(first, second, third, bounds.view_width, bounds.view_height, workspace);
+    if (draw.counters) { ++draw.counters->triangles; }
+    prepare_triangle(first, second, third, bounds.view_width, bounds.view_height, workspace, draw.counters);
     if (workspace.empty) {
+        if (draw.counters) {
+            if (workspace.vertices.empty()) { ++draw.counters->clipped_out; }
+            else { ++draw.counters->degenerate_triangles; }
+        }
         return;
     }
     // Geometric winding also drives triangulation. Derive the material's effective
     // facing separately so a front-face selection cannot change sample coverage.
     const bool front_facing = workspace.front_facing == (material.front_face() == winding_t::counter_clockwise);
+    if (draw.counters) {
+        if (front_facing) { ++draw.counters->front_triangles; }
+        else { ++draw.counters->back_triangles; }
+    }
     const auto cull = material.cull();
     if (cull == cull_mode_t::both || (cull == cull_mode_t::front && front_facing) || (cull == cull_mode_t::back && !front_facing)) {
+        if (draw.counters) { ++draw.counters->culled_triangles; }
         return;
+    }
+    if (draw.counters) {
+        ++draw.counters->rasterized_polygons;
+        if (workspace.use_triangles) {
+            ++draw.counters->triangulated_polygons;
+            draw.counters->generated_triangles += workspace.triangles.size();
+        } else {
+            ++draw.counters->winding_polygons;
+        }
     }
     load_flat_inputs(scratch, flat_inputs);
     visit_samples(workspace, bounds.end_x, bounds.end_y, [&](const sample_t& sample) {
@@ -631,7 +656,7 @@ void rasterize_triangle(draw_context_t& draw, const pipeline_vertex_view_t& firs
             float(depth_w[1]),
             front_facing
         );
-    }, bounds.first_x, bounds.first_y);
+    }, bounds.first_x, bounds.first_y, draw.counters);
 }
 
 void clear(clipping_buffer_t& buffer) {
@@ -671,7 +696,7 @@ varying_t interpolate(const varying_t& from, const varying_t& to, double factor)
         from);
 }
 
-void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t first, pipeline_vertex_view_t second, std::size_t plane) {
+void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t first, pipeline_vertex_view_t second, std::size_t plane, raster_metrics_t* counters) {
     if (std::lexicographical_compare(second.clip_position.begin(), second.clip_position.end(), first.clip_position.begin(), first.clip_position.end())) {
         std::swap(first, second);
     }
@@ -720,6 +745,7 @@ void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t 
         destination.values.push_back(interpolate(first.outputs[i], second.outputs[i], factor));
     }
     destination.vertices.push_back({position, {offset, first.outputs.size()}});
+    if (counters) { ++counters->clipping_intersections; }
 }
 
 bool between(grid_point_t p, grid_point_t a, grid_point_t b) {
@@ -1061,7 +1087,7 @@ bool stencil_passes(const stencil_state_t& stencil_state, std::uint8_t stored) {
     throw std::invalid_argument(std::format("stencil_passes rejects invalid comparison {}", stencil_state.comparison));
 }
 
-void write_stencil(const stencil_state_t& stencil_state, stencil_op_t operation, std::uint8_t& stored, m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric) {
+void write_stencil(const stencil_state_t& stencil_state, stencil_op_t operation, std::uint8_t& stored, raster_metrics_t* counters) {
     if (operation == stencil_op_t::keep || stencil_state.write_mask == 0) {
         return;
     }
@@ -1078,7 +1104,7 @@ void write_stencil(const stencil_state_t& stencil_state, stencil_op_t operation,
         default: { throw std::invalid_argument(std::format("write_stencil rejects invalid operation {}", operation)); }
     }
     stored = static_cast<std::uint8_t>((stored & ~stencil_state.write_mask) | (candidate & stencil_state.write_mask));
-    metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept { ++metric.stencil_writes; });
+    if (counters) { ++counters->stencil_writes; }
 }
 
 bool storage_overlaps(std::span<const std::byte> left, std::span<const std::byte> right) {
@@ -1101,7 +1127,7 @@ void shade_sample(draw_context_t& draw, std::int64_t x, std::int64_t y, float de
     const auto& framebuffer = draw.framebuffer;
     auto& scratch = draw.scratch;
     auto& io = scratch.fragment_io;
-    auto& metric = *draw.metric;
+    auto* counters = draw.counters;
 
     if (x < bounds.first_x || y < bounds.first_y || bounds.end_x <= x || bounds.end_y <= y) {
         return;
@@ -1117,22 +1143,18 @@ void shade_sample(draw_context_t& draw, std::int64_t x, std::int64_t y, float de
             reciprocal_w}),
         front_facing
     );
-    metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
-        ++metric.invocations;
-    });
+    if (counters) { ++counters->invocations; }
     scratch.prepared_program.run(scratch.fragment_values, scratch.fragment_outputs, io, scratch.execution_context);
     if (io.discarded()) {
-        metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
-            ++metric.discards;
-        });
+        if (counters) { ++counters->discards; }
         return;
     }
     const auto index = static_cast<std::size_t>(y) * static_cast<std::size_t>(bounds.width) + static_cast<std::size_t>(x);
     const bool stencil_test = material.stencil_test();
     const auto stencil_state = stencil_test ? (front_facing ? material.stencil_front() : material.stencil_back()) : stencil_state_t{};
     if (stencil_test && !stencil_passes(stencil_state, framebuffer.stencil()[index])) {
-        write_stencil(stencil_state, stencil_state.fail, framebuffer.stencil()[index], metric);
-        metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept { ++metric.stencil_rejections; });
+        write_stencil(stencil_state, stencil_state.fail, framebuffer.stencil()[index], counters);
+        if (counters) { ++counters->stencil_rejections; }
         return;
     }
     if (material.depth_test()) {
@@ -1140,26 +1162,22 @@ void shade_sample(draw_context_t& draw, std::int64_t x, std::int64_t y, float de
         const bool passes = comparison == comparison_t::always || (comparison != comparison_t::never && depth_passes(comparison, depth, framebuffer.depth()[index]));
         if (!passes) {
             if (stencil_test) {
-                write_stencil(stencil_state, stencil_state.depth_fail, framebuffer.stencil()[index], metric);
+                write_stencil(stencil_state, stencil_state.depth_fail, framebuffer.stencil()[index], counters);
             }
-            metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
-                ++metric.depth_rejections;
-            });
+            if (counters) { ++counters->depth_rejections; }
             return;
         }
     }
     if (stencil_test) {
-        write_stencil(stencil_state, stencil_state.pass, framebuffer.stencil()[index], metric);
+        write_stencil(stencil_state, stencil_state.pass, framebuffer.stencil()[index], counters);
     }
     if (material.depth_test() && material.depth_write()) {
         framebuffer.depth()[index] = depth;
-        metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept { ++metric.depth_writes; });
+        if (counters) { ++counters->depth_writes; }
     }
     if (const auto color = io.color(); color && draw.color.write) {
         draw.color.write(draw.color, *color, framebuffer.pixels().bytes().data() + index * 4);
-        metric.update<raster_metrics_t>([](raster_metrics_t& metric) noexcept {
-            ++metric.color_writes;
-        });
+        if (counters) { ++counters->color_writes; }
     }
 }
 

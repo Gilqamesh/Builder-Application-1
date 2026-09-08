@@ -29,6 +29,55 @@ profiling::metric_t inactive_metric;
 software_renderer.draw(camera, item, inactive_metric);
 ```
 
+## Feature counters and pass attribution
+
+Draw data counts empty camera intersections and successfully prepared draws by
+original topology. Preparation reports reflected resource entries, interpolation
+components, and selected color paths. Rasterization reports submitted primitives,
+clipping intersections/rejections, snapped degeneracy, facing/culling, and coverage
+algorithm work alongside fragment outcomes. The exact accumulation and exception
+rules are defined in [profiling_metrics.h](../profiling_metrics.h).
+
+Vertex and raster counters accumulate in local storage and publish once per stage,
+including exception exits. Inactive stages skip counter initialization and updates.
+Rectangular clears publish one total after filling. No profiler calls or clock reads
+occur per vertex, primitive, fragment, or scanline. Conditional local scalar increments
+record hot-loop outcomes; coverage work is counted per triangle or winding scanline/span.
+Rendering always executes outside metric-update callbacks.
+
+The benchmark groups drawing under `application.mask`, `application.scene`, and
+`application.composition`, with `application.mip_generation` measuring regenerated
+levels separately. The interactive example also measures event polling, resize,
+idle waiting, and the CPU presentation call. It stops frame measurement before
+terminal output. Presentation timing measures the call, including any waiting;
+it does not measure GPU execution separately.
+
+Applications supply these parents using distinct metric types, each with its own
+formatter. The same renderer metric type has independent data beneath each parent:
+
+```cpp
+// scene_metrics_t and composition_metrics_t are application-defined metric types.
+{
+    auto frame = profiler.metric<frame_metrics_t>();
+    {
+        auto scene = frame.metric<scene_metrics_t>();
+        renderer.draw(camera, scene_item, scene);
+    }
+    {
+        auto composition = frame.metric<composition_metrics_t>();
+        renderer.draw(camera, composition_item, composition);
+    }
+}
+```
+
+Counters expose features without isolating their execution time. Clipping,
+interpolation, shading, sampling, and attachment processing remain included in
+rasterization. Candidate counts represent planned visits and may overlap; they are
+not unique pixels. First-use storage allocation and warm steady-state performance
+should be evaluated separately. Compare disabled absolute timings before/after
+instrumentation as well as enabled/disabled differences, since both configurations
+execute the same instrumented binary.
+
 ## Headless benchmark
 
 From Builder-Layout:
@@ -41,8 +90,11 @@ From Builder-Layout:
 
 Use a new absolute output directory outside installed build artifacts.
 All workloads run sequentially and write one `results.json`; `--report` adds a text
-stage report for each workload. Schema version 5 retains raw timing pairs, summaries,
-profiling overhead, and metric-node counts. Workload version 4 is unchanged.
+stage report for each workload. Schema version 6 retains raw timing pairs, summaries,
+profiling overhead, and metric-node counts with separate application pass paths.
+Workload version 5 retains the thirteen original workloads and adds constant fill,
+a 32×32 indexed grid, the grid reduced to tiny triangles, and a fully clipped grid.
+Metric-node counts must remain stable after the first frame; disabled runs store no nodes.
 Peak RSS is not measured.
 [benchmark.cpp](../benchmark.cpp) defines workloads and timing boundaries. Samples
 include clears and draws; two-pass samples include mask drawing and composition,

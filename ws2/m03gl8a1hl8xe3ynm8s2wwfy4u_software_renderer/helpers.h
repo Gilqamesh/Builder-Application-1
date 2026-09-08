@@ -164,9 +164,27 @@ struct color_state_t {
     blend_equation_t alpha;
     vector4f_t constant;
     color_mask_t mask;
+    bool replacement = true;
     void (*write)(const color_state_t&, const vector4f_t&, std::byte*) = nullptr;
 
     color_state_t(const material_t& material, texture::format_t format);
+};
+
+// Keeps producer counters local to an active stage and publishes before it stops.
+// Inactive stages neither initialize counters nor publish updates.
+template <typename T>
+class counter_batch_t {
+public:
+    explicit counter_batch_t(m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric);
+    ~counter_batch_t();
+    counter_batch_t(const counter_batch_t&) = delete;
+    counter_batch_t& operator=(const counter_batch_t&) = delete;
+
+    T* counters() noexcept;
+
+private:
+    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& m_metric;
+    std::optional<T> m_counters;
 };
 
 // Borrows one draw's state; destruction releases prepared shader resources.
@@ -176,7 +194,7 @@ struct draw_context_t {
     const framebuffer_t& framebuffer;
     scratch_t& scratch;
     color_state_t color;
-    m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t* metric = nullptr;
+    raster_metrics_t* counters = nullptr;
 
     draw_context_t(const material_t& material, const raster_bounds_t& bounds, const framebuffer_t& framebuffer, scratch_t& scratch);
     ~draw_context_t();
@@ -188,9 +206,9 @@ pipeline_vertex_view_t view(const pipeline_vertex_t& vertex, const varying_value
 
 double clip_distance(const pipeline_vertex_view_t& vertex, std::size_t plane);
 
-std::optional<std::size_t> clip_line(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, clipping_workspace_t& workspace);
+std::optional<std::size_t> clip_line(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, clipping_workspace_t& workspace, raster_metrics_t* counters = nullptr);
 
-std::optional<std::size_t> clip_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, clipping_workspace_t& workspace);
+std::optional<std::size_t> clip_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, clipping_workspace_t& workspace, raster_metrics_t* counters = nullptr);
 
 double projectable_reciprocal_w(float w);
 
@@ -204,7 +222,7 @@ std::int64_t sample_bound(fraction_t crossing, std::int64_t extent);
 
 void prepare_polygon(raster_workspace_t& workspace);
 
-void prepare_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, std::int64_t width, std::int64_t height, raster_workspace_t& workspace);
+void prepare_triangle(const pipeline_vertex_view_t& first, const pipeline_vertex_view_t& second, const pipeline_vertex_view_t& third, std::int64_t width, std::int64_t height, raster_workspace_t& workspace, raster_metrics_t* counters = nullptr);
 
 void scanline_events(std::span<const projected_vertex_t> vertices, std::int64_t y, std::vector<scan_event_t>& events);
 
@@ -242,7 +260,7 @@ void rasterize_triangle(draw_context_t& draw, const pipeline_vertex_view_t& firs
 
 // The renderer and validation consume the same pre-shading coverage events.
 template <typename emit_type_t>
-void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, emit_type_t&& emit, std::int64_t first_x = 0, std::int64_t first_y = 0);
+void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, emit_type_t&& emit, std::int64_t first_x = 0, std::int64_t first_y = 0, raster_metrics_t* counters = nullptr);
 
 struct screen_vertex_t {
     double x;
@@ -264,7 +282,7 @@ void append_vertex(clipping_buffer_t& destination, const pipeline_vertex_view_t&
 
 varying_t interpolate(const varying_t& from, const varying_t& to, double factor);
 
-void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t first, pipeline_vertex_view_t second, std::size_t plane);
+void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t first, pipeline_vertex_view_t second, std::size_t plane, raster_metrics_t* counters = nullptr);
 
 bool between(grid_point_t p, grid_point_t a, grid_point_t b);
 
@@ -312,7 +330,7 @@ bool depth_passes(comparison_t comparison, float incoming, float stored);
 
 bool stencil_passes(const stencil_state_t& stencil_state, std::uint8_t stored);
 
-void write_stencil(const stencil_state_t& stencil_state, stencil_op_t operation, std::uint8_t& stored, m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric);
+void write_stencil(const stencil_state_t& stencil_state, stencil_op_t operation, std::uint8_t& stored, raster_metrics_t* counters);
 
 bool storage_overlaps(std::span<const std::byte> left, std::span<const std::byte> right);
 
@@ -366,6 +384,9 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scratch_t>;
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_state_t>;
 
+template <typename T>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::counter_batch_t<T>>;
+
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::draw_context_t>;
 
@@ -376,8 +397,27 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::screen_vertex_t>;
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
+template <typename T>
+counter_batch_t<T>::counter_batch_t(m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric):
+    m_metric(metric)
+{
+    if (metric) { m_counters.emplace(); }
+}
+
+template <typename T>
+counter_batch_t<T>::~counter_batch_t() {
+    if (m_counters) {
+        m_metric.update<T>([this](T& metrics) noexcept { metrics.accumulate(*m_counters); });
+    }
+}
+
+template <typename T>
+T* counter_batch_t<T>::counters() noexcept {
+    return m_counters ? &*m_counters : nullptr;
+}
+
 template <typename emit_type_t>
-void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, emit_type_t&& emit, std::int64_t clip_first_x, std::int64_t clip_first_y) {
+void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, emit_type_t&& emit, std::int64_t clip_first_x, std::int64_t clip_first_y, raster_metrics_t* counters) {
     if (workspace.empty) {
         return;
     }
@@ -398,6 +438,9 @@ void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64
             const auto end_x = sample_bound({std::max({a[0], b[0], c[0]}) + 1, 1}, width);
             const auto first_y = std::max(clip_first_y, sample_bound({std::min({a[1], b[1], c[1]}), 1}, height));
             const auto end_y = sample_bound({std::max({a[1], b[1], c[1]}) + 1, 1}, height);
+            if (counters) {
+                counters->triangle_candidates += std::size_t(std::max<std::int64_t>(0, end_x - first_x)) * std::size_t(std::max<std::int64_t>(0, end_y - first_y));
+            }
             const grid_point_t origin {first_x * subpixels + center_offset, first_y * subpixels + center_offset};
             std::array row_values {edge(b, c, origin), edge(c, a, origin), edge(a, b, origin)};
             const std::array step_x {edge_value_t(b[1] - c[1]) * subpixels, edge_value_t(c[1] - a[1]) * subpixels, edge_value_t(a[1] - b[1]) * subpixels};
@@ -434,6 +477,10 @@ void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64
     for (auto y = first_y; y < end_y; ++y) {
         scanline_events(vertices, std::int64_t(y) * subpixels + center_offset, workspace.events);
         const auto& events = workspace.events;
+        if (counters) {
+            ++counters->winding_scanlines;
+            counters->winding_events += events.size();
+        }
         int winding = 0;
         scan_event_t left {};
         for (std::size_t begin = 0; begin < events.size();) {
@@ -456,6 +503,7 @@ void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64
                 } else {
                     const auto first_x = std::max(clip_first_x, sample_bound(left.x, width));
                     const auto end_x = sample_bound(boundary.x, width);
+                    if (counters && first_x < end_x) { ++counters->winding_spans; }
                     for (auto x = first_x; x < end_x; ++x) {
                         emit(span_sample(left, boundary, vertices, x, y));
                     }
@@ -721,6 +769,16 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_state_t> {
         auto out = ctx.out();
         out = std::format_to(out, "rgb={} alpha={}", color.rgb, color.alpha);
         out = std::format_to(out, " constant={} mask={}", color.constant, color.mask);
+        return out;
+    }
+};
+
+template <typename T>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::counter_batch_t<T>> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::counter_batch_t<T>&, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ stage counter batch }}");
         return out;
     }
 };

@@ -33,6 +33,17 @@ namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 struct frame_metrics_t {};
 
+struct events_metrics_t {};
+struct resize_metrics_t {};
+struct mask_metrics_t {};
+struct scene_metrics_t {};
+struct composition_metrics_t {};
+struct mip_generation_metrics_t {
+    std::size_t levels_generated = 0;
+};
+struct presentation_metrics_t {};
+struct idle_metrics_t {};
+
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
 
 namespace std {
@@ -42,6 +53,94 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::frame_metrics_t> 
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::frame_metrics_t&, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "application.frame");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::events_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::events_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.events");
+        (void)metrics;
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::resize_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::resize_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.resize");
+        (void)metrics;
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::mask_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::mask_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.mask");
+        (void)metrics;
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scene_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scene_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.scene");
+        (void)metrics;
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::composition_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::composition_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.composition");
+        (void)metrics;
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::mip_generation_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::mip_generation_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.mip_generation");
+        out = std::format_to(out, " levels_generated={}", metrics.levels_generated);
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::presentation_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::presentation_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.presentation");
+        (void)metrics;
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::idle_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::idle_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.idle");
+        (void)metrics;
         return out;
     }
 };
@@ -236,11 +335,15 @@ int main() {
             const auto frame_started_at = steady_clock_t::now();
             const auto seconds = std::chrono::duration<float>(frame_started_at - started_at).count();
 
-            glfw_api::poll_events();
+            {
+                auto events_metric = frame_metric.metric<software_renderer_api::events_metrics_t>();
+                glfw_api::poll_events();
+            }
 
             const auto size = window->framebuffer_size();
             auto framebuffer = software_renderer.framebuffer();
             if (framebuffer.width() != size[0] || framebuffer.height() != size[1]) {
+                auto resize_metric = frame_metric.metric<software_renderer_api::resize_metrics_t>();
                 pixels.resize(software_renderer_api::framebuffer_t::pixel_count(size[0], size[1]));
                 depth.resize(pixels.size());
                 stencil.resize(pixels.size());
@@ -252,12 +355,13 @@ int main() {
                 }
                 software_renderer_api::framebuffer_t replacement(pixels, size[0], size[1]);
                 replacement.depth(depth);
-                replacement.format(software_renderer_texture::format_t::rgba8_srgb);
+                replacement.format(texture::format_t::rgba8_srgb);
                 software_renderer.framebuffer() = replacement;
                 framebuffer = software_renderer.framebuffer();
             }
 
             if (framebuffer.width() == 0 || framebuffer.height() == 0) {
+                auto idle_metric = frame_metric.metric<software_renderer_api::idle_metrics_t>();
                 std::this_thread::sleep_for(std::chrono::milliseconds(16));
             } else {
                 software_renderer_api::framebuffer_t offscreen(target->view());
@@ -273,21 +377,37 @@ int main() {
                     {{0, framebuffer.width()}, {0, framebuffer.height()}},
                     software_renderer_api::perspective_t(std::numbers::pi_v<float> / 3, 0.5F, 20.0F)
                 );
-                software_renderer.draw(camera, mask, frame_metric);
-                // Alternate submission order while the surfaces intersect and cross the near plane.
-                if (static_cast<int>(seconds) % 2 == 0) {
-                    software_renderer.draw(camera, render_item, frame_metric);
-                    software_renderer.draw(camera, second_item, frame_metric);
-                } else {
-                    software_renderer.draw(camera, second_item, frame_metric);
-                    software_renderer.draw(camera, render_item, frame_metric);
+                {
+                    auto mask_metric = frame_metric.metric<software_renderer_api::mask_metrics_t>();
+                    software_renderer.draw(camera, mask, mask_metric);
                 }
-                // Source-over into transparent storage produces premultiplied intermediate RGBA.
-                software_renderer.draw(camera, transparent_item, frame_metric);
-                target->generate_mipmaps();
-                software_renderer.framebuffer() = framebuffer;
-                software_renderer.clear_color({28, 36, 48, 255}, frame_metric);
-                software_renderer.draw(camera, postprocess, frame_metric);
+                {
+                    auto scene_metric = frame_metric.metric<software_renderer_api::scene_metrics_t>();
+                    // Alternate submission order while the surfaces intersect and cross the near plane.
+                    if (static_cast<int>(seconds) % 2 == 0) {
+                        software_renderer.draw(camera, render_item, scene_metric);
+                        software_renderer.draw(camera, second_item, scene_metric);
+                    } else {
+                        software_renderer.draw(camera, second_item, scene_metric);
+                        software_renderer.draw(camera, render_item, scene_metric);
+                    }
+                    // Source-over into transparent storage produces premultiplied intermediate RGBA.
+                    software_renderer.draw(camera, transparent_item, scene_metric);
+                }
+                {
+                    auto mip_metric = frame_metric.metric<software_renderer_api::mip_generation_metrics_t>();
+                    target->generate_mipmaps();
+                    mip_metric.update<software_renderer_api::mip_generation_metrics_t>([&](auto& metrics) noexcept {
+                        metrics.levels_generated += target->level_count() - 1;
+                    });
+                }
+                {
+                    auto composition_metric = frame_metric.metric<software_renderer_api::composition_metrics_t>();
+                    software_renderer.framebuffer() = framebuffer;
+                    software_renderer.clear_color({28, 36, 48, 255}, composition_metric);
+                    software_renderer.draw(camera, postprocess, composition_metric);
+                }
+                auto presentation_metric = frame_metric.metric<software_renderer_api::presentation_metrics_t>();
                 opengl_renderer.present_rgba8(
                     std::as_bytes(std::span<const rgba8_t>(pixels)),
                     framebuffer.width(),
@@ -295,6 +415,7 @@ int main() {
                 );
             }
 
+            frame_metric.stop();
             const auto frame_time = std::chrono::duration<double, std::milli>(frame_started_at - previous_frame_started_at);
             previous_frame_started_at = frame_started_at;
             std::cout << std::format("frame: {:.2f} ms, framebuffer: {}x{}\n", frame_time.count(), framebuffer.width(), framebuffer.height());

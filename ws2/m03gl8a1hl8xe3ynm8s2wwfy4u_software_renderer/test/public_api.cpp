@@ -2631,6 +2631,178 @@ void test_profiling() {
     require(profiler.size() == 7);
 }
 
+void test_profiling_features() {
+    std::vector<rgba8_t> pixels(256);
+    std::vector<float> depth(256, 1);
+    software_renderer_t renderer(framebuffer_t(pixels, 16, 16));
+    renderer.framebuffer().depth(depth);
+    const auto camera = make_camera(16, 16);
+    const auto capture = [&](const render_item_t& item) {
+        profiling::profiler_t profiler;
+        {
+            auto metric = profiler.metric<application_metrics_t>();
+            renderer.draw(camera, item, metric);
+        }
+        return *profiler.metrics<application_metrics_t, draw_metrics_t, raster_metrics_t>();
+    };
+    const auto quad = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle);
+    const auto visible = capture(quad);
+    require(visible.triangles == 2 && visible.triangulated_polygons == 2 && visible.generated_triangles == 2);
+    require(visible.rasterized_polygons == 2 && visible.front_triangles + visible.back_triangles == 2);
+    require(visible.triangle_candidates == 512 && visible.invocations == 256);
+    require(visible.clipped_out == 0 && visible.degenerate_triangles == 0 && visible.clipping_intersections == 0);
+
+    auto culled = quad;
+    culled.material() = std::make_shared<material_t>(*quad.material());
+    culled.material()->cull(cull_mode_t::both);
+    const auto rejected = capture(culled);
+    require(rejected.culled_triangles == 2 && rejected.rasterized_polygons == 0 && rejected.invocations == 0);
+    const auto outside = capture(make_visibility_item({{2, 0, 0, 1}, {3, 0, 0, 1}, {2, 1, 0, 1}}, {0, 1, 2}, vertex_primitive_topology_t::triangle));
+    require(outside.triangles == 1 && outside.clipped_out == 1 && outside.degenerate_triangles == 0);
+    const auto collapsed = capture(make_visibility_item({{0, 0, 0, 1}, {0.00001F, 0, 0, 1}, {0, 0.00001F, 0, 1}}, {0, 1, 2}, vertex_primitive_topology_t::triangle));
+    require(collapsed.degenerate_triangles == 1 && collapsed.clipped_out == 0 && collapsed.invocations == 0);
+    const auto clipped = capture(make_visibility_item({{-2, 0, 0, 1}, {0, -0.5F, 0, 1}, {0, 0.5F, 0, 1}}, {0, 1, 2}, vertex_primitive_topology_t::triangle));
+    require(clipped.clipping_intersections == 2 && clipped.generated_triangles == 2 && clipped.clipped_out == 0);
+    const auto zero_w = capture(make_visibility_item({{0, 0, 0, 0}}, {0}, vertex_primitive_topology_t::point));
+    require(zero_w.points == 1 && zero_w.clipped_out == 1 && zero_w.invocations == 0);
+    const auto clipped_line = capture(make_visibility_item({{-2, 0, 0, 1}, {0, 0, 0, 1}}, {0, 1}, vertex_primitive_topology_t::line));
+    require(clipped_line.lines == 1 && clipped_line.clipping_intersections == 1 && clipped_line.clipped_out == 0);
+
+    const std::array topologies {vertex_primitive_topology_t::point, vertex_primitive_topology_t::line, vertex_primitive_topology_t::line_strip,
+        vertex_primitive_topology_t::line_loop, vertex_primitive_topology_t::triangle, vertex_primitive_topology_t::triangle_strip, vertex_primitive_topology_t::triangle_fan};
+    const std::array<std::size_t, 7> counts {4, 2, 3, 4, 1, 2, 2};
+    for (std::size_t i = 0; i < topologies.size(); ++i) {
+        const auto indices = i == 4 ? index_buffer_t::indices_t{0, 1, 2} : index_buffer_t::indices_t{0, 1, 2, 3};
+        const auto metrics = capture(make_visibility_item(visibility_quad(0), indices, topologies[i]));
+        require(metrics.points + metrics.lines + metrics.triangles == counts[i]);
+    }
+
+    // Each caller parent owns independent draw data; repeated calls accumulate.
+    profiling::profiler_t profiler;
+    {
+        auto frame = profiler.metric<application_metrics_t>();
+        renderer.draw(camera, quad, frame);
+        renderer.draw(camera, quad, frame);
+        renderer.draw(make_camera(0, 0), render_item_t{}, frame);
+        auto pass = frame.metric<application_metrics_t>();
+        renderer.draw(camera, culled, pass);
+    }
+    const auto* scene = profiler.metrics<application_metrics_t, draw_metrics_t, raster_metrics_t>();
+    const auto* mask = profiler.metrics<application_metrics_t, application_metrics_t, draw_metrics_t, raster_metrics_t>();
+    require(scene->triangles == 4 && scene->invocations == 512 && mask->culled_triangles == 2 && mask->invocations == 0);
+    const auto* draws = profiler.metrics<application_metrics_t, draw_metrics_t>();
+    require(draws->triangle_draws == 2 && draws->empty_draws == 1);
+    const auto* prepared = profiler.metrics<application_metrics_t, draw_metrics_t, preparation_metrics_t>();
+    require(prepared->vertex_inputs == 2 && prepared->uniform_bindings == 2 && prepared->replacement_draws == 2 && prepared->linear_draws == 2);
+
+    // Sampling the winding path must preserve the same covered positions.
+    raster_workspace_t workspace;
+    for (const grid_point_t point : {grid_point_t{0, 0}, grid_point_t{1024, 1024}, grid_point_t{0, 1024}, grid_point_t{1024, 0}}) {
+        workspace.vertices.push_back({point, 0, 1, {vector4f_t({0, 0, 0, 1}), {}}});
+    }
+    prepare_polygon(workspace);
+    require(!workspace.empty && !workspace.use_triangles);
+    raster_metrics_t winding;
+    mask_t measured;
+    visit_samples(workspace, 8, 8, [&](const sample_t& sample) { measured.insert({int(sample.x), int(sample.y)}); }, 0, 0, &winding);
+    require(measured == count_samples(workspace, 8, 8));
+    require(winding.winding_scanlines == 4 && winding.winding_events == 8 && 0 < winding.winding_spans && winding.triangle_candidates == 0);
+}
+
+void test_profiling_preparation() {
+    for (const auto mode : {shader::interpolation_t::perspective, shader::interpolation_t::noperspective, shader::interpolation_t::flat}) {
+        shader::vertex_shader_ast_builder_t vertex;
+        vertex.position(vertex.input<vector4f_t>(0));
+        vertex.output(0, shader::vector_t<float, 3>({0.25F, 0.5F, 0.75F}));
+        vertex.output(1, std::int32_t(7));
+        shader::fragment_shader_ast_builder_t fragment;
+        fragment.color(fragment.construct<vector4f_t>(fragment.input<shader::vector_t<float, 3>>(0, mode), 1.0F));
+        fragment.output(0, fragment.input<std::int32_t>(1, shader::interpolation_t::flat));
+        const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+        auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle, {1, 0, 0, 1}, program);
+        item.material()->depth_test(false);
+        item.material()->blend(true);
+        item.material()->blend_color({blend_factor_t::src_alpha, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
+        item.material()->color_write(color_mask_t::red);
+        std::vector<rgba8_t> pixels(256);
+        software_renderer_t renderer(framebuffer_t(pixels, 16, 16));
+        renderer.framebuffer().format(texture::format_t::rgba8_srgb);
+        profiling::profiler_t profiler;
+        {
+            auto frame = profiler.metric<application_metrics_t>();
+            renderer.draw(make_camera(16, 16), item, frame);
+            item.material()->color_write(color_mask_t::none);
+            renderer.draw(make_camera(16, 16), item, frame);
+        }
+        const auto* metrics = profiler.metrics<application_metrics_t, draw_metrics_t, preparation_metrics_t>();
+        require(metrics->perspective_components == (mode == shader::interpolation_t::perspective ? 6U : 0U));
+        require(metrics->noperspective_components == (mode == shader::interpolation_t::noperspective ? 6U : 0U));
+        require(metrics->flat_components == (mode == shader::interpolation_t::flat ? 8U : 2U));
+        require(metrics->blended_draws == 1 && metrics->masked_draws == 1 && metrics->srgb_draws == 1 && metrics->color_disabled_draws == 1);
+    }
+}
+
+void test_profiling_resources() {
+    shader::vertex_shader_ast_builder_t vertex;
+    vertex.position(vertex.input<vector4f_t>(0));
+    vertex.output(0, shader::sample(vertex.resource<shader::shader_texture_2d_t>(0), vertex.resource<shader::shader_sampler_t>(0), vector2f_t(0.5F)));
+    shader::fragment_shader_ast_builder_t fragment;
+    fragment.color(fragment.input<vector4f_t>(0) * shader::sample(fragment.resource<shader::shader_texture_2d_t>(0), fragment.resource<shader::shader_sampler_t>(0), vector2f_t(0.5F)));
+    const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+    const auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle, {1, 0, 0, 1}, program);
+    item.material()->depth_test(false);
+    item.material()->texture(0, make_unorm_texture(white));
+    item.material()->sampler(0, make_sampler());
+    item.material()->texture(1, make_unorm_texture(red));
+    std::vector<rgba8_t> pixels(16);
+    software_renderer_t renderer(framebuffer_t(pixels, 4, 4));
+    profiling::profiler_t profiler;
+    {
+        auto frame = profiler.metric<application_metrics_t>();
+        renderer.draw(make_camera(4, 4), item, frame);
+    }
+    const auto* metrics = profiler.metrics<application_metrics_t, draw_metrics_t, preparation_metrics_t>();
+    require(metrics->texture_bindings == 2 && metrics->sampler_bindings == 2 && metrics->uniform_bindings == 0);
+    require(metrics->perspective_components == 4 && metrics->vertex_inputs == 1);
+}
+
+void test_profiling_fragment_exception() {
+    shader::vertex_shader_ast_builder_t vertex;
+    vertex.position(vertex.input<vector4f_t>(0));
+    shader::fragment_shader_ast_builder_t fragment;
+    fragment.color(vector4f_t({1, 0, 0, 1}));
+    fragment.branch(8.0F < shader::swizzle<0>(fragment.fragment_coordinate()), [&] {
+        fragment.output(0, std::int32_t(1) / fragment.uniform<std::int32_t>(1));
+    });
+    const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+    const auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, vertex_primitive_topology_t::triangle, {1, 0, 0, 1}, program);
+    item.material()->uniform(1, std::int32_t(0));
+    std::vector<rgba8_t> pixels(256, clear_color), normal_pixels(pixels);
+    std::vector<float> depth(256, 1), normal_depth(depth);
+    std::vector<std::uint8_t> stencil(256), normal_stencil(stencil);
+    item.material()->stencil_test(true);
+    item.material()->stencil_front({.pass = stencil_op_t::increment_wrap});
+    item.material()->stencil_back(item.material()->stencil_front());
+    const auto render = [&](auto& colors, auto& depths, auto& stencils, profiling::metric_t& frame) {
+        framebuffer_t framebuffer(colors, 16, 16);
+        framebuffer.depth(depths); framebuffer.stencil(stencils);
+        software_renderer_t renderer(framebuffer);
+        renderer.draw(make_camera(16, 16), item, frame);
+    };
+    profiling::profiler_t profiler;
+    {
+        auto frame = profiler.metric<application_metrics_t>();
+        test::expect_throws<std::domain_error>([&] { render(pixels, depth, stencil, frame); });
+    }
+    test::expect_throws<std::domain_error>([&] { render(normal_pixels, normal_depth, normal_stencil, inactive_metric); });
+    require(std::equal(pixels.begin(), pixels.end(), normal_pixels.begin(), same_color) && depth == normal_depth && stencil == normal_stencil);
+    const auto* metrics = profiler.metrics<application_metrics_t, draw_metrics_t, raster_metrics_t>();
+    const auto writes = std::size_t(std::ranges::count_if(pixels, [](rgba8_t pixel) { return same_color(pixel, red); }));
+    require(0 < writes && metrics->color_writes == writes && metrics->depth_writes == writes && metrics->stencil_writes == writes);
+    require(metrics->invocations == writes + 1 && metrics->discards == 0 && metrics->triangles != 0);
+    require(profiler.unwinding<application_metrics_t, draw_metrics_t, raster_metrics_t>() == true);
+}
+
 void configure_source_over(material_t& material) {
     material.blend(true);
     material.blend_color({blend_factor_t::src_alpha, blend_factor_t::one_minus_src_alpha, blend_op_t::add});
@@ -3787,6 +3959,10 @@ void run_pipeline_tests() {
     test_blend_depth_and_metrics();
     test_blended_coverage();
     test_profiling();
+    test_profiling_features();
+    test_profiling_preparation();
+    test_profiling_resources();
+    test_profiling_fragment_exception();
     test_material_setting_invariants();
     test_depth_attachment_updates();
     test_depth_comparisons_and_controls();

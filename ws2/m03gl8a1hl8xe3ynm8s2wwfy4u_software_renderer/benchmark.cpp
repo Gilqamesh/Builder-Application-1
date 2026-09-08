@@ -34,6 +34,13 @@ struct frame_metrics_t {
     std::size_t draws = 0;
 };
 
+struct benchmark_mask_metrics_t {};
+struct benchmark_scene_metrics_t {};
+struct benchmark_composition_metrics_t {};
+struct benchmark_mip_generation_metrics_t {
+    std::size_t levels_generated = 0;
+};
+
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
 
 namespace std {
@@ -44,6 +51,50 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::frame_metrics_t> 
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::frame_metrics_t& frame_metrics, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "application.frame draws={}", frame_metrics.draws);
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_mask_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_mask_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.mask");
+        (void)metrics;
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_scene_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_scene_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.scene");
+        (void)metrics;
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_composition_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_composition_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.composition");
+        (void)metrics;
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_mip_generation_metrics_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_mip_generation_metrics_t& metrics, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "application.mip_generation");
+        out = std::format_to(out, " levels_generated={}", metrics.levels_generated);
         return out;
     }
 };
@@ -85,11 +136,16 @@ std::vector<render_item_t> make_workload(std::string_view name) {
     vertex.position(vertex.world_to_clip() * vertex.object_to_world() * position);
     vertex.output(0, shader::swizzle<0, 1>(position) * 0.5F + vector2f_t({0.5F, 0.5F}));
     shader::fragment_shader_ast_builder_t fragment;
+    const bool constant = name == "constant_fill" || name == "indexed_mesh" || name == "tiny_triangles" || name == "rejected_triangles";
     const auto interpolation = name == "flat_fill" ? shader::interpolation_t::flat : (name == "noperspective_fill" ? shader::interpolation_t::noperspective : shader::interpolation_t::perspective);
-    const auto coordinates = fragment.input<vector2f_t>(0, interpolation);
-    const auto sampled_texture = fragment.resource<shader::shader_texture_2d_t>(0);
-    const auto sampled_sampler = fragment.resource<shader::shader_sampler_t>(0);
-    fragment.color(name == "mipmapped_fill" ? shader::sample_lod(sampled_texture, sampled_sampler, coordinates, 0.5F) : shader::sample(sampled_texture, sampled_sampler, coordinates));
+    if (constant) {
+        fragment.color(vector4f_t({0.25F, 0.5F, 0.75F, 1.0F}));
+    } else {
+        const auto coordinates = fragment.input<vector2f_t>(0, interpolation);
+        const auto sampled_texture = fragment.resource<shader::shader_texture_2d_t>(0);
+        const auto sampled_sampler = fragment.resource<shader::shader_sampler_t>(0);
+        fragment.color(name == "mipmapped_fill" ? shader::sample_lod(sampled_texture, sampled_sampler, coordinates, 0.5F) : shader::sample(sampled_texture, sampled_sampler, coordinates));
+    }
     const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
     auto material = std::make_shared<material_t>(program);
     const bool translucent = name == "translucent_linear" || name == "translucent_srgb" || name == "two_pass_linear" || name == "two_pass_srgb" || name == "mipmapped_two_pass";
@@ -133,6 +189,31 @@ std::vector<render_item_t> make_workload(std::string_view name) {
         for (std::size_t i = 0; i < items.size(); ++i) { items[i].translation()[2] = -1.3F + float(i) * 0.1F; }
         return items;
     }
+    if (constant) {
+        if (name == "constant_fill") { return {item}; }
+        soa::structure_of_arrays_t<std::array<float, 4>> grid;
+        auto selected_indices = std::make_shared<index_buffer_t>();
+        constexpr std::uint32_t side = 32;
+        for (std::uint32_t y = 0; y <= side; ++y) {
+            for (std::uint32_t x = 0; x <= side; ++x) {
+                grid.push_back({-1.0F + 2.0F * float(x) / side, -1.0F + 2.0F * float(y) / side, 0, 1});
+            }
+        }
+        for (std::uint32_t y = 0; y < side; ++y) {
+            for (std::uint32_t x = 0; x < side; ++x) {
+                const auto first = y * (side + 1) + x;
+                for (const auto index : {first, first + 1, first + side + 1, first + 1, first + side + 2, first + side + 1}) {
+                    selected_indices->indices().push_back(index);
+                }
+            }
+        }
+        auto selected_geometry = std::make_shared<geometry_t>(selected_indices);
+        selected_geometry->mesh() = std::make_shared<mesh_t>(std::move(grid), std::vector<vertex_attribute_t>{vertex_attribute_t(vertex_attribute_type_t::R32, 4)});
+        item.geometry() = selected_geometry;
+        if (name == "tiny_triangles") { item.scale() = {0.0625F, 0.0625F, 1}; }
+        if (name == "rejected_triangles") { item.translation()[0] = 4; }
+        return {item};
+    }
     if (name == "textured_fill" || name == "stencil_mask" || name == "flat_fill" || name == "noperspective_fill" || name == "mipmapped_fill") { return {item}; }
     if (name == "depth_overdraw") {
         std::vector<render_item_t> items(4, item);
@@ -167,19 +248,30 @@ std::int64_t render_frame(software_renderer_t& software_renderer, const camera_t
         software_renderer.clear_color({0, 0, 0, std::uint8_t(offscreen ? 0 : 255)}, metric);
         software_renderer.clear_depth(1, metric);
         if (mask) {
-            software_renderer.clear_stencil(0, metric);
-            software_renderer.draw(camera, *mask, metric);
+            auto pass_metric = metric.metric<benchmark_mask_metrics_t>();
+            software_renderer.clear_stencil(0, pass_metric);
+            software_renderer.draw(camera, *mask, pass_metric);
             metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.draws; });
         }
-        for (const auto& item : items) {
-            software_renderer.draw(camera, item, metric);
-            metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.draws; });
+        {
+            auto pass_metric = metric.metric<benchmark_scene_metrics_t>();
+            for (const auto& item : items) {
+                software_renderer.draw(camera, item, pass_metric);
+                metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.draws; });
+            }
         }
         if (offscreen) {
-            if (mip_target) { mip_target->generate_mipmaps(); }
+            if (mip_target) {
+                auto mip_metric = metric.metric<benchmark_mip_generation_metrics_t>();
+                mip_target->generate_mipmaps();
+                mip_metric.update<benchmark_mip_generation_metrics_t>([&](auto& metrics) noexcept {
+                    metrics.levels_generated += mip_target->level_count() - 1;
+                });
+            }
+            auto pass_metric = metric.metric<benchmark_composition_metrics_t>();
             software_renderer.framebuffer() = output;
-            software_renderer.clear_color({16, 24, 32, 255}, metric);
-            software_renderer.draw(camera, *postprocess, metric);
+            software_renderer.clear_color({16, 24, 32, 255}, pass_metric);
+            software_renderer.draw(camera, *postprocess, pass_metric);
             metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.draws; });
         }
     }
@@ -211,7 +303,7 @@ void benchmark_t::run() const {
     if (program.parent().parent().is_child(output)) { throw std::invalid_argument("benchmark output must be outside the installed binary artifact"); }
     filesystem::create_directories(output);
     json_t results {{"metadata", metadata(program)}, {"workloads", json_t::object()}};
-    for (const std::string workload : {"textured_fill", "depth_overdraw", "many_draws", "clipping", "translucent_linear", "translucent_srgb", "stencil_mask", "two_pass_linear", "two_pass_srgb", "flat_fill", "noperspective_fill", "mipmapped_fill", "mipmapped_two_pass"}) {
+    for (const std::string workload : {"textured_fill", "depth_overdraw", "many_draws", "clipping", "translucent_linear", "translucent_srgb", "stencil_mask", "two_pass_linear", "two_pass_srgb", "flat_fill", "noperspective_fill", "mipmapped_fill", "mipmapped_two_pass", "constant_fill", "indexed_mesh", "tiny_triangles", "rejected_triangles"}) {
         auto captured = run_workload(workload);
         const auto& summary = captured.at("summary");
         std::cout << std::format("{}: normal {:.3f} ms, profiled {:.3f} ms, difference {:+.2f}%\n",
@@ -292,6 +384,7 @@ json_t benchmark_t::run_workload(std::string_view workload) const {
     const camera_t camera({{0, m_size}, {0, m_size}}, orthographic_t({{-1, 1}, {-1, 1}}, 0.1F, 10.0F));
     std::vector<std::array<std::int64_t, 4>> observations;
     observations.reserve(std::size_t(m_samples) * std::size_t(m_runs));
+    std::optional<std::size_t> metric_nodes;
     for (int run = 0; run < m_runs; ++run) {
         for (int sample = -m_warmup; sample < m_samples; ++sample) {
             std::int64_t normal_ns, measured_ns;
@@ -311,6 +404,10 @@ json_t benchmark_t::run_workload(std::string_view workload) const {
                         throw std::runtime_error("benchmark generated mip levels differ with profiling enabled");
                     }
                 }
+            }
+            if (!metric_nodes) { metric_nodes = profiler.size(); }
+            if (profiler.size() != *metric_nodes || normal_profiler.size() != 0) {
+                throw std::runtime_error("benchmark profiling paths grow after the first frame or record while disabled");
             }
             if (0 <= sample) { observations.push_back({run, sample, normal_ns, measured_ns}); }
         }
@@ -342,7 +439,7 @@ json_t benchmark_t::run_workload(std::string_view workload) const {
 
 json_t benchmark_t::metadata(const filesystem::path_t& program) const {
     return {
-        {"schema_version", 5}, {"workload_version", 4},
+        {"schema_version", 6}, {"workload_version", 5},
         {"size", m_size}, {"warmup_per_run", m_warmup}, {"samples_per_run", m_samples}, {"runs", m_runs},
         {"scope", "frame measurement, full color/depth clears, fixed draw sequence; two-pass workloads also include stencil mask, target selection, output clear and sampled composite; mipmapped_two_pass also regenerates all lower levels; setup, comparison, reporting excluded"},
         {"build", {
@@ -407,7 +504,7 @@ int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--help") {
             std::cout << "usage: benchmark --output /absolute/new/run-directory [--size 128] [--warmup 3] [--samples 20] [--runs 5] [--report]\n"
-                         "Runs thirteen workloads; --report writes per-workload stage reports.\n";
+                         "Runs seventeen workloads; --report writes per-workload stage reports.\n";
             return 0;
         }
         m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_t(argc, argv).run();
