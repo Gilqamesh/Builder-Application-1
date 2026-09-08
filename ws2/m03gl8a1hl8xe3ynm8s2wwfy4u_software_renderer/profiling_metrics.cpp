@@ -1,5 +1,7 @@
 #include "profiling_metrics.h"
 
+#include <algorithm>
+
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 vertex_metrics_t::vertex_metrics_t(std::size_t expected) noexcept:
@@ -10,6 +12,12 @@ vertex_metrics_t::vertex_metrics_t(std::size_t expected) noexcept:
 void vertex_metrics_t::accumulate(const vertex_metrics_t& counters) noexcept {
     expected += counters.expected;
     invocations += counters.invocations;
+    reuses += counters.reuses;
+    lookup_bytes = std::max(lookup_bytes, counters.lookup_bytes);
+    touched_bytes = std::max(touched_bytes, counters.touched_bytes);
+    result_bytes = std::max(result_bytes, counters.result_bytes);
+    varying_bytes = std::max(varying_bytes, counters.varying_bytes);
+    flat_bytes = std::max(flat_bytes, counters.flat_bytes);
 }
 
 void raster_metrics_t::accumulate(const raster_metrics_t& counters) noexcept {

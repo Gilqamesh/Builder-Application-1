@@ -65,6 +65,41 @@ vertex_input_t::vertex_input_t(const type_erased_array::type_erased_array_t& str
     }
 }
 
+void vertex_cache_t::prepare(std::size_t vertex_count, std::size_t index_count) {
+    reset();
+    if (m_lookup.size() < vertex_count) {
+        m_lookup.resize(vertex_count, std::numeric_limits<std::size_t>::max());
+    }
+    m_touched.reserve(std::min(vertex_count, index_count));
+}
+
+std::optional<std::size_t> vertex_cache_t::find(std::uint32_t vertex_index) const {
+    const auto result = m_lookup[vertex_index];
+    if (result == std::numeric_limits<std::size_t>::max()) { return std::nullopt; }
+    return result;
+}
+
+void vertex_cache_t::insert(std::uint32_t vertex_index, std::size_t result_index) {
+    // Publish only after the reset list accepts the entry, including allocation failure.
+    m_touched.push_back(vertex_index);
+    m_lookup[vertex_index] = result_index;
+}
+
+void vertex_cache_t::reset() noexcept {
+    for (const auto vertex_index : m_touched) {
+        m_lookup[vertex_index] = std::numeric_limits<std::size_t>::max();
+    }
+    m_touched.clear();
+}
+
+std::size_t vertex_cache_t::lookup_bytes() const noexcept {
+    return m_lookup.capacity() * sizeof(std::size_t);
+}
+
+std::size_t vertex_cache_t::touched_bytes() const noexcept {
+    return m_touched.capacity() * sizeof(std::uint32_t);
+}
+
 color_state_t::color_state_t(const material_t& material, texture::format_t format):
     rgb(material.blend_color()), alpha(material.blend_alpha()), constant(material.blend_constant()), mask(material.color_write())
 {
@@ -92,6 +127,7 @@ draw_context_t::draw_context_t(const material_t& material, const raster_bounds_t
 }
 
 draw_context_t::~draw_context_t() {
+    scratch.vertex_cache.reset();
     scratch.prepared_program.reset();
     scratch.vertex_bindings.clear();
 }

@@ -64,6 +64,11 @@ struct preparation_metrics_t {
  * @brief Counts vertex invocations across all measurements, including calls that throw.
  *
  * Expected accumulates selected index entries across measurements, including repeated indices.
+ * Reuses counts completed cache hits. Invocation frequency is implementation-dependent.
+ * The byte fields report per-field maximum retained vertex-storage capacities after
+ * successful vertex stages, excluding allocator overhead and other renderer storage.
+ * Failed stages publish invocation/reuse counts but do not sample capacities.
+ * Maxima for different fields can originate in different draws.
  */
 struct vertex_metrics_t {
     explicit vertex_metrics_t(std::size_t expected = 0) noexcept;
@@ -72,6 +77,12 @@ struct vertex_metrics_t {
 
     std::size_t expected;
     std::size_t invocations = 0;
+    std::size_t reuses = 0;
+    std::size_t lookup_bytes = 0;
+    std::size_t touched_bytes = 0;
+    std::size_t result_bytes = 0;
+    std::size_t varying_bytes = 0;
+    std::size_t flat_bytes = 0;
 };
 
 /**
@@ -256,6 +267,9 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_metrics_t>
         out = std::format_to(out, "renderer.vertices");
         out = std::format_to(out, " vertex_invocations={}", vertex_metrics.invocations);
         out = std::format_to(out, ", expected={}", vertex_metrics.expected);
+        out = std::format_to(out, ", reuses={}", vertex_metrics.reuses);
+        out = std::format_to(out, ", lookup_bytes={} touched_bytes={}", vertex_metrics.lookup_bytes, vertex_metrics.touched_bytes);
+        out = std::format_to(out, ", result_bytes={} varying_bytes={} flat_bytes={}", vertex_metrics.result_bytes, vertex_metrics.varying_bytes, vertex_metrics.flat_bytes);
         return out;
     }
 };

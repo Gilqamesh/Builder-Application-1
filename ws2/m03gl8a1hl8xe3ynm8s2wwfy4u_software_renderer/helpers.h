@@ -138,8 +138,26 @@ struct vertex_input_t {
     vertex_input_t(const type_erased_array::type_erased_array_t& stream, const vertex_attribute_t& attribute, shader::shader_data_type_t type);
 };
 
+// Maps validated source indices to completed results for one draw. Reset touches
+// only populated entries; allocations remain available for the next draw.
+class vertex_cache_t {
+public:
+    void prepare(std::size_t vertex_count, std::size_t index_count);
+    std::optional<std::size_t> find(std::uint32_t vertex_index) const;
+    void insert(std::uint32_t vertex_index, std::size_t result_index);
+    void reset() noexcept;
+
+    std::size_t lookup_bytes() const noexcept;
+    std::size_t touched_bytes() const noexcept;
+
+private:
+    std::vector<std::size_t> m_lookup;
+    std::vector<std::uint32_t> m_touched;
+};
+
 // Renderer-owned storage retains its peak capacities across draws.
 struct scratch_t {
+    vertex_cache_t vertex_cache;
     std::vector<pipeline_vertex_t> vertex_results;
     varying_values_t vertex_values;
     flat_values_t flat_values;
@@ -377,6 +395,9 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_workspace_
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_input_t>;
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_cache_t>;
 
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scratch_t>;
@@ -739,6 +760,17 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_input_t> {
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_input_t& input, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "vertex input elements={}", input.stream.element_count());
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_cache_t> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::vertex_cache_t& vertex_cache, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "vertex cache lookup_bytes={}", vertex_cache.lookup_bytes());
+        out = std::format_to(out, " touched_bytes={}", vertex_cache.touched_bytes());
         return out;
     }
 };

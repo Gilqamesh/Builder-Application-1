@@ -236,12 +236,19 @@ void software_renderer_t::draw(
         scratch.vertex_results.clear();
         scratch.flat_values.clear();
         scratch.vertex_values.clear();
-        scratch.vertex_results.reserve(indices.size());
+        scratch.vertex_cache.prepare(mesh->number_of_vertices(), indices.size());
+        scratch.vertex_results.reserve(std::min(mesh->number_of_vertices(), indices.size()));
         scratch.vertex_io.object_to_world(object_to_world);
         scratch.vertex_io.world_to_clip(world_to_clip);
         for (const std::uint32_t vertex_index : indices) {
             if (static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) < vertex_index) {
                 throw std::out_of_range("vertex index cannot be represented by software shader vertex_io_t");
+            }
+            // Execute distinct source indices in first-occurrence order. Assembly
+            // still visits every original occurrence, including repeated primitives.
+            if (scratch.vertex_cache.find(vertex_index)) {
+                if (counters) { ++counters->reuses; }
+                continue;
             }
 
             auto& io = scratch.vertex_io;
@@ -287,6 +294,14 @@ void software_renderer_t::draw(
                 .outputs = {output_offset, scratch.interpolated_inputs.size()},
                 .flat_outputs = {flat_offset, scratch.flat_inputs.size()}
             });
+            scratch.vertex_cache.insert(vertex_index, scratch.vertex_results.size() - 1);
+        }
+        if (counters) {
+            counters->lookup_bytes = scratch.vertex_cache.lookup_bytes();
+            counters->touched_bytes = scratch.vertex_cache.touched_bytes();
+            counters->result_bytes = scratch.vertex_results.capacity() * sizeof(pipeline_vertex_t);
+            counters->varying_bytes = scratch.vertex_values.capacity() * sizeof(varying_t);
+            counters->flat_bytes = scratch.flat_values.capacity() * sizeof(flat_t);
         }
     }
 
@@ -295,7 +310,8 @@ void software_renderer_t::draw(
     counter_batch_t<raster_metrics_t> counter_batch(raster_metric);
     draw.counters = counter_batch.counters();
     const auto vertex = [&](std::size_t index) {
-        return view(scratch.vertex_results[index], scratch.vertex_values, scratch.flat_values);
+        const auto result_index = *scratch.vertex_cache.find(indices[index]);
+        return view(scratch.vertex_results[result_index], scratch.vertex_values, scratch.flat_values);
     };
     const auto submit_line = [&](std::size_t first, std::size_t second) {
         rasterize_line(draw, vertex(first), vertex(second));

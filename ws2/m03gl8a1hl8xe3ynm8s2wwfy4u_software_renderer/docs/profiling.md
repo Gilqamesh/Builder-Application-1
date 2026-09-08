@@ -90,18 +90,36 @@ From Builder-Layout:
 
 Use a new absolute output directory outside installed build artifacts.
 All workloads run sequentially and write one `results.json`; `--report` adds a text
-stage report for each workload. Schema version 6 retains raw timing pairs, summaries,
-profiling overhead, and metric-node counts with separate application pass paths.
-Workload version 5 retains the thirteen original workloads and adds constant fill,
-a 32×32 indexed grid, the grid reduced to tiny triangles, and a fully clipped grid.
+stage report for each workload. Schema version 7 includes raw timing pairs,
+summaries, profiling overhead, metric-node counts, first-frame timings, scene vertex
+counts, and retained vertex-storage capacities. The first-frame pair includes initial
+storage growth; it is also part of warm-up (or the sample set when warm-up is zero).
+Scene counts include every measured frame, including warm-up. Capacity fields are
+per-field maxima in bytes, measured after successful vertex stages; they exclude
+other renderer storage and allocator overhead. Maxima from different draws need
+not occur simultaneously.
+
+Workload version 6 retains the seventeen existing workloads and adds
+`indexed_varyings`, `unshared_varyings`, and `sparse_varyings`. All three render the
+same grid with perspective, noperspective, and flat inputs consumed by the fragment
+shader. The unshared mesh expands every index occurrence into a separate vertex.
+The sparse mesh selects 1,089 vertices at the end of a 1,048,576-vertex allocation.
+Compare these workloads to measure reuse, payload storage, and the dense lookup's
+cost when a draw selects a small part of a large mesh.
 Metric-node counts must remain stable after the first frame; disabled runs store no nodes.
 Peak RSS is not measured.
 [benchmark.cpp](../benchmark.cpp) defines workloads and timing boundaries. Samples
 include clears and draws; two-pass samples include mask drawing and composition,
 and `mipmapped_two_pass` includes mip generation. Setup, result comparisons, and
 reporting are outside frame timing. Each profiling-enabled/disabled pair must
-produce identical color, depth, stencil, and texture levels. Stage reports include
-warm-up; sample summaries exclude it.
+produce identical color, depth, stencil, and texture levels. Each workload also
+writes `<workload>.attachments` outside timing: tightly packed final color bytes,
+then float depth bytes, stencil bytes, and any offscreen texture levels in increasing
+level order. These native-format files can be compared byte-for-byte between builds
+on the same platform with identical workloads and dimensions. Compare the three
+varying-grid files with one another as an additional equivalence check; matching
+profiling-enabled/disabled execution alone cannot detect a shared rendering defect.
+Stage reports include warm-up; sample summaries exclude it.
 
 ## Reproducible optimized build
 
@@ -127,3 +145,22 @@ Give separate workspaces separate `BUILDER_ARTIFACT_ROOT` directories. Builder's
 artifact semantics; the renderer adds no independent dependency list or flags.
 Full-frame timings include preparation and resource resolution; shader invocation
 improvements alone do not establish a full-frame speedup.
+
+## Vertex result reuse
+
+The renderer reuses completed vertex results within each draw. `expected` continues
+to count selected index occurrences; `vertex_invocations` counts actual attempted
+shader calls and `reuses` counts completed cache hits. The drawing contract permits
+reuse without fixing invocation frequency or order. The current implementation
+walks distinct source indices in first-occurrence order and preserves the original
+index sequence for assembly. The 32×32 indexed grid therefore reports 6,144
+occurrences, 1,089 invocations, and 5,055 reuses per successful draw.
+
+The lookup and touched-index list retain their capacities between draws but reset
+all entries at draw completion, including exceptions. Result records reserve at
+most `min(vertex_count, index_count)` entries on each reservation request; existing
+larger capacities are retained. Payload vectors grow only for executed vertices.
+Capacity metrics include the lookup, touched indices, result records, interpolated
+payloads, and flat payloads. The dense lookup costs one `std::size_t` per mesh vertex
+at its retained high-water capacity, even for a sparse selection; the benchmark
+makes this memory and first-use cost visible alongside steady-state timing.

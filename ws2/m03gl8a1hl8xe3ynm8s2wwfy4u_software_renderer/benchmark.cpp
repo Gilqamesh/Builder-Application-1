@@ -131,20 +131,28 @@ private:
 };
 
 std::vector<render_item_t> make_workload(std::string_view name) {
+    const bool varyings = name == "indexed_varyings" || name == "unshared_varyings" || name == "sparse_varyings";
     shader::vertex_shader_ast_builder_t vertex;
     const auto position = vertex.input<vector4f_t>(0);
     vertex.position(vertex.world_to_clip() * vertex.object_to_world() * position);
     vertex.output(0, shader::swizzle<0, 1>(position) * 0.5F + vector2f_t({0.5F, 0.5F}));
+    if (varyings) {
+        vertex.output(1, position * 0.25F + vector4f_t(0.5F));
+        vertex.output(2, shader::swizzle<0, 1>(position) * 0.5F + vector2f_t(0.5F));
+    }
     shader::fragment_shader_ast_builder_t fragment;
     const bool constant = name == "constant_fill" || name == "indexed_mesh" || name == "tiny_triangles" || name == "rejected_triangles";
     const auto interpolation = name == "flat_fill" ? shader::interpolation_t::flat : (name == "noperspective_fill" ? shader::interpolation_t::noperspective : shader::interpolation_t::perspective);
     if (constant) {
         fragment.color(vector4f_t({0.25F, 0.5F, 0.75F, 1.0F}));
     } else {
-        const auto coordinates = fragment.input<vector2f_t>(0, interpolation);
+        auto coordinates = fragment.input<vector2f_t>(0, interpolation);
+        if (varyings) { coordinates = (coordinates + fragment.input<vector2f_t>(2, shader::interpolation_t::noperspective)) * 0.5F; }
         const auto sampled_texture = fragment.resource<shader::shader_texture_2d_t>(0);
         const auto sampled_sampler = fragment.resource<shader::shader_sampler_t>(0);
-        fragment.color(name == "mipmapped_fill" ? shader::sample_lod(sampled_texture, sampled_sampler, coordinates, 0.5F) : shader::sample(sampled_texture, sampled_sampler, coordinates));
+        auto color = name == "mipmapped_fill" ? shader::sample_lod(sampled_texture, sampled_sampler, coordinates, 0.5F) : shader::sample(sampled_texture, sampled_sampler, coordinates);
+        if (varyings) { color = color * fragment.input<vector4f_t>(1, shader::interpolation_t::flat); }
+        fragment.color(color);
     }
     const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
     auto material = std::make_shared<material_t>(program);
@@ -189,11 +197,13 @@ std::vector<render_item_t> make_workload(std::string_view name) {
         for (std::size_t i = 0; i < items.size(); ++i) { items[i].translation()[2] = -1.3F + float(i) * 0.1F; }
         return items;
     }
-    if (constant) {
+    if (constant || varyings) {
         if (name == "constant_fill") { return {item}; }
         soa::structure_of_arrays_t<std::array<float, 4>> grid;
         auto selected_indices = std::make_shared<index_buffer_t>();
         constexpr std::uint32_t side = 32;
+        const std::uint32_t prefix = name == "sparse_varyings" ? (1U << 20) - (side + 1) * (side + 1) : 0;
+        for (std::uint32_t i = 0; i < prefix; ++i) { grid.push_back({0, 0, 0, 1}); }
         for (std::uint32_t y = 0; y <= side; ++y) {
             for (std::uint32_t x = 0; x <= side; ++x) {
                 grid.push_back({-1.0F + 2.0F * float(x) / side, -1.0F + 2.0F * float(y) / side, 0, 1});
@@ -201,11 +211,21 @@ std::vector<render_item_t> make_workload(std::string_view name) {
         }
         for (std::uint32_t y = 0; y < side; ++y) {
             for (std::uint32_t x = 0; x < side; ++x) {
-                const auto first = y * (side + 1) + x;
+                const auto first = prefix + y * (side + 1) + x;
                 for (const auto index : {first, first + 1, first + side + 1, first + 1, first + side + 2, first + side + 1}) {
                     selected_indices->indices().push_back(index);
                 }
             }
+        }
+        if (name == "unshared_varyings") {
+            soa::structure_of_arrays_t<std::array<float, 4>> expanded;
+            std::uint32_t expanded_index = 0;
+            for (auto& index : selected_indices->indices()) {
+                const auto x = index % (side + 1), y = index / (side + 1);
+                expanded.push_back({-1.0F + 2.0F * float(x) / side, -1.0F + 2.0F * float(y) / side, 0, 1});
+                index = expanded_index++;
+            }
+            grid = std::move(expanded);
         }
         auto selected_geometry = std::make_shared<geometry_t>(selected_indices);
         selected_geometry->mesh() = std::make_shared<mesh_t>(std::move(grid), std::vector<vertex_attribute_t>{vertex_attribute_t(vertex_attribute_type_t::R32, 4)});
@@ -303,7 +323,7 @@ void benchmark_t::run() const {
     if (program.parent().parent().is_child(output)) { throw std::invalid_argument("benchmark output must be outside the installed binary artifact"); }
     filesystem::create_directories(output);
     json_t results {{"metadata", metadata(program)}, {"workloads", json_t::object()}};
-    for (const std::string workload : {"textured_fill", "depth_overdraw", "many_draws", "clipping", "translucent_linear", "translucent_srgb", "stencil_mask", "two_pass_linear", "two_pass_srgb", "flat_fill", "noperspective_fill", "mipmapped_fill", "mipmapped_two_pass", "constant_fill", "indexed_mesh", "tiny_triangles", "rejected_triangles"}) {
+    for (const std::string workload : {"textured_fill", "depth_overdraw", "many_draws", "clipping", "translucent_linear", "translucent_srgb", "stencil_mask", "two_pass_linear", "two_pass_srgb", "flat_fill", "noperspective_fill", "mipmapped_fill", "mipmapped_two_pass", "constant_fill", "indexed_mesh", "tiny_triangles", "rejected_triangles", "indexed_varyings", "unshared_varyings", "sparse_varyings"}) {
         auto captured = run_workload(workload);
         const auto& summary = captured.at("summary");
         std::cout << std::format("{}: normal {:.3f} ms, profiled {:.3f} ms, difference {:+.2f}%\n",
@@ -385,6 +405,7 @@ json_t benchmark_t::run_workload(std::string_view workload) const {
     std::vector<std::array<std::int64_t, 4>> observations;
     observations.reserve(std::size_t(m_samples) * std::size_t(m_runs));
     std::optional<std::size_t> metric_nodes;
+    std::optional<std::array<std::int64_t, 2>> first_frame;
     for (int run = 0; run < m_runs; ++run) {
         for (int sample = -m_warmup; sample < m_samples; ++sample) {
             std::int64_t normal_ns, measured_ns;
@@ -395,6 +416,7 @@ json_t benchmark_t::run_workload(std::string_view workload) const {
                 measured_ns = render_frame(measured, camera, items, profiler, masked ? &mask : nullptr, two_pass ? &*measured_offscreen : nullptr, two_pass ? &*measured_postprocess : nullptr, mipmaps ? measured_target.get() : nullptr);
                 normal_ns = render_frame(normal, camera, items, normal_profiler, masked ? &mask : nullptr, two_pass ? &*normal_offscreen : nullptr, two_pass ? &*normal_postprocess : nullptr, mipmaps ? normal_target.get() : nullptr);
             }
+            if (!first_frame) { first_frame = std::array{normal_ns, measured_ns}; }
             if (!std::equal(normal_pixels.begin(), normal_pixels.end(), measured_pixels.begin(), [](rgba8_t a, rgba8_t b) { return std::bit_cast<std::uint32_t>(a) == std::bit_cast<std::uint32_t>(b); }) || normal_depth != measured_depth || normal_stencil != measured_stencil || (two_pass && !std::equal(normal_target->bytes().begin(), normal_target->bytes().end(), measured_target->bytes().begin()))) {
                 throw std::runtime_error("benchmark enabled/disabled profiling results differ");
             }
@@ -421,6 +443,21 @@ json_t benchmark_t::run_workload(std::string_view workload) const {
         report.close();
         if (!report) { throw std::runtime_error(std::format("could not write benchmark report {}", path)); }
     }
+    // Store exact final attachment bytes outside timing for cross-build comparisons.
+    const auto attachment_path = filesystem::path_t(m_output) / filesystem::relative_path_t(std::string(workload) + ".attachments");
+    std::ofstream attachments(attachment_path.c_str(), std::ios::binary);
+    const auto write = [&](std::span<const std::byte> bytes) {
+        if (!bytes.empty()) { attachments.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size())); }
+    };
+    write(std::as_bytes(std::span(normal_pixels)));
+    write(std::as_bytes(std::span(normal_depth)));
+    write(std::as_bytes(std::span(normal_stencil)));
+    if (two_pass) {
+        for (std::size_t level = 0; level < normal_target->level_count(); ++level) { write(normal_target->view(level).bytes()); }
+    }
+    attachments.close();
+    if (!attachments) { throw std::runtime_error(std::format("could not write benchmark attachments {}", attachment_path)); }
+    const auto* vertices = profiler.metrics<frame_metrics_t, benchmark_scene_metrics_t, draw_metrics_t, vertex_metrics_t>();
     const auto normal_summary = summarize(observations, 2, m_runs);
     const auto profiled_summary = summarize(observations, 3, m_runs);
     const auto normal_median = normal_summary.at("median_ns").get<double>();
@@ -431,6 +468,9 @@ json_t benchmark_t::run_workload(std::string_view workload) const {
     }
     return {
         {"samples", std::move(samples)},
+        {"first_frame_ns", {{"normal", (*first_frame)[0]}, {"profiled", (*first_frame)[1]}}},
+        {"vertices", {{"expected", vertices->expected}, {"invocations", vertices->invocations}, {"reuses", vertices->reuses}}},
+        {"vertex_storage_bytes", {{"lookup", vertices->lookup_bytes}, {"touched", vertices->touched_bytes}, {"results", vertices->result_bytes}, {"varyings", vertices->varying_bytes}, {"flat", vertices->flat_bytes}}},
         {"summary", {{"normal", normal_summary}, {"profiled", profiled_summary}}},
         {"median_overhead_percent", (profiled_median / normal_median - 1) * 100},
         {"metric_nodes", profiler.size()}
@@ -439,7 +479,7 @@ json_t benchmark_t::run_workload(std::string_view workload) const {
 
 json_t benchmark_t::metadata(const filesystem::path_t& program) const {
     return {
-        {"schema_version", 6}, {"workload_version", 5},
+        {"schema_version", 7}, {"workload_version", 6},
         {"size", m_size}, {"warmup_per_run", m_warmup}, {"samples_per_run", m_samples}, {"runs", m_runs},
         {"scope", "frame measurement, full color/depth clears, fixed draw sequence; two-pass workloads also include stencil mask, target selection, output clear and sampled composite; mipmapped_two_pass also regenerates all lower levels; setup, comparison, reporting excluded"},
         {"build", {
@@ -504,7 +544,7 @@ int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--help") {
             std::cout << "usage: benchmark --output /absolute/new/run-directory [--size 128] [--warmup 3] [--samples 20] [--runs 5] [--report]\n"
-                         "Runs seventeen workloads; --report writes per-workload stage reports.\n";
+                         "Runs twenty workloads; --report writes per-workload stage reports.\n";
             return 0;
         }
         m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::benchmark_t(argc, argv).run();

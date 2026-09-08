@@ -31,6 +31,10 @@ namespace profiling = m03gtjqkhqacstl3luv2ojsz3q_profiling;
  * world-to-clip matrix derived from camera_t's pose and projection. The camera's
  * view rectangle supplies both viewport mapping and half-open pixel bounds.
  * Partial framebuffer overlap restricts writes without changing that mapping.
+ * Vertex results may be reused for repeated indices within a draw. Every draw
+ * observes its current resources and transforms; reuse preserves shader-visible
+ * source indices and original primitive ordering. Invocation frequency and order
+ * are implementation-dependent. Vertex-stage failure precedes attachment writes.
  *
  * Shader positions must be finite homogeneous clip coordinates; X, Y and Z are
  * clipped to [-W,W]. Surviving zero-W vertices make their primitive empty; positive W

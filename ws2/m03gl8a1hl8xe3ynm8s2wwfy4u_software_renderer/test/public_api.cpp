@@ -2497,6 +2497,7 @@ void test_profiling() {
     };
     const auto camera = make_camera(16, 16);
     std::size_t vertex_invocations = 0;
+    std::size_t expected_vertices = 0;
     raster_metrics_t expected_raster;
     for (int mode = 0; mode < 6; ++mode) {
         auto item = make_visibility_item(visibility_quad(0), {0, 1, 2, 2, 1, 3}, api::vertex_primitive_topology_t::triangle);
@@ -2525,8 +2526,10 @@ void test_profiling() {
         require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->color_writes == 256 * std::size_t(mode + 1));
         require(profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->depth_writes == 256 * std::size_t(mode + 1));
         const auto* vertex_metrics = profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>();
-        vertex_invocations += 6 * draws;
-        require(vertex_metrics->invocations == vertex_invocations && vertex_metrics->expected == vertex_invocations);
+        vertex_invocations += 4 * draws;
+        expected_vertices += 6 * draws;
+        require(vertex_metrics->invocations == vertex_invocations && vertex_metrics->expected == expected_vertices);
+        require(vertex_metrics->reuses == expected_vertices - vertex_invocations);
         const auto* raster_metrics = profiler.metrics<application_metrics_t, draw_metrics_t, raster_metrics_t>();
         expected_raster.invocations += mode == 4 ? 0 : 256 * draws;
         expected_raster.discards += mode == 2 || mode == 3 ? 128 : 0;
@@ -2543,7 +2546,7 @@ void test_profiling() {
     std::ostringstream report;
     profiler.report(report);
     require(report.str().find("application.frame") != std::string::npos && report.str().find("items=2") != std::string::npos);
-    require(report.str().find("vertex_invocations=42, expected=42") != std::string::npos);
+    require(report.str().find("vertex_invocations=28, expected=42, reuses=14") != std::string::npos);
 
     const auto report_text = report.str();
     const auto color_position = report_text.find("\n├─ renderer.clear_color");
@@ -2581,8 +2584,9 @@ void test_profiling() {
         measure([&](profiling::metric_t& metric) { measured.clear_depth(1, metric); }); normal.clear_depth(1, inactive_metric);
         measure([&](profiling::metric_t& metric) { measured.draw(camera, item, metric); }); normal.draw(camera, item, inactive_metric);
         vertex_invocations += indices.size();
+        expected_vertices += indices.size();
         require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->invocations == vertex_invocations);
-        require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->expected == vertex_invocations);
+        require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->expected == expected_vertices);
         require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
         require(measured_depth == normal_depth);
     }
@@ -2604,7 +2608,7 @@ void test_profiling() {
     require(profiler.size() == 7);
     require(profiler.unwinding<application_metrics_t, draw_metrics_t, vertex_metrics_t>() == true);
     require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->invocations == vertex_invocations + 1);
-    require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->expected == vertex_invocations + 6);
+    require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->expected == expected_vertices + 6);
     require(profiler.unwinding<application_metrics_t, draw_metrics_t, preparation_metrics_t>() == false);
 
     // Enablement affects subsequent roots; the active frame still records children.
@@ -3923,6 +3927,178 @@ void test_fragment_input_reuse() {
     }
 }
 
+void test_vertex_reuse_equivalence() {
+    shader::vertex_shader_ast_builder_t vertex;
+    const auto position = vertex.input<vector4f_t>(0);
+    vertex.position(position);
+    vertex.output(0, shader::swizzle<0, 1>(position));
+    vertex.output(1, shader::swizzle<0, 1>(position));
+    vertex.output(2, position * 0.1F + vector4f_t(0.5F));
+    shader::fragment_shader_ast_builder_t fragment;
+    const auto perspective = fragment.input<vector2f_t>(0);
+    const auto noperspective = fragment.input<vector2f_t>(1, shader::interpolation_t::noperspective);
+    const auto flat = fragment.input<vector4f_t>(2, shader::interpolation_t::flat);
+    fragment.color(fragment.construct<vector4f_t>((perspective + noperspective) * 0.125F + vector2f_t(0.5F), 0.25F, 0.5F) * flat);
+    auto material = std::make_shared<material_t>(std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize()));
+    material->depth_test(true);
+    material->depth_compare(comparison_t::always);
+    material->stencil_test(true);
+    material->stencil_front({.pass = stencil_op_t::increment_wrap});
+    material->stencil_back({.pass = stencil_op_t::increment_wrap});
+    configure_source_over(*material);
+    const std::vector<clip_position_fixture_t> positions {{-2, -1, 0, 1}, {0.8F, -0.8F, 0.2F, 1}, {-0.5F, 2, 0, 1}, {0.5F, 0.5F, 0, 0.75F}};
+    const auto camera = make_camera(32, 32);
+    for (const auto topology : {vertex_primitive_topology_t::point, vertex_primitive_topology_t::line,
+             vertex_primitive_topology_t::line_strip, vertex_primitive_topology_t::line_loop,
+             vertex_primitive_topology_t::triangle, vertex_primitive_topology_t::triangle_strip,
+             vertex_primitive_topology_t::triangle_fan}) {
+        const std::vector<std::uint32_t> indices = topology == vertex_primitive_topology_t::triangle ?
+            std::vector<std::uint32_t>{2, 0, 3, 2, 0, 3, 3, 0, 1} : std::vector<std::uint32_t>{3, 0, 2, 1, 3, 0};
+        std::vector<clip_position_fixture_t> expanded;
+        for (const auto index : indices) { expanded.push_back(positions[index]); }
+        std::vector<std::uint32_t> identity(indices.size());
+        std::iota(identity.begin(), identity.end(), 0U);
+        const auto shared = make_render_item(make_typed_geometry(positions, vertex_attribute_t(vertex_attribute_type_t::R32, 4), indices, topology), material);
+        const auto unshared = make_render_item(make_typed_geometry(expanded, vertex_attribute_t(vertex_attribute_type_t::R32, 4), identity, topology), material);
+        for (const auto provoking : {provoking_vertex_t::first, provoking_vertex_t::last}) {
+            material->provoking_vertex(provoking);
+            std::vector<rgba8_t> actual(1024, clear_color), expected(actual);
+            std::vector<float> actual_depth(1024, 1), expected_depth(actual_depth);
+            std::vector<std::uint8_t> actual_stencil(1024), expected_stencil(actual_stencil);
+            framebuffer_t actual_framebuffer(actual, 32, 32), expected_framebuffer(expected, 32, 32);
+            actual_framebuffer.depth(actual_depth); actual_framebuffer.stencil(actual_stencil);
+            expected_framebuffer.depth(expected_depth); expected_framebuffer.stencil(expected_stencil);
+            software_renderer_t renderer(actual_framebuffer);
+            profiling::profiler_t profiler;
+            {
+                auto metric = profiler.metric<application_metrics_t>();
+                renderer.draw(camera, shared, metric);
+            }
+            const auto* metrics = profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>();
+            // This implementation reuses every repeated index; it is not an API guarantee.
+            require(metrics->expected == indices.size() && metrics->invocations == 4 && metrics->reuses == indices.size() - 4);
+            require(metrics->result_bytes == 4 * sizeof(pipeline_vertex_t));
+            require(metrics->varying_bytes != 0 && metrics->flat_bytes != 0);
+            renderer.framebuffer() = expected_framebuffer;
+            renderer.draw(camera, unshared, inactive_metric);
+            require(std::equal(actual.begin(), actual.end(), expected.begin(), same_color));
+            require(actual_depth == expected_depth && actual_stencil == expected_stencil);
+            require(colored_pixel_count(actual) != 0);
+            // Repeated visible points must still execute fragments and update stencil repeatedly.
+            if (topology == vertex_primitive_topology_t::point) {
+                const auto* raster = profiler.metrics<application_metrics_t, draw_metrics_t, raster_metrics_t>();
+                require(raster->points == indices.size());
+            }
+        }
+    }
+}
+
+void test_vertex_reuse_freshness() {
+    shader::vertex_shader_ast_builder_t vertex;
+    const auto local = vertex.construct<vector4f_t>(vertex.input<vector2f_t>(0) + vertex.uniform<vector2f_t>(7), 0.0F, 1.0F);
+    vertex.position(vertex.world_to_clip() * vertex.object_to_world() * local);
+    vertex.output(0, shader::sample(vertex.resource<shader::shader_texture_2d_t>(0), vertex.resource<shader::shader_sampler_t>(0), vector2f_t(0.5F)));
+    shader::fragment_shader_ast_builder_t fragment;
+    fragment.color(fragment.input<vector4f_t>(0, shader::interpolation_t::flat));
+    const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+    auto texture = make_unorm_texture(red);
+    auto item = make_render_item(make_geometry({{-0.5F, 0}, {0.5F, 0}}, {0, 1, 0}, vertex_primitive_topology_t::point), make_material(texture, make_sampler(), program));
+    item.material()->uniform(7, vector2f_t(0));
+    std::vector<rgba8_t> actual(1024), expected(1024);
+    software_renderer_t reused(framebuffer_t(actual, 32, 32));
+    auto camera = make_camera(32, 32);
+    for (int change = 0; change < 9; ++change) {
+        if (change == 1) { item.material()->uniform(7, vector2f_t({0.125F, 0.125F})); }
+        if (change == 2) { texture->view().bytes()[0] = std::byte(64); }
+        if (change == 3) { texture = make_unorm_texture(green); item.material()->texture(0, texture); }
+        if (change == 4) { item.translation()[0] = 0.125F; }
+        if (change == 5) { camera.position()[1] = 0.125F; }
+        if (change == 6) {
+            item.geometry()->mesh() = make_geometry({{0, 0.5F}, {0, -0.5F}, {0.25F, 0}}, {0, 1, 2}, vertex_primitive_topology_t::point)->mesh();
+        }
+        if (change == 7) { item.geometry()->index_buffer()->indices() = {2, 1, 2}; }
+        if (change == 8) { item.material() = std::make_shared<material_t>(make_constant_program(vector4f_t({0, 0, 1, 1}))); }
+        software_renderer_t fresh(framebuffer_t(expected, 32, 32));
+        reused.clear_color(clear_color, inactive_metric); fresh.clear_color(clear_color, inactive_metric);
+        profiling::profiler_t profiler;
+        {
+            auto metric = profiler.metric<application_metrics_t>();
+            reused.draw(camera, item, metric);
+        }
+        fresh.draw(camera, item, inactive_metric);
+        require(std::equal(actual.begin(), actual.end(), expected.begin(), same_color));
+        require(colored_pixel_count(actual) != 0);
+        const auto* metrics = profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>();
+        require(metrics->expected == 3 && metrics->invocations == 2 && metrics->reuses == 1);
+    }
+}
+
+void test_vertex_reuse_failure() {
+    for (int failure = 0; failure < 3; ++failure) {
+        shader::vertex_shader_ast_builder_t vertex;
+        vertex.position(vertex.input<vector4f_t>(0));
+        const auto fails = (vertex.vertex_index() == std::int32_t(1)) && vertex.uniform<bool>(7);
+        vertex.branch(!fails, [&] { vertex.output(0, vector4f_t({1, 0, 0, 1})); });
+        if (failure == 1) {
+            vertex.branch(fails, [&] { vertex.position(vector4f_t({std::numeric_limits<float>::infinity(), 0, 0, 1})); });
+        }
+        if (failure == 2) {
+            vertex.branch(fails, [&] { vertex.output(1, std::int32_t(1) / vertex.uniform<std::int32_t>(8)); });
+        }
+        shader::fragment_shader_ast_builder_t fragment;
+        fragment.color(fragment.input<vector4f_t>(0, shader::interpolation_t::flat));
+        const auto program = std::make_shared<const software_shader::program_t>(std::move(vertex).finalize(), std::move(fragment).finalize());
+        auto item = make_visibility_item(visibility_quad(0), {2, 0, 2, 1, 3, 0}, vertex_primitive_topology_t::point, {1, 0, 0, 1}, program);
+        item.material()->uniform(7, true); item.material()->uniform(8, std::int32_t(0));
+        item.material()->stencil_test(true);
+        item.material()->stencil_front({.pass = stencil_op_t::increment_wrap});
+        std::vector<rgba8_t> pixels(256, clear_color);
+        std::vector<float> depth(256, 1);
+        std::vector<std::uint8_t> stencil(256, 17);
+        framebuffer_t framebuffer(pixels, 16, 16);
+        framebuffer.depth(depth); framebuffer.stencil(stencil);
+        software_renderer_t renderer(framebuffer);
+        profiling::profiler_t profiler;
+        {
+            auto metric = profiler.metric<application_metrics_t>();
+            test::expect_throws([&] { renderer.draw(make_camera(16, 16), item, metric); });
+        }
+        const auto* metrics = profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>();
+        require(metrics->expected == 6 && metrics->invocations == 3 && metrics->reuses == 1);
+        require(colored_pixel_count(pixels) == 0);
+        require(std::ranges::all_of(depth, [](float sample) { return sample == 1; }));
+        require(std::ranges::all_of(stencil, [](std::uint8_t sample) { return sample == 17; }));
+        item.material()->uniform(7, false);
+        {
+            auto metric = profiler.metric<application_metrics_t>();
+            renderer.draw(make_camera(16, 16), item, metric);
+        }
+        require(metrics->expected == 12 && metrics->invocations == 7 && metrics->reuses == 3);
+        require(colored_pixel_count(pixels) != 0);
+    }
+}
+
+void test_vertex_cache_storage() {
+    vertex_cache_t vertex_cache;
+    vertex_cache.prepare(128, 6);
+    vertex_cache.insert(5, 0); vertex_cache.insert(127, 1);
+    require(vertex_cache.find(5) == 0 && vertex_cache.find(127) == 1 && !vertex_cache.find(0));
+    const auto lookup_bytes = vertex_cache.lookup_bytes(), touched_bytes = vertex_cache.touched_bytes();
+    vertex_cache.reset();
+    require(!vertex_cache.find(5) && !vertex_cache.find(127));
+    vertex_cache.prepare(4, 4);
+    vertex_cache.insert(3, 0);
+    vertex_cache.prepare(256, 6);
+    require(!vertex_cache.find(3) && !vertex_cache.find(127) && !vertex_cache.find(255));
+    require(lookup_bytes <= vertex_cache.lookup_bytes() && vertex_cache.touched_bytes() == touched_bytes);
+    vertex_metrics_t total, first, second;
+    first.expected = 6; first.invocations = 4; first.reuses = 2; first.lookup_bytes = 32; first.result_bytes = 192;
+    second.expected = 3; second.invocations = 3; second.lookup_bytes = 64; second.result_bytes = 144;
+    total.accumulate(first); total.accumulate(second);
+    require(total.expected == 9 && total.invocations == 7 && total.reuses == 2);
+    require(total.lookup_bytes == 64 && total.result_bytes == 192);
+}
+
 void run_resource_tests() {
     test_rotation_and_item_transform();
     test_resource_model();
@@ -3938,6 +4114,10 @@ void run_framebuffer_tests() {
 }
 
 void run_pipeline_tests() {
+    test_vertex_reuse_equivalence();
+    test_vertex_reuse_freshness();
+    test_vertex_reuse_failure();
+    test_vertex_cache_storage();
     test_fragment_input_reuse();
     test_mixed_interpolation_on_points_and_lines();
     test_interpolation_coverage_and_clip_planes();
