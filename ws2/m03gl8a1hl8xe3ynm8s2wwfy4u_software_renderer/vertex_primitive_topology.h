@@ -13,7 +13,7 @@ enum class vertex_primitive_topology_t {
     line_strip,         /* {0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}           */
     line_loop,          /* {0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 0}   */
     triangle,           /* {0, 1, 2}, {3, 4, 5}                             */
-    triangle_strip,     /* {1, 0, 2}, {1, 2, 3}, {3, 2, 4}, {3, 4, 5}       */ // n-2 triangles are drawn, n == odd -> (n, n + 1, n + 2), n == even -> (n + 1, n, n + 2)
+    triangle_strip,     /* {0, 1, 2}, {2, 1, 3}, {2, 3, 4}, {4, 3, 5}       */ // For n vertices, n-2 triangles: zero-based i even -> (i, i + 1, i + 2), i odd -> (i + 1, i, i + 2).
     triangle_fan,       /* {0, 1, 2}, {0, 2, 3}, {0, 3, 4}, {0, 4, 5}       */
 };
 
