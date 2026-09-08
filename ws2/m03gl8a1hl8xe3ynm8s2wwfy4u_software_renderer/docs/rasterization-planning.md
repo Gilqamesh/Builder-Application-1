@@ -139,9 +139,9 @@ Reference: [Vulkan fragment operations](https://docs.vulkan.org/spec/latest/chap
 ## Snapped-polygon guarantees
 
 Current triangles are clipped, projected, and snapped to a 1/256-pixel grid.
-The renderer supports nonzero-winding coverage, deterministic interpolation and
-facing on degenerate or self-crossing snapped boundaries, and at most one shaded
-sample per original triangle. Raster fixtures exercise these guarantees.
+The renderer supports nonzero-winding coverage and deterministic interpolation and
+facing on degenerate or self-crossing snapped boundaries. Each covered sample is
+shaded at most once per original triangle. Raster fixtures exercise these guarantees.
 
 Recommended direction: retain this contract during feature work. Simplification
 is not a prerequisite. Before proposing triangle-oriented coverage, specify
