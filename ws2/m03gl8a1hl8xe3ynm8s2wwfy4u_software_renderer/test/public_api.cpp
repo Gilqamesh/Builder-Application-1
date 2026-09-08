@@ -41,7 +41,7 @@
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 struct application_metrics_t {
-    std::size_t m_items = 0;
+    std::size_t items = 0;
 };
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
@@ -53,7 +53,7 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::application_metri
     constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::application_metrics_t& metrics, auto& ctx) const {
         auto out = ctx.out();
-        out = std::format_to(out, "application.frame items={}", metrics.m_items);
+        out = std::format_to(out, "application.frame items={}", metrics.items);
         return out;
     }
 };
@@ -1071,7 +1071,7 @@ mask_t count_samples(raster::raster_workspace_t& workspace, int width = 32, int 
     mask_t result;
     raster::visit_samples(workspace, width, height, [&](const raster::sample_t& sample) {
         // Insert before interpolation/shading. A second ear/span hit is a failure.
-        require(result.insert({sample.m_x, sample.m_y}).second);
+        require(result.insert({sample.x, sample.y}).second);
     });
     return result;
 }
@@ -1095,7 +1095,7 @@ mask_t winding_oracle(std::span<const raster::projected_vertex_t> vertices, int 
             const std::int64_t px = x * 256 + 128, py = y * 256 + 128;
             int winding = 0;
             for (std::size_t i = 0; i < vertices.size(); ++i) {
-                const auto a = vertices[i].m_point, b = vertices[(i + 1) % vertices.size()].m_point;
+                const auto a = vertices[i].point, b = vertices[(i + 1) % vertices.size()].point;
                 const __int128 lhs = __int128(px - a[0]) * (b[1] - a[1]);
                 const __int128 rhs = __int128(py - a[1]) * (b[0] - a[0]);
                 if (a[1] <= py && py < b[1] && lhs < rhs) {
@@ -1133,8 +1133,8 @@ void test_original_shared_edges() {
                 for (std::size_t i = 0; i < inputs.size(); ++i) {
                     prepare(inputs[i], workspace);
                     masks[i] = count_samples(workspace);
-                    require(masks[i] == winding_oracle(workspace.m_vertices, 32, 32));
-                    workspace.m_use_triangles = false;
+                    require(masks[i] == winding_oracle(workspace.vertices, 32, 32));
+                    workspace.use_triangles = false;
                     require(count_samples(workspace) == masks[i]);
                 }
                 for (bool reverse_submission : {false, true}) {
@@ -1168,13 +1168,13 @@ void test_clipped_boundaries() {
                     std::rotate(input.begin(), input.begin() + rotation, input.end());
                     raster::raster_workspace_t workspace;
                     prepare(input, workspace);
-                    require(workspace.m_use_triangles == (original == concave));
-                    require(workspace.m_front_facing == reversed);
+                    require(workspace.use_triangles == (original == concave));
+                    require(workspace.front_facing == reversed);
                     require(count_samples(workspace) == mask_t {{0, 0}});
-                    require(winding_oracle(workspace.m_vertices, 32, 32) == mask_t {{0, 0}});
-                    for (const auto& v : workspace.m_vertices) {
+                    require(winding_oracle(workspace.vertices, 32, 32) == mask_t {{0, 0}});
+                    for (const auto& v : workspace.vertices) {
                         for (std::size_t plane = 0; plane < 6; ++plane) {
-                            require(0.0 <= raster::clip_distance(v.m_source, plane));
+                            require(0.0 <= raster::clip_distance(v.source, plane));
                         }
                     }
                 }
@@ -1193,32 +1193,32 @@ void test_polygon(std::vector<raster::grid_point_t> points, const mask_t& expect
     raster::raster_workspace_t workspace;
     for (std::size_t i = 0; i < points.size(); ++i) {
         payloads[i].emplace_back(float(i * i + 1) / 16.0F);
-        workspace.m_vertices.push_back({points[i], double(i % 3) / 4.0, 1.0 / double(1 + i % 3), {raster::vector4f_t({0, 0, 0, 1}), payloads[i]}});
+        workspace.vertices.push_back({points[i], double(i % 3) / 4.0, 1.0 / double(1 + i % 3), {raster::vector4f_t({0, 0, 0, 1}), payloads[i]}});
     }
-    const auto originals = workspace.m_vertices;
+    const auto originals = workspace.vertices;
     std::vector<std::array<double, 3>> baseline;
     bool facing = false;
     for (bool reversed : {false, true}) {
         for (std::size_t rotation = 0; rotation < points.size(); ++rotation) {
-            workspace.m_vertices = originals;
+            workspace.vertices = originals;
             if (reversed) {
-                std::reverse(workspace.m_vertices.begin(), workspace.m_vertices.end());
+                std::reverse(workspace.vertices.begin(), workspace.vertices.end());
             }
-            std::rotate(workspace.m_vertices.begin(), workspace.m_vertices.begin() + rotation, workspace.m_vertices.end());
+            std::rotate(workspace.vertices.begin(), workspace.vertices.begin() + rotation, workspace.vertices.end());
             raster::prepare_polygon(workspace);
             require(count_samples(workspace, 8, 8) == expected);
-            require(winding_oracle(workspace.m_vertices, 8, 8) == expected);
+            require(winding_oracle(workspace.vertices, 8, 8) == expected);
             std::vector<std::array<double, 3>> actual(64);
             std::array<software_shader::value_t, 4> output;
             const std::array<std::size_t, 4> input_slots {0, 1, 2, 3};
             raster::visit_samples(workspace, 8, 8, [&](const raster::sample_t& sample) {
-                const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, input_slots, output);
+                const auto dq = raster::interpolate_sample(workspace.vertices, sample, input_slots, output);
                 require(0.0 < dq[1]);
-                actual[sample.m_y * 8 + sample.m_x] = {dq[0], dq[1], std::get<float>(output[0])};
+                actual[sample.y * 8 + sample.x] = {dq[0], dq[1], std::get<float>(output[0])};
             });
             if (!reversed && rotation == 0) {
                 baseline = actual;
-                facing = workspace.m_front_facing;
+                facing = workspace.front_facing;
             } else {
                 for (std::size_t i = 0; i < actual.size(); ++i) {
                     for (std::size_t j = 0; j < 3; ++j) {
@@ -1226,10 +1226,10 @@ void test_polygon(std::vector<raster::grid_point_t> points, const mask_t& expect
                     }
                 }
                 if (!expected.empty()) {
-                    require(workspace.m_front_facing == (reversed ? !facing : facing));
+                    require(workspace.front_facing == (reversed ? !facing : facing));
                 }
             }
-            workspace.m_use_triangles = false;
+            workspace.use_triangles = false;
             require(count_samples(workspace, 8, 8) == expected);
         }
     }
@@ -1258,10 +1258,10 @@ void test_general_boundaries() {
         raster::raster_workspace_t workspace;
         const auto count = 3 + random() % 7;
         for (std::size_t i = 0; i < count; ++i) {
-            workspace.m_vertices.push_back({{std::int64_t(random() % 1025), std::int64_t(random() % 1025)}, 0, 1, {raster::vector4f_t({0, 0, 0, 1}), {}}});
+            workspace.vertices.push_back({{std::int64_t(random() % 1025), std::int64_t(random() % 1025)}, 0, 1, {raster::vector4f_t({0, 0, 0, 1}), {}}});
         }
         raster::prepare_polygon(workspace);
-        require(count_samples(workspace, 4, 4) == winding_oracle(workspace.m_vertices, 4, 4));
+        require(count_samples(workspace, 4, 4) == winding_oracle(workspace.vertices, 4, 4));
     }
 }
 
@@ -1273,7 +1273,7 @@ void test_interpolation() {
     raster::raster_workspace_t workspace;
     for (std::size_t i = 0; i < points.size(); ++i) {
         payloads[i] = {float(i), raster::vector2f_t({float(i), 7.0F}), m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>(float(i)), raster::vector4f_t(float(i))};
-        workspace.m_vertices.push_back({points[i], z[i], q[i], {raster::vector4f_t({0, 0, 0, 1}), payloads[i]}});
+        workspace.vertices.push_back({points[i], z[i], q[i], {raster::vector4f_t({0, 0, 0, 1}), payloads[i]}});
     }
     raster::prepare_polygon(workspace);
     int hits = 0;
@@ -1281,7 +1281,7 @@ void test_interpolation() {
         ++hits;
         std::array<software_shader::value_t, 5> output {std::uint32_t(0xfedcba98)};
         const std::array<std::size_t, 4> input_slots {4, 1, 3, 2};
-        const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, input_slots, output);
+        const auto dq = raster::interpolate_sample(workspace.vertices, sample, input_slots, output);
         require(std::get<std::uint32_t>(output[0]) == std::uint32_t(0xfedcba98));
         near(dq[0], 0.6);
         near(dq[1], 0.5);
@@ -1293,16 +1293,16 @@ void test_interpolation() {
     });
     require(hits == 1);
     // Triangle sample: grid (0,0),(1024,0),(0,1024), lambda=(3/4,1/8,1/8).
-    workspace.m_vertices.resize(3);
-    workspace.m_vertices[0].m_point = {0, 0};
-    workspace.m_vertices[1].m_point = {1024, 0};
-    workspace.m_vertices[2].m_point = {0, 1024};
+    workspace.vertices.resize(3);
+    workspace.vertices[0].point = {0, 0};
+    workspace.vertices[1].point = {1024, 0};
+    workspace.vertices[2].point = {0, 1024};
     raster::prepare_polygon(workspace);
     raster::visit_samples(workspace, 4, 4, [&](const auto& sample) {
-        if (sample.m_x == 0 && sample.m_y == 0) {
+        if (sample.x == 0 && sample.y == 0) {
             std::array<software_shader::value_t, 4> output;
             const std::array<std::size_t, 4> input_slots {0, 1, 2, 3};
-            const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, input_slots, output);
+            const auto dq = raster::interpolate_sample(workspace.vertices, sample, input_slots, output);
             near(dq[1], 27.0 / 32.0);
             near(dq[0], 11.0 / 32.0);
             near(std::get<float>(output[0]), 4.0 / 27.0);
@@ -1311,14 +1311,14 @@ void test_interpolation() {
     for (auto& payload : payloads) {
         payload = {std::numeric_limits<float>::max()};
     }
-    for (std::size_t i = 0; i < workspace.m_vertices.size(); ++i) {
-        workspace.m_vertices[i].m_source.m_outputs = payloads[i];
-        workspace.m_vertices[i].m_reciprocal_w = std::numeric_limits<float>::max();
+    for (std::size_t i = 0; i < workspace.vertices.size(); ++i) {
+        workspace.vertices[i].source.outputs = payloads[i];
+        workspace.vertices[i].reciprocal_w = std::numeric_limits<float>::max();
     }
     raster::visit_samples(workspace, 4, 4, [&](const auto& sample) {
         std::array<software_shader::value_t, 4> output;
         const std::array<std::size_t, 4> input_slots {0, 1, 2, 3};
-        const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, input_slots, output);
+        const auto dq = raster::interpolate_sample(workspace.vertices, sample, input_slots, output);
         require(std::isfinite(float(dq[1])));
         require(std::get<float>(output[0]) == std::numeric_limits<float>::max());
     });
@@ -1398,16 +1398,16 @@ void test_plane_coverage() {
                     raster::raster_workspace_t workspace;
                     prepare({positions[ids[0]], positions[ids[1]], positions[ids[2]]}, workspace);
                     const auto mask = count_samples(workspace);
-                    require(mask == winding_oracle(workspace.m_vertices, 32, 32));
+                    require(mask == winding_oracle(workspace.vertices, 32, 32));
                     for (const auto p : mask) {
                         require(united.insert(p).second);
                     }
                     if (4 <= plane) {
                         std::span<software_shader::value_t> outputs;
                         raster::visit_samples(workspace, 32, 32, [&](const auto& sample) {
-                            const auto dq = raster::interpolate_sample(workspace.m_vertices, sample, {}, outputs);
-                            const double ndc_z = plane == 6 ? double(sample.m_x - sample.m_y) / 16.0
-                                                            : (plane == 4 ? -1.0 : 1.0) * (double(sample.m_x) + 0.5) / 16.0;
+                            const auto dq = raster::interpolate_sample(workspace.vertices, sample, {}, outputs);
+                            const double ndc_z = plane == 6 ? double(sample.x - sample.y) / 16.0
+                                                            : (plane == 4 ? -1.0 : 1.0) * (double(sample.x) + 0.5) / 16.0;
                             near(dq[0], 0.5 * ndc_z + 0.5);
                         });
                     }
@@ -1428,10 +1428,10 @@ void test_plane_coverage() {
         raster::clipping_workspace_t clipping;
         const auto index = raster::clip_triangle(input[0], input[1], input[2], clipping);
         if (index) {
-            const auto& polygon = clipping.m_buffers[*index];
-            for (const auto& v : polygon.m_vertices) {
+            const auto& polygon = clipping.buffers[*index];
+            for (const auto& v : polygon.vertices) {
                 for (std::size_t plane = 0; plane < 6; ++plane) {
-                    require(0 <= raster::clip_distance(raster::view(v, polygon.m_values), plane));
+                    require(0 <= raster::clip_distance(raster::view(v, polygon.values), plane));
                 }
             }
         }
@@ -1443,37 +1443,37 @@ void test_clipping() {
     const raster::varying_values_t from_values {0.0F}, to_values {1.0F};
     for (std::size_t plane = 0; plane < 6; ++plane) {
         auto outside = vertex({0, 0, 0, 1}), inside = outside;
-        outside.m_clip_position[plane / 2] = plane % 2 == 0 ? -2.0F : 2.0F;
-        outside.m_outputs = from_values;
-        inside.m_outputs = to_values;
+        outside.clip_position[plane / 2] = plane % 2 == 0 ? -2.0F : 2.0F;
+        outside.outputs = from_values;
+        inside.outputs = to_values;
         auto index = raster::clip_line(outside, inside, workspace);
         require(index.has_value());
-        auto& line = workspace.m_buffers[*index];
-        const auto position = line.m_vertices[0].m_clip_position;
-        require(raster::clip_distance(raster::view(line.m_vertices[0], line.m_values), plane) == 0.0);
-        near(std::get<float>(raster::view(line.m_vertices[0], line.m_values).m_outputs[0]), 0.5);
+        auto& line = workspace.buffers[*index];
+        const auto position = line.vertices[0].clip_position;
+        require(raster::clip_distance(raster::view(line.vertices[0], line.values), plane) == 0.0);
+        near(std::get<float>(raster::view(line.vertices[0], line.values).outputs[0]), 0.5);
         index = raster::clip_line(inside, outside, workspace);
         require(index.has_value());
         for (std::size_t axis = 0; axis < 4; ++axis) {
-            require(std::bit_cast<std::uint32_t>(position[axis]) == std::bit_cast<std::uint32_t>(workspace.m_buffers[*index].m_vertices[1].m_clip_position[axis]));
+            require(std::bit_cast<std::uint32_t>(position[axis]) == std::bit_cast<std::uint32_t>(workspace.buffers[*index].vertices[1].clip_position[axis]));
         }
         auto on_plane = inside;
-        on_plane.m_clip_position = position;
+        on_plane.clip_position = position;
         index = raster::clip_line(outside, on_plane, workspace);
         require(index.has_value());
-        for (const auto& v : workspace.m_buffers[*index].m_vertices) {
-            const auto actual = raster::view(v, workspace.m_buffers[*index].m_values);
-            require(std::ranges::equal(actual.m_clip_position, on_plane.m_clip_position));
-            near(std::get<float>(actual.m_outputs[0]), 1.0);
+        for (const auto& v : workspace.buffers[*index].vertices) {
+            const auto actual = raster::view(v, workspace.buffers[*index].values);
+            require(std::ranges::equal(actual.clip_position, on_plane.clip_position));
+            near(std::get<float>(actual.outputs[0]), 1.0);
         }
     }
     for (float sign : {-1.0F, 1.0F}) {
         auto first = vertex({sign * 2, sign * 2, sign * 2, 1}), second = vertex({0, 0, 0, 1});
         const auto index = raster::clip_line(first, second, workspace);
         require(index.has_value());
-        for (const auto& v : workspace.m_buffers[*index].m_vertices) {
+        for (const auto& v : workspace.buffers[*index].vertices) {
             for (std::size_t plane = 0; plane < 6; ++plane) {
-                require(0 <= raster::clip_distance(raster::view(v, workspace.m_buffers[*index].m_values), plane));
+                require(0 <= raster::clip_distance(raster::view(v, workspace.buffers[*index].values), plane));
             }
         }
     }
@@ -1517,16 +1517,16 @@ void test_integer_bounds() {
     // Both rational crossings round to the same double, but contain the last X center.
     raster::raster_workspace_t workspace;
     for (const auto p : std::array<raster::grid_point_t, 3> {{{limit - 128, 0}, {limit - 127, limit}, {limit - 129, limit}}}) {
-        workspace.m_vertices.push_back({p, 0, 1, {raster::vector4f_t({0, 0, 0, 1}), {}}});
+        workspace.vertices.push_back({p, 0, 1, {raster::vector4f_t({0, 0, 0, 1}), {}}});
     }
     raster::prepare_polygon(workspace);
-    workspace.m_use_triangles = false;
+    workspace.use_triangles = false;
     int hits = 0;
     raster::visit_samples(workspace, raster::maximum_extent, 1, [&](const auto& sample) {
         ++hits;
-        require(sample.m_x == raster::maximum_extent - 1 && sample.m_y == 0);
+        require(sample.x == raster::maximum_extent - 1 && sample.y == 0);
         double sum = 0;
-        for (double w : sample.m_weights) {
+        for (double w : sample.weights) {
             require(std::isfinite(w) && 0 <= w);
             sum += w;
         }
@@ -1540,10 +1540,10 @@ void test_wide_raster_bounds() {
     const int maximum = std::numeric_limits<int>::max();
     const raster::raster_bounds_t bounds(8, 8, {{minimum, maximum}, {minimum, maximum}});
     require(!bounds.empty());
-    require(bounds.m_view_width == std::int64_t(maximum) - minimum);
-    require(bounds.m_first_x == -std::int64_t(minimum));
-    require(bounds.m_end_x - bounds.m_first_x == 8);
-    const std::int64_t limit = bounds.m_view_width * raster::subpixels;
+    require(bounds.view_width == std::int64_t(maximum) - minimum);
+    require(bounds.first_x == -std::int64_t(minimum));
+    require(bounds.end_x - bounds.first_x == 8);
+    const std::int64_t limit = bounds.view_width * raster::subpixels;
     const std::array<raster::grid_point_t, 4> corners {{{0, 0}, {limit, 0}, {limit, limit}, {0, limit}}};
     for (auto a : corners) {
         for (auto b : corners) {
@@ -1557,21 +1557,21 @@ void test_wide_raster_bounds() {
     raster::raster_workspace_t workspace;
     const auto zero = vertex({0, 0, 0, 1});
     for (auto point : corners) {
-        workspace.m_vertices.push_back({point, 0, 1, zero});
+        workspace.vertices.push_back({point, 0, 1, zero});
     }
     raster::prepare_polygon(workspace);
     for (bool triangles : {true, false}) {
-        workspace.m_use_triangles = triangles;
+        workspace.use_triangles = triangles;
         mask_t actual;
-        raster::visit_samples(workspace, bounds.m_end_x, bounds.m_end_y, [&](const auto& sample) {
-            require(actual.insert({sample.m_x - bounds.m_first_x, sample.m_y - bounds.m_first_y}).second);
+        raster::visit_samples(workspace, bounds.end_x, bounds.end_y, [&](const auto& sample) {
+            require(actual.insert({sample.x - bounds.first_x, sample.y - bounds.first_y}).second);
             double sum = 0;
-            for (double weight : sample.m_weights) {
+            for (double weight : sample.weights) {
                 require(std::isfinite(weight) && 0 <= weight);
                 sum += weight;
             }
             near(sum, 1);
-        }, bounds.m_first_x, bounds.m_first_y);
+        }, bounds.first_x, bounds.first_y);
         require(actual == rectangle(0, 0, 8, 8));
     }
     std::mt19937_64 random(20260907);
@@ -2478,9 +2478,9 @@ void test_depth_clears() {
 void test_profiling() {
     require(std::format("{}", raster_metrics_t{}).find("discarded=n/a, depth_rejected=n/a") != std::string::npos);
     raster_metrics_t ratios;
-    ratios.m_invocations = 8;
-    ratios.m_discards = 2;
-    ratios.m_depth_rejections = 3;
+    ratios.invocations = 8;
+    ratios.discards = 2;
+    ratios.depth_rejections = 3;
     require(std::format("{}", ratios).find("discarded=25.0%, depth_rejected=37.5%") != std::string::npos);
     std::vector<api::rgba8_t> measured_pixels(256), normal_pixels(256);
     std::vector<float> measured_depth(256), normal_depth(256);
@@ -2515,30 +2515,30 @@ void test_profiling() {
         {
             auto metric = profiler.metric<application_metrics_t>();
             render(measured, metric);
-            metric.update<application_metrics_t>([draws](application_metrics_t& metric) noexcept { metric.m_items = draws; });
+            metric.update<application_metrics_t>([draws](application_metrics_t& metric) noexcept { metric.items = draws; });
         }
         render(normal, inactive_metric);
         require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
         require(measured_depth == normal_depth);
         require(profiler.size() == 7);
-        require(profiler.metrics<application_metrics_t>()->m_items == draws);
-        require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->m_color_writes == 256 * std::size_t(mode + 1));
-        require(profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->m_depth_writes == 256 * std::size_t(mode + 1));
+        require(profiler.metrics<application_metrics_t>()->items == draws);
+        require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->color_writes == 256 * std::size_t(mode + 1));
+        require(profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->depth_writes == 256 * std::size_t(mode + 1));
         const auto* vertex_metrics = profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>();
         vertex_invocations += 6 * draws;
-        require(vertex_metrics->m_invocations == vertex_invocations && vertex_metrics->m_expected == vertex_invocations);
+        require(vertex_metrics->invocations == vertex_invocations && vertex_metrics->expected == vertex_invocations);
         const auto* raster_metrics = profiler.metrics<application_metrics_t, draw_metrics_t, raster_metrics_t>();
-        expected_raster.m_invocations += mode == 4 ? 0 : 256 * draws;
-        expected_raster.m_discards += mode == 2 || mode == 3 ? 128 : 0;
-        expected_raster.m_depth_rejections += mode == 1 || mode == 5 ? 256 : 0;
+        expected_raster.invocations += mode == 4 ? 0 : 256 * draws;
+        expected_raster.discards += mode == 2 || mode == 3 ? 128 : 0;
+        expected_raster.depth_rejections += mode == 1 || mode == 5 ? 256 : 0;
         const std::size_t writes = mode == 1 || mode == 4 ? 0 : (mode == 2 || mode == 3 ? 128 : 256);
-        expected_raster.m_depth_writes += writes;
-        expected_raster.m_color_writes += mode == 3 ? 0 : writes;
-        require(raster_metrics->m_invocations == expected_raster.m_invocations);
-        require(raster_metrics->m_discards == expected_raster.m_discards);
-        require(raster_metrics->m_depth_rejections == expected_raster.m_depth_rejections);
-        require(raster_metrics->m_depth_writes == expected_raster.m_depth_writes);
-        require(raster_metrics->m_color_writes == expected_raster.m_color_writes);
+        expected_raster.depth_writes += writes;
+        expected_raster.color_writes += mode == 3 ? 0 : writes;
+        require(raster_metrics->invocations == expected_raster.invocations);
+        require(raster_metrics->discards == expected_raster.discards);
+        require(raster_metrics->depth_rejections == expected_raster.depth_rejections);
+        require(raster_metrics->depth_writes == expected_raster.depth_writes);
+        require(raster_metrics->color_writes == expected_raster.color_writes);
     }
     std::ostringstream report;
     profiler.report(report);
@@ -2560,7 +2560,7 @@ void test_profiling() {
     test::expect_throws([&] { measure([&](profiling::metric_t& metric) { measured.draw(camera, api::render_item_t{}, metric); }); });
     test::expect_throws([&] { normal.draw(camera, api::render_item_t{}, inactive_metric); });
     require(profiler.size() == 7 && profiler.unwinding<application_metrics_t, draw_metrics_t>() == true && profiler.unwinding<application_metrics_t, draw_metrics_t, preparation_metrics_t>() == true);
-    require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->m_invocations == vertex_invocations);
+    require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->invocations == vertex_invocations);
 
     // Empty intersections retain their original validation bypass in both configurations.
     auto empty_camera = make_camera(0, 0);
@@ -2581,8 +2581,8 @@ void test_profiling() {
         measure([&](profiling::metric_t& metric) { measured.clear_depth(1, metric); }); normal.clear_depth(1, inactive_metric);
         measure([&](profiling::metric_t& metric) { measured.draw(camera, item, metric); }); normal.draw(camera, item, inactive_metric);
         vertex_invocations += indices.size();
-        require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->m_invocations == vertex_invocations);
-        require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->m_expected == vertex_invocations);
+        require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->invocations == vertex_invocations);
+        require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->expected == vertex_invocations);
         require(std::equal(measured_pixels.begin(), measured_pixels.end(), normal_pixels.begin(), same_color));
         require(measured_depth == normal_depth);
     }
@@ -2603,8 +2603,8 @@ void test_profiling() {
     test::expect_throws<std::runtime_error>([&] { normal.draw(camera, throwing_item, inactive_metric); });
     require(profiler.size() == 7);
     require(profiler.unwinding<application_metrics_t, draw_metrics_t, vertex_metrics_t>() == true);
-    require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->m_invocations == vertex_invocations + 1);
-    require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->m_expected == vertex_invocations + 6);
+    require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->invocations == vertex_invocations + 1);
+    require(profiler.metrics<application_metrics_t, draw_metrics_t, vertex_metrics_t>()->expected == vertex_invocations + 6);
     require(profiler.unwinding<application_metrics_t, draw_metrics_t, preparation_metrics_t>() == false);
 
     // Enablement affects subsequent roots; the active frame still records children.
@@ -2612,22 +2612,22 @@ void test_profiling() {
         auto metric = profiler.metric<application_metrics_t>();
         profiler.enabled() = false;
         measured.clear_color(make_camera(2, 2), clear_color, metric);
-        metric.update<application_metrics_t>([](application_metrics_t& metric) noexcept { metric.m_items = 3; });
+        metric.update<application_metrics_t>([](application_metrics_t& metric) noexcept { metric.items = 3; });
     }
-    require(profiler.metrics<application_metrics_t>()->m_items == 3);
-    const auto color_writes = profiler.metrics<application_metrics_t, clear_color_metrics_t>()->m_color_writes;
-    const auto depth_writes = profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->m_depth_writes;
+    require(profiler.metrics<application_metrics_t>()->items == 3);
+    const auto color_writes = profiler.metrics<application_metrics_t, clear_color_metrics_t>()->color_writes;
+    const auto depth_writes = profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->depth_writes;
     measure([&](profiling::metric_t& metric) { measured.clear_color(empty_camera, clear_color, metric); });
-    require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->m_color_writes == color_writes);
+    require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->color_writes == color_writes);
     profiler.enabled() = true;
     measure([&](profiling::metric_t& metric) { measured.clear_color(empty_camera, clear_color, metric); });
     measure([&](profiling::metric_t& metric) { measured.clear_depth(empty_camera, 1, metric); });
-    require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->m_color_writes == color_writes);
-    require(profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->m_depth_writes == depth_writes);
+    require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->color_writes == color_writes);
+    require(profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->depth_writes == depth_writes);
     measure([&](profiling::metric_t& metric) { measured.clear_color(make_camera(2, 2), clear_color, metric); });
     measure([&](profiling::metric_t& metric) { measured.clear_depth(make_camera(2, 2), 1, metric); });
-    require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->m_color_writes == color_writes + 4);
-    require(profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->m_depth_writes == depth_writes + 4);
+    require(profiler.metrics<application_metrics_t, clear_color_metrics_t>()->color_writes == color_writes + 4);
+    require(profiler.metrics<application_metrics_t, clear_depth_metrics_t>()->depth_writes == depth_writes + 4);
     require(profiler.size() == 7);
 }
 
@@ -2897,10 +2897,10 @@ void test_blend_depth_and_metrics() {
         require(std::equal(recorded_pixels.begin(), recorded_pixels.end(), inactive_pixels.begin(), same_color));
         require(recorded_depth == inactive_depth);
         const auto* metrics = profiler.metrics<application_metrics_t, draw_metrics_t, raster_metrics_t>();
-        require(metrics->m_invocations == 256 && metrics->m_discards == (mode == 3 ? 128U : 0U));
-        require(metrics->m_depth_rejections == (mode == 4 ? 256U : 0U));
-        require(metrics->m_color_writes == (mode == 0 || mode == 2 || mode == 4 ? 0U : (mode == 3 ? 128U : 256U)));
-        require(metrics->m_depth_writes == (mode == 4 || mode == 5 ? 0U : (mode == 3 ? 128U : 256U)));
+        require(metrics->invocations == 256 && metrics->discards == (mode == 3 ? 128U : 0U));
+        require(metrics->depth_rejections == (mode == 4 ? 256U : 0U));
+        require(metrics->color_writes == (mode == 0 || mode == 2 || mode == 4 ? 0U : (mode == 3 ? 128U : 256U)));
+        require(metrics->depth_writes == (mode == 4 || mode == 5 ? 0U : (mode == 3 ? 128U : 256U)));
         for (int y = 0; y < 16; ++y) {
             for (int x = 0; x < 16; ++x) {
                 const auto i = pixel_index(x, y, 16);
@@ -3132,14 +3132,14 @@ void test_stencil_pipeline_and_metrics() {
         require(depth == normal_depth && stencil == normal_stencil);
         const auto* metrics = profiler.metrics<application_metrics_t, draw_metrics_t, raster_metrics_t>();
         const std::size_t survivors = mode == 9 ? 0 : (mode == 4 ? 128 : 256);
-        require(metrics->m_invocations == (mode == 9 ? 0U : 256U));
-        require(metrics->m_discards == (mode == 4 ? 128U : 0U));
-        require(metrics->m_stencil_rejections == (mode == 1 ? 256U : 0U));
-        require(metrics->m_depth_rejections == (mode == 2 ? 256U : 0U));
-        require(metrics->m_stencil_writes == (mode == 7 ? 0 : survivors));
-        require(metrics->m_depth_writes == (mode == 1 || mode == 2 || mode == 3 || mode == 8 ? 0 : survivors));
-        require(metrics->m_color_writes == (mode == 1 || mode == 2 || mode == 5 || mode == 6 ? 0 : survivors));
-        require(profiler.metrics<application_metrics_t, clear_stencil_metrics_t>()->m_stencil_writes == 256);
+        require(metrics->invocations == (mode == 9 ? 0U : 256U));
+        require(metrics->discards == (mode == 4 ? 128U : 0U));
+        require(metrics->stencil_rejections == (mode == 1 ? 256U : 0U));
+        require(metrics->depth_rejections == (mode == 2 ? 256U : 0U));
+        require(metrics->stencil_writes == (mode == 7 ? 0 : survivors));
+        require(metrics->depth_writes == (mode == 1 || mode == 2 || mode == 3 || mode == 8 ? 0 : survivors));
+        require(metrics->color_writes == (mode == 1 || mode == 2 || mode == 5 || mode == 6 ? 0 : survivors));
+        require(profiler.metrics<application_metrics_t, clear_stencil_metrics_t>()->stencil_writes == 256);
         for (int y = 0; y < 16; ++y) {
             for (int x = 0; x < 16; ++x) {
                 const auto index = pixel_index(x, y, 16);

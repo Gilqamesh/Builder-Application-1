@@ -175,7 +175,7 @@ public:
     /**
      * @brief Replaces an owned texture binding, or removes it when the value is null.
      */
-    void texture(std::uint32_t location, std::shared_ptr<texture::texture_t> value);
+    void texture(std::uint32_t location, std::shared_ptr<texture::texture_t> texture);
 
     /** @brief Borrows the current texture until replacement, removal, or destruction; missing bindings fail. */
     const texture::texture_t& texture(std::uint32_t location) const;
@@ -183,7 +183,7 @@ public:
     /**
      * @brief Replaces an owned sampler binding, or removes it when the value is null.
      */
-    void sampler(std::uint32_t location, std::shared_ptr<texture::sampler_t> value);
+    void sampler(std::uint32_t location, std::shared_ptr<texture::sampler_t> sampler);
 
     /** @brief Borrows the current sampler under texture()'s lifetime and failure rules. */
     const texture::sampler_t& sampler(std::uint32_t location) const;

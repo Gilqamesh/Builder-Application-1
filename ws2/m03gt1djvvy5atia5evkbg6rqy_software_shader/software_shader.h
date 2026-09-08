@@ -211,7 +211,7 @@ void program_t::execution_context_t::prepared_t::resolve(const shader::shader_in
                 const auto& uniform = bindings.uniform_value(binding.index);
                 const auto type = std::visit([]<typename V>(const V&) { return shader::shader_data_type<V>(); }, uniform);
                 if (type != binding.type) {
-                    throw std::invalid_argument(std::format("prepared shader uniform binding {} has the wrong type", binding.index));
+                    throw std::invalid_argument(std::format("prepared shader uniform binding {} has type {}; expected {}", binding.index, type, binding.type));
                 }
                 resolved.emplace_back(uniform);
             } break;

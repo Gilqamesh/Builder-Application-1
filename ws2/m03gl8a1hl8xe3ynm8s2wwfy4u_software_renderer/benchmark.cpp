@@ -31,7 +31,7 @@
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 struct frame_metrics_t {
-    std::size_t m_draws = 0;
+    std::size_t draws = 0;
 };
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
@@ -43,7 +43,7 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::frame_metrics_t> 
     constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::frame_metrics_t& frame_metrics, auto& ctx) const {
         auto out = ctx.out();
-        out = std::format_to(out, "application.frame draws={}", frame_metrics.m_draws);
+        out = std::format_to(out, "application.frame draws={}", frame_metrics.draws);
         return out;
     }
 };
@@ -169,18 +169,18 @@ std::int64_t render_frame(software_renderer_t& software_renderer, const camera_t
         if (mask) {
             software_renderer.clear_stencil(0, metric);
             software_renderer.draw(camera, *mask, metric);
-            metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.m_draws; });
+            metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.draws; });
         }
         for (const auto& item : items) {
             software_renderer.draw(camera, item, metric);
-            metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.m_draws; });
+            metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.draws; });
         }
         if (offscreen) {
             if (mip_target) { mip_target->generate_mipmaps(); }
             software_renderer.framebuffer() = output;
             software_renderer.clear_color({16, 24, 32, 255}, metric);
             software_renderer.draw(camera, *postprocess, metric);
-            metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.m_draws; });
+            metric.update<frame_metrics_t>([](frame_metrics_t& metric) noexcept { ++metric.draws; });
         }
     }
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();

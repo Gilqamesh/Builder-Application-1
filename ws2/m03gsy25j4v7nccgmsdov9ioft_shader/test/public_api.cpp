@@ -2,7 +2,9 @@
 #include <m03gsy25j4v7nccgmsdov9ioft_shader/api.h>
 
 #include <cstdint>
+#include <format>
 #include <functional>
+#include <string>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -361,10 +363,109 @@ void test_vertex_matrix_builtins() {
     expect_element(ast.interface().outputs()[0], 7, shader::shader_data_type<matrix4f_t>());
 }
 
+
 } // namespace
+
+namespace m03gsy25j4v7nccgmsdov9ioft_shader {
+
+static_assert(std::formattable<shader::shader_data_category_t, char>);
+static_assert(std::formattable<shader::shader_scalar_type_t, char>);
+static_assert(std::formattable<shader::shader_data_type_t, char>);
+static_assert(std::formattable<shader::shader_texture_2d_t, char>);
+static_assert(std::formattable<shader::shader_sampler_t, char>);
+static_assert(std::formattable<shader::shader_unary_operation_t, char>);
+static_assert(std::formattable<shader::shader_binary_operation_t, char>);
+static_assert(std::formattable<shader::shader_call_operation_t, char>);
+static_assert(std::formattable<shader::shader_boolean_components_t, char>);
+static_assert(std::formattable<shader::shader_literal_t, char>);
+static_assert(std::formattable<shader::shader_stage_t, char>);
+static_assert(std::formattable<shader::shader_builtin_t, char>);
+static_assert(std::formattable<shader::shader_output_t, char>);
+static_assert(std::formattable<shader::interpolation_t, char>);
+static_assert(std::formattable<shader::shader_interface_element_t, char>);
+static_assert(std::formattable<shader::shader_interface_t, char>);
+static_assert(std::formattable<shader::shader_expression_node_t, char>);
+static_assert(std::formattable<shader::shader_statement_node_t, char>);
+static_assert(std::formattable<shader::shader_block_t, char>);
+static_assert(std::formattable<shader::shader_ast_t, char>);
+static_assert(std::formattable<shader::shader_ast_builder_t, char>);
+static_assert(std::formattable<shader::vertex_shader_ast_builder_t, char>);
+static_assert(std::formattable<shader::fragment_shader_ast_builder_t, char>);
+static_assert(std::formattable<shader::shader_ast_visitor_t, char>);
+static_assert(std::formattable<shader::shader_constant_node_t, char>);
+static_assert(std::formattable<shader::shader_input_node_t, char>);
+static_assert(std::formattable<shader::shader_uniform_node_t, char>);
+static_assert(std::formattable<shader::shader_resource_node_t, char>);
+static_assert(std::formattable<shader::shader_builtin_node_t, char>);
+static_assert(std::formattable<shader::shader_local_node_t, char>);
+static_assert(std::formattable<shader::shader_unary_node_t, char>);
+static_assert(std::formattable<shader::shader_binary_node_t, char>);
+static_assert(std::formattable<shader::shader_construct_node_t, char>);
+static_assert(std::formattable<shader::shader_swizzle_node_t, char>);
+static_assert(std::formattable<shader::shader_call_node_t, char>);
+static_assert(std::formattable<shader::shader_local_statement_t, char>);
+static_assert(std::formattable<shader::shader_assignment_statement_t, char>);
+static_assert(std::formattable<shader::shader_output_statement_t, char>);
+static_assert(std::formattable<shader::shader_branch_statement_t, char>);
+static_assert(std::formattable<shader::shader_loop_statement_t, char>);
+static_assert(std::formattable<shader::shader_break_statement_t, char>);
+static_assert(std::formattable<shader::shader_continue_statement_t, char>);
+static_assert(std::formattable<shader::shader_discard_statement_t, char>);
+static_assert(std::formattable<shader::shader_expression_t<float>, char>);
+static_assert(std::formattable<shader::shader_local_t<float>, char>);
+static_assert(std::formattable<shader::shader_scalar_type_traits_t<float, shader::shader_scalar_type_t::floating_point, true, false>, char>);
+static_assert(std::formattable<shader::shader_resource_type_traits_t<shader::shader_data_category_t::sampler>, char>);
+static_assert(std::formattable<shader::shader_operand_traits_t<float>, char>);
+static_assert(std::formattable<shader::shader_binary_result_traits_t<shader::shader_binary_operation_t::add, float, float>, char>);
+
+void test_shader_formatting() {
+    const auto shader_data_type = shader::shader_data_type<vector4f_t>();
+    test::expect(std::equal_to<>(), std::format("{}", shader_data_type), std::string("{ category: vector, scalar: floating_point, rows: 4, columns: 1 }"));
+    test::expect(std::equal_to<>(), std::format("{}", shader::shader_stage_t::vertex), std::string("vertex"));
+    test::expect(std::equal_to<>(), std::format("{}", static_cast<shader::shader_stage_t>(99)), std::string("invalid(99)"));
+    test::expect_throws<std::format_error>([&] {
+        (void)std::vformat("{:x}", std::make_format_args(shader_data_type));
+    });
+
+    shader::vertex_shader_ast_builder_t vertex;
+    const auto position = vertex.input<vector4f_t>(7);
+    vertex.position(position);
+    const auto handle_text = std::format("{}", position);
+    test::expect(std::identity(), handle_text.contains("node:"));
+    test::expect(std::identity(), handle_text.contains("rows: 4"));
+    const auto shader_ast = std::move(vertex).finalize();
+    const auto ast_text = std::format("{}", shader_ast);
+    test::expect(std::identity(), ast_text.contains("stage: vertex"));
+    test::expect(std::identity(), ast_text.contains("index: 7"));
+
+    const shader::shader_binary_node_t binary(shader_data_type, shader::shader_binary_operation_t::add, position.node(), position.node());
+    test::expect(std::identity(), std::format("{}", binary).contains("operation: add"));
+    test::expect(std::identity(), std::format("{}", shader::shader_type_traits_t<float>{}).contains("numeric: true"));
+    test::expect(std::identity(), std::format("{}", shader::shader_boolean_components_t{{0, 1}}).contains("[0, 1]"));
+}
+
+void test_interface_diagnostics() {
+    try {
+        (void)shader::shader_interface_t(shader::shader_stage_t::vertex,
+            {{7, shader::shader_data_type<float>()}, {7, shader::shader_data_type<vector4f_t>()}}, {}, {});
+        test::fail();
+    } catch (const std::invalid_argument& error) {
+        const std::string message(error.what());
+        test::expect(std::identity(), message.contains("location 7"));
+        test::expect(std::identity(), message.contains("actual"));
+        test::expect(std::identity(), message.contains("expected"));
+        test::expect(std::identity(), message.contains("category: scalar"));
+        test::expect(std::identity(), message.contains("category: vector"));
+    }
+}
+
+
+} // namespace m03gsy25j4v7nccgmsdov9ioft_shader
 
 int main() {
     return test::run([] {
+        shader::test_shader_formatting();
+        shader::test_interface_diagnostics();
         test_explicit_lod_ast_validation();
         test_interpolation_metadata();
         test_repeated_branch_outputs();

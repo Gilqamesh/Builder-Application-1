@@ -37,8 +37,8 @@ const software_shader::value_t& material_t::uniform_value(std::uint32_t location
     return iterator->second;
 }
 
-void material_t::texture(std::uint32_t location, std::shared_ptr<texture::texture_t> value) {
-    if (value) { m_textures.insert_or_assign(location, std::move(value)); }
+void material_t::texture(std::uint32_t location, std::shared_ptr<texture::texture_t> texture) {
+    if (texture) { m_textures.insert_or_assign(location, std::move(texture)); }
     else { m_textures.erase(location); }
 }
 
@@ -50,8 +50,8 @@ const texture::texture_t& material_t::texture(std::uint32_t location) const {
     return *iterator->second;
 }
 
-void material_t::sampler(std::uint32_t location, std::shared_ptr<texture::sampler_t> value) {
-    if (value) { m_samplers.insert_or_assign(location, std::move(value)); }
+void material_t::sampler(std::uint32_t location, std::shared_ptr<texture::sampler_t> sampler) {
+    if (sampler) { m_samplers.insert_or_assign(location, std::move(sampler)); }
     else { m_samplers.erase(location); }
 }
 
@@ -219,8 +219,6 @@ void material_t::color_write(color_mask_t color_mask) {
 color_mask_t material_t::color_write() const {
     return m_color_write;
 }
-
-
 
 void material_t::validate_stencil_state(const stencil_state_t& stencil_state) {
     switch (stencil_state.comparison) {

@@ -4,6 +4,7 @@
 # include "shader_expression.h"
 
 # include <concepts>
+# include <cstddef>
 # include <cstdint>
 # include <functional>
 # include <format>
@@ -486,17 +487,107 @@ public:
 namespace std {
 
 template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_stage_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_output_t>;
+
+template <>
 struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::interpolation_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_interface_element_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_interface_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_expression_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_statement_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_block_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_ast_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_ast_builder_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::vertex_shader_ast_builder_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::fragment_shader_ast_builder_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_ast_visitor_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_constant_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_input_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_uniform_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_resource_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_local_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_unary_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_binary_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_construct_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_swizzle_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_call_node_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_local_statement_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_assignment_statement_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_output_statement_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_branch_statement_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_loop_statement_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_break_statement_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_continue_statement_t>;
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_discard_statement_t>;
 
 } // namespace std
 
 namespace m03gsy25j4v7nccgmsdov9ioft_shader {
-
-template <shader_value T>
-shader_constant_node_t::shader_constant_node_t(T value):
-    shader_constant_node_t(shader_literal_t(std::move(value)))
-{
-}
 
 template <shader_value T>
 shader_local_t<T>::shader_local_t(shader_ast_builder_t* builder, const shader_local_node_t* node):
@@ -555,14 +646,14 @@ shader_expression_t<T> shader_ast_builder_t::uniform(std::uint32_t binding) {
 
 template <shader_resource T>
 shader_expression_t<std::remove_cvref_t<T>> shader_ast_builder_t::resource(std::uint32_t binding) {
-    using type = std::remove_cvref_t<T>;
-    return expression<type>(std::make_unique<shader_resource_node_t>(shader_data_type<type>(), binding));
+    using type_t = std::remove_cvref_t<T>;
+    return expression<type_t>(std::make_unique<shader_resource_node_t>(shader_data_type<type_t>(), binding));
 }
 
 template <shader_value T>
 shader_expression_t<std::remove_cvref_t<T>> shader_ast_builder_t::constant(T value) {
-    using type = std::remove_cvref_t<T>;
-    return expression<type>(std::make_unique<shader_constant_node_t>(std::move(value)));
+    using type_t = std::remove_cvref_t<T>;
+    return expression<type_t>(std::make_unique<shader_constant_node_t>(std::move(value)));
 }
 
 template <shader_value T, typename... Ts>
@@ -639,6 +730,14 @@ void shader_ast_builder_t::statement(std::unique_ptr<Node> statement) {
     m_current_block->statements.push_back(std::move(statement));
 }
 
+template <shader_type T>
+const shader_expression_node_t* shader_ast_builder_t::require(shader_expression_t<T> expression) const {
+    if (expression.builder() != this || !owns(expression.node())) {
+        throw std::invalid_argument("shader expression belongs to another builder");
+    }
+    return expression.node();
+}
+
 template <typename Body>
 shader_block_t shader_ast_builder_t::block(Body&& body) {
     shader_block_t result;
@@ -662,17 +761,111 @@ const shader_expression_node_t* shader_ast_builder_t::operand(T&& value) {
     }
 }
 
-template <shader_type T>
-const shader_expression_node_t* shader_ast_builder_t::require(shader_expression_t<T> expression) const {
-    if (expression.builder() != this || !owns(expression.node())) {
-        throw std::invalid_argument("shader expression belongs to another builder");
-    }
-    return expression.node();
+template <shader_value T>
+shader_constant_node_t::shader_constant_node_t(T value):
+    shader_constant_node_t(shader_literal_t(std::move(value)))
+{
 }
 
 } // namespace m03gsy25j4v7nccgmsdov9ioft_shader
 
 namespace std {
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_stage_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_stage_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_stage_t& shader_stage, auto& ctx) const {
+        auto out = ctx.out();
+        switch (shader_stage) {
+            case m03gsy25j4v7nccgmsdov9ioft_shader::shader_stage_t::vertex: {
+                out = std::format_to(out, "vertex");
+            } break;
+            case m03gsy25j4v7nccgmsdov9ioft_shader::shader_stage_t::fragment: {
+                out = std::format_to(out, "fragment");
+            } break;
+            default: {
+                out = std::format_to(out, "invalid({})", static_cast<int>(shader_stage));
+            } break;
+        }
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_builtin_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_t& shader_builtin, auto& ctx) const {
+        auto out = ctx.out();
+        switch (shader_builtin) {
+            case m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_t::vertex_index: {
+                out = std::format_to(out, "vertex_index");
+            } break;
+            case m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_t::instance_index: {
+                out = std::format_to(out, "instance_index");
+            } break;
+            case m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_t::object_to_world: {
+                out = std::format_to(out, "object_to_world");
+            } break;
+            case m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_t::world_to_clip: {
+                out = std::format_to(out, "world_to_clip");
+            } break;
+            case m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_t::fragment_coordinate: {
+                out = std::format_to(out, "fragment_coordinate");
+            } break;
+            case m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_t::front_facing: {
+                out = std::format_to(out, "front_facing");
+            } break;
+            default: {
+                out = std::format_to(out, "invalid({})", static_cast<int>(shader_builtin));
+            } break;
+        }
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_output_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_output_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_output_t& shader_output, auto& ctx) const {
+        auto out = ctx.out();
+        switch (shader_output) {
+            case m03gsy25j4v7nccgmsdov9ioft_shader::shader_output_t::location: {
+                out = std::format_to(out, "location");
+            } break;
+            case m03gsy25j4v7nccgmsdov9ioft_shader::shader_output_t::position: {
+                out = std::format_to(out, "position");
+            } break;
+            case m03gsy25j4v7nccgmsdov9ioft_shader::shader_output_t::color: {
+                out = std::format_to(out, "color");
+            } break;
+            default: {
+                out = std::format_to(out, "invalid({})", static_cast<int>(shader_output));
+            } break;
+        }
+        return out;
+    }
+};
 
 template <>
 struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::interpolation_t> {
@@ -691,6 +884,566 @@ struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::interpolation_t> {
             case m03gsy25j4v7nccgmsdov9ioft_shader::interpolation_t::flat: { out = std::format_to(out, "flat"); } break;
             default: { out = std::format_to(out, "invalid({})", static_cast<int>(interpolation)); } break;
         }
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_interface_element_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_interface_element_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_interface_element_t& shader_interface_element, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "index: {}", shader_interface_element.index);
+        out = std::format_to(out, ", type: {}", shader_interface_element.type);
+        out = std::format_to(out, ", interpolation: {}", shader_interface_element.interpolation);
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_interface_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_interface_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_interface_t& shader_interface, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "stage: {}", shader_interface.stage());
+        out = std::format_to(out, ", inputs: {}", shader_interface.inputs());
+        out = std::format_to(out, ", outputs: {}", shader_interface.outputs());
+        out = std::format_to(out, ", bindings: {}", shader_interface.bindings());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_expression_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_expression_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_expression_node_t& shader_expression_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "type: {}", shader_expression_node.type());
+        out = std::format_to(out, ", operands: {}", shader_expression_node.operands().size());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_statement_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_statement_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_statement_node_t& shader_statement_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "shader_statement_node_t");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_block_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_block_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_block_t& shader_block, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "statements: {}", shader_block.statements.size());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_ast_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_ast_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_ast_t& shader_ast, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "interface: {}", shader_ast.interface());
+        out = std::format_to(out, ", root: {}", shader_ast.root());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_ast_builder_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_ast_builder_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_ast_builder_t& shader_ast_builder, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "shader_ast_builder_t");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::vertex_shader_ast_builder_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid vertex_shader_ast_builder_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::vertex_shader_ast_builder_t& vertex_shader_ast_builder, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "vertex_shader_ast_builder_t");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::fragment_shader_ast_builder_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid fragment_shader_ast_builder_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::fragment_shader_ast_builder_t& fragment_shader_ast_builder, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "fragment_shader_ast_builder_t");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_ast_visitor_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_ast_visitor_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_ast_visitor_t& shader_ast_visitor, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "shader_ast_visitor_t");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_constant_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_constant_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_constant_node_t& shader_constant_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "literal: {}", shader_constant_node.value());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_input_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_input_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_input_node_t& shader_input_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "type: {}", shader_input_node.type());
+        out = std::format_to(out, ", location: {}", shader_input_node.location());
+        out = std::format_to(out, ", interpolation: {}", shader_input_node.interpolation());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_uniform_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_uniform_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_uniform_node_t& shader_uniform_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "type: {}", shader_uniform_node.type());
+        out = std::format_to(out, ", binding: {}", shader_uniform_node.binding());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_resource_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_resource_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_resource_node_t& shader_resource_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "type: {}", shader_resource_node.type());
+        out = std::format_to(out, ", binding: {}", shader_resource_node.binding());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_builtin_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_builtin_node_t& shader_builtin_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "type: {}", shader_builtin_node.type());
+        out = std::format_to(out, ", builtin: {}", shader_builtin_node.builtin());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_local_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_local_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_local_node_t& shader_local_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "type: {}", shader_local_node.type());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_unary_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_unary_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_unary_node_t& shader_unary_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "type: {}", shader_unary_node.type());
+        out = std::format_to(out, ", operation: {}", shader_unary_node.operation());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_binary_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_binary_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_binary_node_t& shader_binary_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "type: {}", shader_binary_node.type());
+        out = std::format_to(out, ", operation: {}", shader_binary_node.operation());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_construct_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_construct_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_construct_node_t& shader_construct_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "type: {}", shader_construct_node.type());
+        out = std::format_to(out, ", operands: {}", shader_construct_node.operands().size());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_swizzle_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_swizzle_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_swizzle_node_t& shader_swizzle_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "type: {}", shader_swizzle_node.type());
+        out = std::format_to(out, ", components: {}", shader_swizzle_node.components());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_call_node_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_call_node_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_call_node_t& shader_call_node, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "type: {}", shader_call_node.type());
+        out = std::format_to(out, ", operation: {}", shader_call_node.operation());
+        out = std::format_to(out, ", arguments: {}", shader_call_node.operands().size());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_local_statement_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_local_statement_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_local_statement_t& shader_local_statement, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "local: {}", static_cast<const void*>(shader_local_statement.local_node()));
+        out = std::format_to(out, ", initial: {}", static_cast<const void*>(shader_local_statement.initial_node()));
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_assignment_statement_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_assignment_statement_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_assignment_statement_t& shader_assignment_statement, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "local: {}", static_cast<const void*>(shader_assignment_statement.local_node()));
+        out = std::format_to(out, ", expression: {}", static_cast<const void*>(shader_assignment_statement.value_node()));
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_output_statement_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_output_statement_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_output_statement_t& shader_output_statement, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "output: {}", shader_output_statement.output());
+        out = std::format_to(out, ", location: {}", shader_output_statement.location());
+        out = std::format_to(out, ", expression: {}", static_cast<const void*>(shader_output_statement.expression_node()));
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_branch_statement_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_branch_statement_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_branch_statement_t& shader_branch_statement, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "condition: {}", static_cast<const void*>(shader_branch_statement.condition_node()));
+        out = std::format_to(out, ", true_block: {}", shader_branch_statement.true_block());
+        out = std::format_to(out, ", false_block: {}", shader_branch_statement.false_block());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_loop_statement_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_loop_statement_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_loop_statement_t& shader_loop_statement, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "condition: {}", static_cast<const void*>(shader_loop_statement.condition_node()));
+        out = std::format_to(out, ", body: {}", shader_loop_statement.body());
+        out = std::format_to(out, " }}");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_break_statement_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_break_statement_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_break_statement_t& shader_break_statement, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "shader_break_statement_t");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_continue_statement_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_continue_statement_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_continue_statement_t& shader_continue_statement, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "shader_continue_statement_t");
+        return out;
+    }
+};
+
+template <>
+struct formatter<m03gsy25j4v7nccgmsdov9ioft_shader::shader_discard_statement_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto iterator = ctx.begin();
+        if (iterator != ctx.end() && *iterator != '}') {
+            throw std::format_error("invalid shader_discard_statement_t format specifier");
+        }
+        return iterator;
+    }
+
+    auto format(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_discard_statement_t& shader_discard_statement, auto& ctx) const {
+        auto out = ctx.out();
+        out = std::format_to(out, "shader_discard_statement_t");
         return out;
     }
 };

@@ -31,7 +31,7 @@ void software_renderer_t::clear_color(rgba8_t color, profiling::metric_t& parent
         bytes[offset + 2] = std::byte(color.blue); bytes[offset + 3] = std::byte(color.alpha);
     }
     metric.update<clear_color_metrics_t>([this](clear_color_metrics_t& metric) {
-        metric.m_color_writes += m_framebuffer.pixels().bytes().size() / 4;
+        metric.color_writes += m_framebuffer.pixels().bytes().size() / 4;
     });
 }
 
@@ -42,14 +42,14 @@ void software_renderer_t::clear_color(const camera_t& camera, rgba8_t color, pro
         return;
     }
     const auto pixels = m_framebuffer.pixels().bytes();
-    for (auto y = bounds.m_first_y; y < bounds.m_end_y; ++y) {
-        const auto offset = std::size_t(y + bounds.m_y) * std::size_t(bounds.m_width) + std::size_t(bounds.m_first_x + bounds.m_x);
-        for (std::size_t index = offset; index < offset + std::size_t(bounds.m_end_x - bounds.m_first_x); ++index) {
+    for (auto y = bounds.first_y; y < bounds.end_y; ++y) {
+        const auto offset = std::size_t(y + bounds.y) * std::size_t(bounds.width) + std::size_t(bounds.first_x + bounds.x);
+        for (std::size_t index = offset; index < offset + std::size_t(bounds.end_x - bounds.first_x); ++index) {
             pixels[index * 4] = std::byte(color.red); pixels[index * 4 + 1] = std::byte(color.green);
             pixels[index * 4 + 2] = std::byte(color.blue); pixels[index * 4 + 3] = std::byte(color.alpha);
         }
         metric.update<clear_color_metrics_t>([&bounds](clear_color_metrics_t& metric) noexcept {
-            metric.m_color_writes += std::size_t(bounds.m_end_x - bounds.m_first_x);
+            metric.color_writes += std::size_t(bounds.end_x - bounds.first_x);
         });
     }
 }
@@ -64,7 +64,7 @@ void software_renderer_t::clear_depth(float depth, profiling::metric_t& parent_m
     }
     std::ranges::fill(m_framebuffer.depth(), depth_clear_value(depth));
     metric.update<clear_depth_metrics_t>([this](clear_depth_metrics_t& metric) {
-        metric.m_depth_writes += m_framebuffer.depth().size();
+        metric.depth_writes += m_framebuffer.depth().size();
     });
 }
 
@@ -79,11 +79,11 @@ void software_renderer_t::clear_depth(const camera_t& camera, float depth, profi
         throw std::invalid_argument("software_renderer_t::clear_depth requires a depth attachment");
     }
     depth = depth_clear_value(depth);
-    for (auto y = bounds.m_first_y; y < bounds.m_end_y; ++y) {
-        const auto offset = std::size_t(y + bounds.m_y) * std::size_t(bounds.m_width) + std::size_t(bounds.m_first_x + bounds.m_x);
-        std::ranges::fill(samples.subspan(offset, std::size_t(bounds.m_end_x - bounds.m_first_x)), depth);
+    for (auto y = bounds.first_y; y < bounds.end_y; ++y) {
+        const auto offset = std::size_t(y + bounds.y) * std::size_t(bounds.width) + std::size_t(bounds.first_x + bounds.x);
+        std::ranges::fill(samples.subspan(offset, std::size_t(bounds.end_x - bounds.first_x)), depth);
         metric.update<clear_depth_metrics_t>([&bounds](clear_depth_metrics_t& metric) noexcept {
-            metric.m_depth_writes += std::size_t(bounds.m_end_x - bounds.m_first_x);
+            metric.depth_writes += std::size_t(bounds.end_x - bounds.first_x);
         });
     }
 }
@@ -98,7 +98,7 @@ void software_renderer_t::clear_stencil(std::uint8_t stencil, profiling::metric_
     }
     std::ranges::fill(m_framebuffer.stencil(), stencil);
     metric.update<clear_stencil_metrics_t>([this](clear_stencil_metrics_t& metric) {
-        metric.m_stencil_writes += m_framebuffer.stencil().size();
+        metric.stencil_writes += m_framebuffer.stencil().size();
     });
 }
 
@@ -112,11 +112,11 @@ void software_renderer_t::clear_stencil(const camera_t& camera, std::uint8_t ste
     if (samples.empty()) {
         throw std::invalid_argument("software_renderer_t::clear_stencil requires a stencil attachment");
     }
-    for (auto y = bounds.m_first_y; y < bounds.m_end_y; ++y) {
-        const auto offset = std::size_t(y + bounds.m_y) * std::size_t(bounds.m_width) + std::size_t(bounds.m_first_x + bounds.m_x);
-        std::ranges::fill(samples.subspan(offset, std::size_t(bounds.m_end_x - bounds.m_first_x)), stencil);
+    for (auto y = bounds.first_y; y < bounds.end_y; ++y) {
+        const auto offset = std::size_t(y + bounds.y) * std::size_t(bounds.width) + std::size_t(bounds.first_x + bounds.x);
+        std::ranges::fill(samples.subspan(offset, std::size_t(bounds.end_x - bounds.first_x)), stencil);
         metric.update<clear_stencil_metrics_t>([&bounds](clear_stencil_metrics_t& metric) noexcept {
-            metric.m_stencil_writes += std::size_t(bounds.m_end_x - bounds.m_first_x);
+            metric.stencil_writes += std::size_t(bounds.end_x - bounds.first_x);
         });
     }
 }
@@ -155,7 +155,7 @@ void software_renderer_t::draw(
     const auto& program = *material->program();
     auto& scratch = m_scratch;
     draw_context_t draw(*material, bounds, m_framebuffer, scratch);
-    scratch.m_prepared_program.prepare(program, *material);
+    scratch.prepared_program.prepare(program, *material);
     validate_feedback(*material, m_framebuffer);
 
     const auto object_to_world = render_item.object_to_world();
@@ -163,64 +163,64 @@ void software_renderer_t::draw(
     const auto mesh = geometry->mesh();
     const auto& streams = mesh->vertex_streams();
     const auto attributes = mesh->vertex_attributes();
-    scratch.m_vertex_bindings.clear();
+    scratch.vertex_bindings.clear();
     for (const auto& input : program.vertex_interface().inputs()) {
         if (streams.size() <= input.index) {
-            throw std::invalid_argument("shader vertex input location has no corresponding mesh stream");
+            throw std::invalid_argument(std::format("software_renderer_t::draw requires mesh stream {} for vertex input {}; mesh has {} streams", input.index, input.type, streams.size()));
         }
-        scratch.m_vertex_bindings.emplace_back(streams[input.index], attributes[input.index], input.type);
+        scratch.vertex_bindings.emplace_back(streams[input.index], attributes[input.index], input.type);
     }
-    scratch.m_interpolated_inputs.clear();
-    scratch.m_flat_inputs.clear();
+    scratch.interpolated_inputs.clear();
+    scratch.flat_inputs.clear();
     const auto fragment_inputs = program.fragment_interface().inputs();
     for (std::size_t index = 0; index < fragment_inputs.size(); ++index) {
         const auto& input = fragment_inputs[index];
         if (!supported_fragment_input(input)) {
-            throw std::invalid_argument("software renderer requires float scalar/vector interpolation or flat float/int32/uint32 inputs");
+            throw std::invalid_argument(std::format("software_renderer_t::draw cannot interpolate fragment input {} of type {} with {}; requires float scalar/vector interpolation or flat float/int32/uint32 inputs", input.index, input.type, input.interpolation));
         }
-        (input.interpolation == shader::interpolation_t::flat ? scratch.m_flat_inputs : scratch.m_interpolated_inputs).push_back(index);
+        (input.interpolation == shader::interpolation_t::flat ? scratch.flat_inputs : scratch.interpolated_inputs).push_back(index);
     }
 
-    scratch.m_vertex_inputs.resize(program.vertex_interface().inputs().size());
-    scratch.m_vertex_outputs.resize(program.vertex_interface().outputs().size());
-    scratch.m_fragment_values.resize(fragment_inputs.size());
-    scratch.m_fragment_outputs.resize(program.fragment_interface().outputs().size());
+    scratch.vertex_inputs.resize(program.vertex_interface().inputs().size());
+    scratch.vertex_outputs.resize(program.vertex_interface().outputs().size());
+    scratch.fragment_values.resize(fragment_inputs.size());
+    scratch.fragment_outputs.resize(program.fragment_interface().outputs().size());
     preparation_metric.stop();
     const auto indices = geometry->indices();
     auto vertex_metric = draw_metric.metric<vertex_metrics_t>();
     vertex_metric.update<vertex_metrics_t>([expected = indices.size()](vertex_metrics_t& metric) noexcept {
-        metric.m_expected += expected;
+        metric.expected += expected;
     });
-    scratch.m_vertex_results.clear();
-    scratch.m_flat_values.clear();
-    scratch.m_vertex_values.clear();
-    scratch.m_vertex_results.reserve(indices.size());
-    scratch.m_vertex_io.object_to_world(object_to_world);
-    scratch.m_vertex_io.world_to_clip(world_to_clip);
+    scratch.vertex_results.clear();
+    scratch.flat_values.clear();
+    scratch.vertex_values.clear();
+    scratch.vertex_results.reserve(indices.size());
+    scratch.vertex_io.object_to_world(object_to_world);
+    scratch.vertex_io.world_to_clip(world_to_clip);
     for (const std::uint32_t vertex_index : indices) {
         if (static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) < vertex_index) {
             throw std::out_of_range("vertex index cannot be represented by software shader vertex_io_t");
         }
 
-        auto& io = scratch.m_vertex_io;
+        auto& io = scratch.vertex_io;
         io.reset(static_cast<std::int32_t>(vertex_index), 0);
-        for (std::size_t index = 0; index < scratch.m_vertex_bindings.size(); ++index) {
-            const auto& input = scratch.m_vertex_bindings[index];
-            scratch.m_vertex_inputs[index] = input.read(input.stream, vertex_index);
+        for (std::size_t index = 0; index < scratch.vertex_bindings.size(); ++index) {
+            const auto& input = scratch.vertex_bindings[index];
+            scratch.vertex_inputs[index] = input.read(input.stream, vertex_index);
         }
         vertex_metric.update<vertex_metrics_t>([](vertex_metrics_t& metric) noexcept {
-            ++metric.m_invocations;
+            ++metric.invocations;
         });
-        scratch.m_prepared_program.run(scratch.m_vertex_inputs, scratch.m_vertex_outputs, io, scratch.m_execution_context);
+        scratch.prepared_program.run(scratch.vertex_inputs, scratch.vertex_outputs, io, scratch.execution_context);
         const vector4f_t clip_position = io.position();
         if (!finite(clip_position)) {
             throw std::runtime_error("vertex shader produced a non-finite clip position");
         }
 
-        const std::size_t output_offset = scratch.m_vertex_values.size();
-        for (const auto index : scratch.m_interpolated_inputs) {
+        const std::size_t output_offset = scratch.vertex_values.size();
+        for (const auto index : scratch.interpolated_inputs) {
             const auto& input = fragment_inputs[index];
-            auto output = vertex_output(scratch.m_vertex_outputs[program.fragment_sources()[index]], input);
+            auto output = vertex_output(scratch.vertex_outputs[program.fragment_sources()[index]], input);
             if (input.interpolation == shader::interpolation_t::noperspective) {
                 noperspective_t noperspective;
                 noperspective.count = shader_component_count(input.type);
@@ -236,16 +236,16 @@ void software_renderer_t::draw(
                 }, output);
                 output = noperspective;
             }
-            scratch.m_vertex_values.push_back(output);
+            scratch.vertex_values.push_back(output);
         }
-        const auto flat_offset = scratch.m_flat_values.size();
-        for (const auto index : scratch.m_flat_inputs) {
-            scratch.m_flat_values.push_back(flat_output(scratch.m_vertex_outputs[program.fragment_sources()[index]], fragment_inputs[index]));
+        const auto flat_offset = scratch.flat_values.size();
+        for (const auto index : scratch.flat_inputs) {
+            scratch.flat_values.push_back(flat_output(scratch.vertex_outputs[program.fragment_sources()[index]], fragment_inputs[index]));
         }
-        scratch.m_vertex_results.push_back({
-            .m_clip_position = clip_position,
-            .m_outputs = {output_offset, scratch.m_interpolated_inputs.size()},
-            .m_flat_outputs = {flat_offset, scratch.m_flat_inputs.size()}
+        scratch.vertex_results.push_back({
+            .clip_position = clip_position,
+            .outputs = {output_offset, scratch.interpolated_inputs.size()},
+            .flat_outputs = {flat_offset, scratch.flat_inputs.size()}
         });
     }
 
@@ -253,13 +253,13 @@ void software_renderer_t::draw(
     auto raster_metric = draw_metric.metric<raster_metrics_t>();
     draw.metric = &raster_metric;
     const auto vertex = [&](std::size_t index) {
-        return view(scratch.m_vertex_results[index], scratch.m_vertex_values, scratch.m_flat_values);
+        return view(scratch.vertex_results[index], scratch.vertex_values, scratch.flat_values);
     };
     const auto submit_line = [&](std::size_t first, std::size_t second) {
         rasterize_line(draw, vertex(first), vertex(second));
     };
     const auto submit_triangle = [&](std::size_t first, std::size_t second, std::size_t third, std::size_t provoking) {
-        rasterize_triangle(draw, vertex(first), vertex(second), vertex(third), vertex(provoking).m_flat_outputs);
+        rasterize_triangle(draw, vertex(first), vertex(second), vertex(third), vertex(provoking).flat_outputs);
     };
     switch (geometry->primitive_topology()) {
         case vertex_primitive_topology_t::point: {

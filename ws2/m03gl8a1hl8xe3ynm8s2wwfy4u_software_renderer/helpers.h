@@ -15,6 +15,10 @@
 # include <m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h>
 
 # include <algorithm>
+# include <cmath>
+# include <stdexcept>
+# include <utility>
+# include <type_traits>
 # include <array>
 # include <cstddef>
 # include <cstdint>
@@ -57,74 +61,74 @@ constexpr std::int64_t center_offset = 128;
 
 // Bounds in viewport-local pixels; the intersection limits work without changing mapping.
 struct raster_bounds_t {
-    int m_width;
-    int m_height;
-    int m_x;
-    int m_y;
-    std::int64_t m_view_width;
-    std::int64_t m_view_height;
-    std::int64_t m_first_x;
-    std::int64_t m_first_y;
-    std::int64_t m_end_x;
-    std::int64_t m_end_y;
+    int width;
+    int height;
+    int x;
+    int y;
+    std::int64_t view_width;
+    std::int64_t view_height;
+    std::int64_t first_x;
+    std::int64_t first_y;
+    std::int64_t end_x;
+    std::int64_t end_y;
 
     raster_bounds_t(int width, int height, const m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<int, 2>& view_rect);
     bool empty() const;
 };
 
 struct pipeline_vertex_t {
-    vector4f_t m_clip_position;
-    std::array<std::size_t, 2> m_outputs; // Offset and count in the owning value buffer.
-    std::array<std::size_t, 2> m_flat_outputs {};
+    vector4f_t clip_position;
+    std::array<std::size_t, 2> outputs; // Offset and count in the owning value buffer.
+    std::array<std::size_t, 2> flat_outputs {};
 };
 
 struct pipeline_vertex_view_t {
-    vector4f_t m_clip_position;
-    std::span<const varying_t> m_outputs;
-    std::span<const flat_t> m_flat_outputs {};
+    vector4f_t clip_position;
+    std::span<const varying_t> outputs;
+    std::span<const flat_t> flat_outputs {};
 };
 
 struct clipping_buffer_t {
-    std::vector<pipeline_vertex_t> m_vertices;
-    varying_values_t m_values;
+    std::vector<pipeline_vertex_t> vertices;
+    varying_values_t values;
 };
 
 struct clipping_workspace_t {
-    std::array<clipping_buffer_t, 2> m_buffers;
+    std::array<clipping_buffer_t, 2> buffers;
 };
 
 struct projected_vertex_t {
-    grid_point_t m_point;
-    double m_ndc_z;
-    double m_reciprocal_w;
-    pipeline_vertex_view_t m_source;
+    grid_point_t point;
+    double ndc_z;
+    double reciprocal_w;
+    pipeline_vertex_view_t source;
 };
 
 struct scan_event_t {
-    fraction_t m_x;
-    std::size_t m_lower;
-    std::size_t m_upper;
-    int m_delta;
+    fraction_t x;
+    std::size_t lower;
+    std::size_t upper;
+    int delta;
 };
 
 struct sample_t {
-    std::int64_t m_x;
-    std::int64_t m_y;
-    std::array<std::size_t, 4> m_vertices;
-    std::array<double, 4> m_weights;
-    std::size_t m_count;
+    std::int64_t x;
+    std::int64_t y;
+    std::array<std::size_t, 4> vertices;
+    std::array<double, 4> weights;
+    std::size_t count;
 };
 
 struct raster_workspace_t {
-    clipping_workspace_t m_clipping;
-    std::vector<projected_vertex_t> m_vertices;
-    std::vector<std::size_t> m_geometry;
-    std::vector<std::size_t> m_ring;
-    std::vector<triangle_t> m_triangles;
-    std::vector<scan_event_t> m_events;
-    bool m_empty = true;
-    bool m_use_triangles = false;
-    bool m_front_facing = false;
+    clipping_workspace_t clipping;
+    std::vector<projected_vertex_t> vertices;
+    std::vector<std::size_t> geometry;
+    std::vector<std::size_t> ring;
+    std::vector<triangle_t> triangles;
+    std::vector<scan_event_t> events;
+    bool empty = true;
+    bool use_triangles = false;
+    bool front_facing = false;
 };
 
 struct vertex_input_t {
@@ -136,22 +140,22 @@ struct vertex_input_t {
 
 // Renderer-owned storage retains its peak capacities across draws.
 struct scratch_t {
-    std::vector<pipeline_vertex_t> m_vertex_results;
-    varying_values_t m_vertex_values;
-    flat_values_t m_flat_values;
-    std::vector<std::size_t> m_interpolated_inputs;
-    std::vector<std::size_t> m_flat_inputs;
-    clipping_workspace_t m_clipping;
-    raster_workspace_t m_raster;
-    software_shader::prepared_program_t m_prepared_program;
-    std::vector<vertex_input_t> m_vertex_bindings;
-    std::vector<software_shader::value_t> m_vertex_inputs;
-    std::vector<software_shader::value_t> m_fragment_values;
-    std::vector<std::optional<software_shader::value_t>> m_vertex_outputs;
-    std::vector<std::optional<software_shader::value_t>> m_fragment_outputs;
-    software_shader::execution_context_t m_execution_context;
-    software_shader::vertex_io_t m_vertex_io {0, 0};
-    software_shader::fragment_io_t m_fragment_io {vector4f_t(0.0F), true};
+    std::vector<pipeline_vertex_t> vertex_results;
+    varying_values_t vertex_values;
+    flat_values_t flat_values;
+    std::vector<std::size_t> interpolated_inputs;
+    std::vector<std::size_t> flat_inputs;
+    clipping_workspace_t clipping;
+    raster_workspace_t raster;
+    software_shader::prepared_program_t prepared_program;
+    std::vector<vertex_input_t> vertex_bindings;
+    std::vector<software_shader::value_t> vertex_inputs;
+    std::vector<software_shader::value_t> fragment_values;
+    std::vector<std::optional<software_shader::value_t>> vertex_outputs;
+    std::vector<std::optional<software_shader::value_t>> fragment_outputs;
+    software_shader::execution_context_t execution_context;
+    software_shader::vertex_io_t vertex_io {0, 0};
+    software_shader::fragment_io_t fragment_io {vector4f_t(0.0F), true};
 };
 
 // A draw's color equations and attachment-specific storage operation.
@@ -240,6 +244,85 @@ void rasterize_triangle(draw_context_t& draw, const pipeline_vertex_view_t& firs
 template <typename emit_type_t>
 void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, emit_type_t&& emit, std::int64_t first_x = 0, std::int64_t first_y = 0);
 
+struct screen_vertex_t {
+    double x;
+    double y;
+    double ndc_z;
+    double reciprocal_w;
+    std::span<const varying_t> outputs;
+};
+
+template <typename T>
+T require_vertex_output(
+    const std::optional<software_shader::value_t>& output,
+    std::uint32_t location
+);
+
+void clear(clipping_buffer_t& buffer);
+
+void append_vertex(clipping_buffer_t& destination, const pipeline_vertex_view_t& source);
+
+varying_t interpolate(const varying_t& from, const varying_t& to, double factor);
+
+void append_intersection(clipping_buffer_t& destination, pipeline_vertex_view_t first, pipeline_vertex_view_t second, std::size_t plane);
+
+bool between(grid_point_t p, grid_point_t a, grid_point_t b);
+
+bool opposite(edge_value_t a, edge_value_t b);
+
+bool intersects(grid_point_t a, grid_point_t b, grid_point_t c, grid_point_t d);
+
+bool simple_boundary(const raster_workspace_t& workspace);
+
+bool triangulate(raster_workspace_t& workspace);
+
+bool crossed_facing(std::span<const projected_vertex_t> vertices);
+
+int compare_varying(const varying_t& a, const varying_t& b);
+
+int compare_record(const projected_vertex_t& a, const projected_vertex_t& b);
+
+bool edge_record_less(const scan_event_t& a, const scan_event_t& b, std::span<const projected_vertex_t> vertices);
+
+bool inside_clip_volume(const pipeline_vertex_view_t& vertex);
+
+edge_value_t ceil_div(edge_value_t numerator, edge_value_t denominator);
+
+vertex_attribute_type_t expected_attribute_type(shader::shader_scalar_type_t type);
+
+void validate_vertex_attribute(
+    const vertex_attribute_t& attribute,
+    shader::shader_data_type_t input_type
+);
+
+std::optional<screen_vertex_t> project(
+    const pipeline_vertex_view_t& vertex,
+    std::int64_t width,
+    std::int64_t height
+);
+
+float blend_factor_component(blend_factor_t factor, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component);
+
+float blend_component(const blend_equation_t& blend_equation, const vector4f_t& source, const vector4f_t& destination, const vector4f_t& constant, std::size_t component);
+
+template <texture::format_t Format, bool Replacement, bool Masked>
+void write_color(const color_state_t& state, const vector4f_t& source, std::byte* pixel);
+
+bool depth_passes(comparison_t comparison, float incoming, float stored);
+
+bool stencil_passes(const stencil_state_t& stencil_state, std::uint8_t stored);
+
+void write_stencil(const stencil_state_t& stencil_state, stencil_op_t operation, std::uint8_t& stored, m03gtjqkhqacstl3luv2ojsz3q_profiling::metric_t& metric);
+
+bool storage_overlaps(std::span<const std::byte> left, std::span<const std::byte> right);
+
+void load_flat_inputs(scratch_t& scratch, std::span<const flat_t> flat_inputs);
+
+void shade_sample(draw_context_t& draw, std::int64_t x, std::int64_t y, float depth, float reciprocal_w, bool front_facing);
+
+template <typename T, std::size_t N>
+software_shader::value_t read_vertex_input(const type_erased_array::type_erased_array_t& stream, std::uint32_t vertex_index);
+
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
 
 namespace std {
@@ -286,23 +369,26 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::color_state_t>;
 template <>
 struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::draw_context_t>;
 
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::screen_vertex_t>;
+
 } // namespace std
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
 template <typename emit_type_t>
 void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64_t height, emit_type_t&& emit, std::int64_t clip_first_x, std::int64_t clip_first_y) {
-    if (workspace.m_empty) {
+    if (workspace.empty) {
         return;
     }
-    const auto& vertices = workspace.m_vertices;
+    const auto& vertices = workspace.vertices;
     // Top/left inclusion classifies a center infinitesimally to the right, then
     // infinitesimally below. Ears and winding spans apply the same convention.
-    if (workspace.m_use_triangles) {
-        for (const auto& indices : workspace.m_triangles) {
-            const auto a = vertices[indices[0]].m_point;
-            const auto b = vertices[indices[1]].m_point;
-            const auto c = vertices[indices[2]].m_point;
+    if (workspace.use_triangles) {
+        for (const auto& indices : workspace.triangles) {
+            const auto a = vertices[indices[0]].point;
+            const auto b = vertices[indices[1]].point;
+            const auto c = vertices[indices[2]].point;
             const auto area = edge(a, b, c);
             const auto inclusive = [](grid_point_t from, grid_point_t to) {
                 return to[1] < from[1] || (to[1] == from[1] && from[0] < to[0]);
@@ -342,34 +428,34 @@ void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64
         return;
     }
 
-    const auto [minimum, maximum] = std::ranges::minmax_element(vertices, {}, [](const auto& vertex) { return vertex.m_point[1]; });
-    const auto first_y = std::max(clip_first_y, sample_bound({minimum->m_point[1], 1}, height));
-    const auto end_y = sample_bound({maximum->m_point[1], 1}, height);
+    const auto [minimum, maximum] = std::ranges::minmax_element(vertices, {}, [](const auto& vertex) { return vertex.point[1]; });
+    const auto first_y = std::max(clip_first_y, sample_bound({minimum->point[1], 1}, height));
+    const auto end_y = sample_bound({maximum->point[1], 1}, height);
     for (auto y = first_y; y < end_y; ++y) {
-        scanline_events(vertices, std::int64_t(y) * subpixels + center_offset, workspace.m_events);
-        const auto& events = workspace.m_events;
+        scanline_events(vertices, std::int64_t(y) * subpixels + center_offset, workspace.events);
+        const auto& events = workspace.events;
         int winding = 0;
         scan_event_t left {};
         for (std::size_t begin = 0; begin < events.size();) {
             std::size_t end = begin;
             int delta = 0;
             do {
-                delta += events[end++].m_delta;
-            } while (end < events.size() && compare_fraction(events[begin].m_x, events[end].m_x) == 0);
+                delta += events[end++].delta;
+            } while (end < events.size() && compare_fraction(events[begin].x, events[end].x) == 0);
             const int after = winding + delta;
             if ((winding == 0) != (after == 0)) {
                 // Equal crossings are ordered by edge_record_less. Select the
                 // least endpoint-record key with the net crossing direction.
                 std::size_t selected = begin;
-                while ((events[selected].m_delta < 0) != (delta < 0)) {
+                while ((events[selected].delta < 0) != (delta < 0)) {
                     ++selected;
                 }
                 const auto& boundary = events[selected];
                 if (winding == 0) {
                     left = boundary;
                 } else {
-                    const auto first_x = std::max(clip_first_x, sample_bound(left.m_x, width));
-                    const auto end_x = sample_bound(boundary.m_x, width);
+                    const auto first_x = std::max(clip_first_x, sample_bound(left.x, width));
+                    const auto end_x = sample_bound(boundary.x, width);
                     for (auto x = first_x; x < end_x; ++x) {
                         emit(span_sample(left, boundary, vertices, x, y));
                     }
@@ -379,6 +465,57 @@ void visit_samples(raster_workspace_t& workspace, std::int64_t width, std::int64
             begin = end;
         }
     }
+}
+
+template <typename T>
+T require_vertex_output(
+    const std::optional<software_shader::value_t>& output,
+    std::uint32_t location
+) {
+    if (!output) {
+        throw std::runtime_error(std::format(
+            "vertex shader did not write output location {} required by the fragment shader",
+            location
+        ));
+    }
+    return std::get<T>(*output);
+}
+
+template <texture::format_t Format, bool Replacement, bool Masked>
+void write_color(const color_state_t& state, const vector4f_t& source, std::byte* pixel) {
+    if constexpr (Replacement && !Masked) {
+        texture::encode_rgba8<Format>(source, std::span<std::byte, 4>(pixel, 4));
+        return;
+    }
+    const vector4f_t sanitized_source {
+        sanitize_unorm(source[0]), sanitize_unorm(source[1]),
+        sanitize_unorm(source[2]), sanitize_unorm(source[3])
+    };
+    vector4f_t result = sanitized_source;
+    if constexpr (!Replacement) {
+        const auto destination = texture::decode_rgba8<Format>(std::span<const std::byte, 4>(pixel, 4));
+        // Both equations use the original destination before any channel is stored.
+        for (std::size_t component = 0; component < 4; ++component) {
+            result[component] = sanitize_unorm(blend_component(component == 3 ? state.alpha : state.rgb, sanitized_source, destination, state.constant, component));
+        }
+    }
+    if constexpr (!Masked) {
+        texture::encode_rgba8<Format>(result, std::span<std::byte, 4>(pixel, 4));
+    } else {
+        std::array<std::byte, 4> stored;
+        texture::encode_rgba8<Format>(result, stored);
+        // Disabled bytes never round-trip through float.
+        if ((state.mask & color_mask_t::red) != color_mask_t::none) { pixel[0] = stored[0]; }
+        if ((state.mask & color_mask_t::green) != color_mask_t::none) { pixel[1] = stored[1]; }
+        if ((state.mask & color_mask_t::blue) != color_mask_t::none) { pixel[2] = stored[2]; }
+        if ((state.mask & color_mask_t::alpha) != color_mask_t::none) { pixel[3] = stored[3]; }
+    }
+}
+
+template <typename T, std::size_t N>
+software_shader::value_t read_vertex_input(const type_erased_array::type_erased_array_t& stream, std::uint32_t vertex_index) {
+    if constexpr (N == 1) { return stream.read<T>(vertex_index); }
+    else { return shader::vector_t<T, N>(stream.read<std::array<T, N>>(vertex_index)); }
 }
 
 } // namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer
@@ -404,9 +541,9 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_bounds_t> 
     constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_bounds_t& bounds, auto& ctx) const {
         auto out = ctx.out();
-        out = std::format_to(out, "{{ origin: ({}, {})", bounds.m_x, bounds.m_y);
-        out = std::format_to(out, ", size: ({}, {})", bounds.m_view_width, bounds.m_view_height);
-        out = std::format_to(out, ", intersection: [{}, {}) x [{}, {}) }}", bounds.m_first_x, bounds.m_end_x, bounds.m_first_y, bounds.m_end_y);
+        out = std::format_to(out, "{{ origin: ({}, {})", bounds.x, bounds.y);
+        out = std::format_to(out, ", size: ({}, {})", bounds.view_width, bounds.view_height);
+        out = std::format_to(out, ", intersection: [{}, {}) x [{}, {}) }}", bounds.first_x, bounds.end_x, bounds.first_y, bounds.end_y);
         return out;
     }
 };
@@ -420,9 +557,9 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::pipeline_vertex_t
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::pipeline_vertex_t& vertex, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "position: {}", vertex.m_clip_position);
-        out = std::format_to(out, ", offset: {}", vertex.m_outputs[0]);
-        out = std::format_to(out, ", count: {}", vertex.m_outputs[1]);
+        out = std::format_to(out, "position: {}", vertex.clip_position);
+        out = std::format_to(out, ", offset: {}", vertex.outputs[0]);
+        out = std::format_to(out, ", count: {}", vertex.outputs[1]);
         out = std::format_to(out, " }}");
         return out;
     }
@@ -437,8 +574,8 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::pipeline_vertex_v
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::pipeline_vertex_view_t& vertex, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "position: {}", vertex.m_clip_position);
-        out = std::format_to(out, ", outputs: {}", vertex.m_outputs.size());
+        out = std::format_to(out, "position: {}", vertex.clip_position);
+        out = std::format_to(out, ", outputs: {}", vertex.outputs.size());
         out = std::format_to(out, " }}");
         return out;
     }
@@ -453,8 +590,8 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clipping_buffer_t
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clipping_buffer_t& buffer, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "vertices: {}", buffer.m_vertices.size());
-        out = std::format_to(out, ", values: {}", buffer.m_values.size());
+        out = std::format_to(out, "vertices: {}", buffer.vertices.size());
+        out = std::format_to(out, ", values: {}", buffer.values.size());
         out = std::format_to(out, " }}");
         return out;
     }
@@ -469,8 +606,8 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clipping_workspac
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::clipping_workspace_t& workspace, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "first: {}", workspace.m_buffers[0]);
-        out = std::format_to(out, ", second: {}", workspace.m_buffers[1]);
+        out = std::format_to(out, "first: {}", workspace.buffers[0]);
+        out = std::format_to(out, ", second: {}", workspace.buffers[1]);
         out = std::format_to(out, " }}");
         return out;
     }
@@ -485,10 +622,10 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::projected_vertex_
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::projected_vertex_t& vertex, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "x: {}", vertex.m_point[0]);
-        out = std::format_to(out, ", y: {}", vertex.m_point[1]);
-        out = std::format_to(out, ", ndc_z: {}", vertex.m_ndc_z);
-        out = std::format_to(out, ", reciprocal_w: {}", vertex.m_reciprocal_w);
+        out = std::format_to(out, "x: {}", vertex.point[0]);
+        out = std::format_to(out, ", y: {}", vertex.point[1]);
+        out = std::format_to(out, ", ndc_z: {}", vertex.ndc_z);
+        out = std::format_to(out, ", reciprocal_w: {}", vertex.reciprocal_w);
         out = std::format_to(out, " }}");
         return out;
     }
@@ -503,11 +640,11 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scan_event_t> {
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scan_event_t& event, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "numerator: {}", event.m_x[0]);
-        out = std::format_to(out, ", denominator: {}", event.m_x[1]);
-        out = std::format_to(out, ", lower: {}", event.m_lower);
-        out = std::format_to(out, ", upper: {}", event.m_upper);
-        out = std::format_to(out, ", delta: {}", event.m_delta);
+        out = std::format_to(out, "numerator: {}", event.x[0]);
+        out = std::format_to(out, ", denominator: {}", event.x[1]);
+        out = std::format_to(out, ", lower: {}", event.lower);
+        out = std::format_to(out, ", upper: {}", event.upper);
+        out = std::format_to(out, ", delta: {}", event.delta);
         out = std::format_to(out, " }}");
         return out;
     }
@@ -522,9 +659,9 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::sample_t> {
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::sample_t& sample, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "x: {}", sample.m_x);
-        out = std::format_to(out, ", y: {}", sample.m_y);
-        out = std::format_to(out, ", vertices: {}", sample.m_count);
+        out = std::format_to(out, "x: {}", sample.x);
+        out = std::format_to(out, ", y: {}", sample.y);
+        out = std::format_to(out, ", vertices: {}", sample.count);
         out = std::format_to(out, " }}");
         return out;
     }
@@ -539,10 +676,10 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_workspace_
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::raster_workspace_t& workspace, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "vertices: {}", workspace.m_vertices.size());
-        out = std::format_to(out, ", triangles: {}", workspace.m_triangles.size());
-        out = std::format_to(out, ", empty: {}", workspace.m_empty);
-        out = std::format_to(out, ", front_facing: {}", workspace.m_front_facing);
+        out = std::format_to(out, "vertices: {}", workspace.vertices.size());
+        out = std::format_to(out, ", triangles: {}", workspace.triangles.size());
+        out = std::format_to(out, ", empty: {}", workspace.empty);
+        out = std::format_to(out, ", front_facing: {}", workspace.front_facing);
         out = std::format_to(out, " }}");
         return out;
     }
@@ -567,11 +704,11 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scratch_t> {
     auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::scratch_t& scratch, auto& ctx) const {
         auto out = ctx.out();
         out = std::format_to(out, "{{ ");
-        out = std::format_to(out, "vertices: {}", scratch.m_vertex_results.size());
-        out = std::format_to(out, ", values: {}", scratch.m_vertex_values.size());
-        out = std::format_to(out, ", clipping: {}", scratch.m_clipping);
-        out = std::format_to(out, ", raster: {}", scratch.m_raster);
-        out = std::format_to(out, ", fragment_inputs: {}", scratch.m_fragment_values.size());
+        out = std::format_to(out, "vertices: {}", scratch.vertex_results.size());
+        out = std::format_to(out, ", values: {}", scratch.vertex_values.size());
+        out = std::format_to(out, ", clipping: {}", scratch.clipping);
+        out = std::format_to(out, ", raster: {}", scratch.raster);
+        out = std::format_to(out, ", fragment_inputs: {}", scratch.fragment_values.size());
         out = std::format_to(out, " }}");
         return out;
     }
@@ -598,5 +735,27 @@ struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::draw_context_t> {
     }
 };
 
+template <>
+struct formatter<m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::screen_vertex_t> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        return ctx.begin();
+    }
+
+    auto format(const m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer::screen_vertex_t& vertex, auto& ctx) const {
+        auto out = ctx.out();
+
+        out = std::format_to(out, "{{ ");
+        out = std::format_to(out, "x: {}", vertex.x);
+        out = std::format_to(out, ", y: {}", vertex.y);
+        out = std::format_to(out, ", ndc_z: {}", vertex.ndc_z);
+        out = std::format_to(out, ", reciprocal_w: {}", vertex.reciprocal_w);
+        out = std::format_to(out, ", outputs: {}", vertex.outputs.size());
+        out = std::format_to(out, " }}");
+
+        return out;
+    }
+};
+
 } // namespace std
+
 #endif // M03GL8A1HL8XE3YNM8S2WWFY4U_SOFTWARE_RENDERER_HELPERS_H

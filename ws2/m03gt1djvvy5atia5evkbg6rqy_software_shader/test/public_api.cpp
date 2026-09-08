@@ -1093,10 +1093,48 @@ void test_prepared_execution() {
     test::expect_throws<std::invalid_argument>([&] { program.run(bindings, vertex_io, context); });
 }
 
+
 } // namespace
+
+namespace m03gt1djvvy5atia5evkbg6rqy_software_shader {
+
+void test_type_diagnostics() {
+    software_shader::bindings_t bindings;
+    bindings.uniform(9, std::uint32_t(1));
+    try {
+        (void)bindings.uniform<float>(9);
+        test::fail();
+    } catch (const std::invalid_argument& error) {
+        const std::string message(error.what());
+        test::expect(std::identity(), message.contains("binding 9"));
+        test::expect(std::identity(), message.contains("unsigned_integer"));
+        test::expect(std::identity(), message.contains("expected"));
+        test::expect(std::identity(), message.contains("floating_point"));
+    }
+
+    shader::vertex_shader_ast_builder_t vertex;
+    vertex.position(vector4f_t({0, 0, 0, 1}));
+    vertex.output(7, 1.0F);
+    shader::fragment_shader_ast_builder_t fragment;
+    fragment.color(fragment.input<vector4f_t>(7));
+    try {
+        software_shader::program_t program(std::move(vertex).finalize(), std::move(fragment).finalize());
+        test::fail();
+    } catch (const std::invalid_argument& error) {
+        const std::string message(error.what());
+        test::expect(std::identity(), message.contains("location 7"));
+        test::expect(std::identity(), message.contains("category: scalar"));
+        test::expect(std::identity(), message.contains("expected"));
+        test::expect(std::identity(), message.contains("category: vector"));
+    }
+}
+
+
+} // namespace m03gt1djvvy5atia5evkbg6rqy_software_shader
 
 int main() {
     return test::run([] {
+        software_shader::test_type_diagnostics();
         test_prepared_execution();
         test_context_reuse_and_lowering();
         test_compiled_short_circuit_and_failures();
