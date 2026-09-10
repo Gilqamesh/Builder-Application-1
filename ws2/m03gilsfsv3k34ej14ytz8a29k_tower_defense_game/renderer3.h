@@ -12,6 +12,9 @@
 
 namespace m03gilsfsv3k34ej14ytz8a29k_tower_defense_game {
 
+/**
+ * @brief Stores 8-bit RGBA channels for the experimental renderer's clear color.
+ */
 struct renderer3_color_t {
     std::uint8_t red;
     std::uint8_t green;
@@ -19,6 +22,12 @@ struct renderer3_color_t {
     std::uint8_t alpha;
 };
 
+/**
+ * @brief Draws scene primitives directly with OpenGL in the experimental rendering path.
+ *
+ * This is legacy/experimental code, as specified in AGENTS.md. The active application
+ * uses the software renderer through game_t; see the entry point in api.h.
+ */
 class renderer3_t {
 public:
     explicit renderer3_t(std::shared_ptr<m03gkcdy62bnz808pmk4uzkjra_glfw::window_t> window);

@@ -7,6 +7,12 @@
 
 namespace m03gilsfsv3k34ej14ytz8a29k_tower_defense_game {
 
+/**
+ * @brief Experimental declaration for translating a shader AST to OpenGL.
+ *
+ * Its constructor has no definition in this module. This standalone wrapper is legacy/experimental, as specified in AGENTS.md.
+ * See api.h and game_t for the active software-renderer path.
+ */
 class opengl_shader_t {
 public:
     explicit opengl_shader_t(const m03gsy25j4v7nccgmsdov9ioft_shader::shader_ast_t& shader_ast);

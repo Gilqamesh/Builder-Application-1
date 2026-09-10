@@ -12,6 +12,14 @@
 #include <stdexcept>
 #include <string>
 
+/**
+ * @file
+ * @brief Publishes checksum-pinned GoogleTest headers and libraries for Builder consumers.
+ *
+ * See [local integration instructions](INTEGRATION.md) for module-qualified
+ * includes, test entry points, dependency linking, and validation registration.
+ */
+
 static constexpr auto GOOGLE_TEST_SOURCE_URL = "https://codeload.github.com/google/googletest/tar.gz/refs/tags/v1.15.0";
 static constexpr auto GOOGLE_TEST_SOURCE_SHA256 = "7315acb6bf10e99f332c8a43f00d5fbb1ee6ca48c52f6b936991b216c586aaad";
 

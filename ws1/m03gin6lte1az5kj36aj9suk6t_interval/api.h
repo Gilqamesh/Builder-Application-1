@@ -15,11 +15,35 @@
 namespace m03gin6lte1az5kj36aj9suk6t_interval {
 
 /**
- * @brief Half-open interval [start, end) of type T.
- * 
- * Invariants:
- *   start <= end.
- *   operations always produce finite values, no NaN or +-infinity for floating point types.
+ * @brief Owns ordered bounds of a half-open interval [start, end) of type T.
+ *
+ * Bounds satisfy start <= end and are finite for floating point types.
+ * Iteration visits exactly the two stored endpoints, start then end, even for
+ * an empty interval; it does not enumerate the values contained in the interval.
+ * Endpoint references and iterators borrow this object's storage and remain
+ * valid for its lifetime; changes to the bounds are visible through them.
+ * Saturating operations use m03ginuqujr8cbfieco8r61u54_saturating_arithmetic.
+ *
+ * @code{.cpp}
+ * #include <m03gin6lte1az5kj36aj9suk6t_interval/api.h>
+ *
+ * #include <cassert>
+ * #include <limits>
+ *
+ * int main() {
+ *     using interval_t = m03gin6lte1az5kj36aj9suk6t_interval::interval_t<int>;
+ *     const int lowest = std::numeric_limits<int>::lowest();
+ *     const int highest = std::numeric_limits<int>::max();
+ *     const interval_t interval(lowest, highest);
+ *     assert(interval.length() == highest); // The full difference saturates.
+ *     assert(interval.end() - interval.begin() == 2);
+ *     assert(*interval.begin() == lowest);
+ *     assert(*(interval.end() - 1) == highest);
+ *     assert(interval.contains(lowest));
+ *     assert(!interval.contains(highest));
+ *     assert(interval.clamp(highest) == highest); // Clamping may return end.
+ * }
+ * @endcode
  */
 template <typename T>
 class interval_t {
@@ -31,75 +55,88 @@ public:
 
     /**
      * @brief Constructs an interval with the given bounds.
-     * 
-     * Fails if end < start.
-     * Fails if either values are NaN or +-infinity for floating point types.
+     *
+     * Copies the bounds without reordering them.
+     * @throws std::invalid_argument If end < start, or a floating point bound
+     * is NaN or +-infinity.
      */
     interval_t(const T& start, const T& end);
 
     /**
      * @brief Sets the bounds of the interval.
-     * 
-     * Fails if end < start.
-     * Fails if either values are NaN or +-infinity for floating point types.
+     *
+     * Rejected bounds leave the interval unchanged.
+     * @throws std::invalid_argument If end < start, or a floating point bound
+     * is NaN or +-infinity.
      */
     void bounds(const T& start, const T& end);
 
+    /** @brief Returns a read-only iterator to the stored start endpoint. */
     std::array<T, 2>::const_iterator begin() const noexcept;
+    /** @brief Returns the iterator past the two stored endpoints. */
     std::array<T, 2>::const_iterator end() const noexcept;
 
+    /**
+     * @brief Borrows the start endpoint at index 0 or the end endpoint at index 1.
+     * @pre index < 2; no bounds check is performed.
+     */
     const T& operator[](std::size_t index) const noexcept;
 
     /**
      * @brief Adds a value to both bounds using saturating arithmetic.
-     * 
-     * Fails if value is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If value is NaN or +-infinity for floating point types.
      */
     interval_t& operator+=(const T& value);
 
     /**
      * @brief Subtracts a value from both bounds using saturating arithmetic.
-     * 
-     * Fails if value is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If value is NaN or +-infinity for floating point types.
      */
     interval_t& operator-=(const T& value);
 
     /**
      * @brief Returns a new interval that is the result of adding a value to both bounds using saturating arithmetic.
-     * 
-     * Fails if value is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If value is NaN or +-infinity for floating point types.
      */
     interval_t operator+(const T& value) const;
 
     /**
      * @brief Returns a new interval that is the result of subtracting a value from both bounds using saturating arithmetic.
-     * 
-     * Fails if value is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If value is NaN or +-infinity for floating point types.
      */
     interval_t operator-(const T& value) const;
 
     /**
-     * @brief Clamps the given value to the interval.
-     * 
+     * @brief Clamps the given value to the closed bounds [start, end].
+     *
      * If the value is greater or equal to the end of the interval, the end of the interval is returned, which is not part of the interval.
-     * 
-     * Fails if value is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If value is NaN or +-infinity for floating point types.
      */
     T clamp(const T& value) const;
 
     /**
-     * @brief Returns a new interval that is inflated by the given value on both sides.
-     * 
-     * Fails if value is NaN or +-infinity for floating point types.
+     * @brief Returns an interval with bounds start - value and end + value using saturating arithmetic.
+     *
+     * A negative value shrinks the interval. If the computed bounds cross,
+     * both become std::midpoint(start, end), rounded toward start for integers.
+     *
+     * @throws std::invalid_argument If value is NaN or +-infinity for floating point types.
      */
     interval_t inflate(const T& value) const;
 
     /**
-     * @brief Returns a new interval that is deflated by the given value on both sides.
-     * 
-     * If the deflation would result in an empty interval, the result is an empty interval with the midpoint of the original interval as its bounds.
-     * 
-     * Fails if value is NaN or +-infinity for floating point types.
+     * @brief Returns an interval with bounds start + value and end - value using saturating arithmetic.
+     *
+     * A negative value expands the interval. If the computed bounds cross,
+     * both become std::midpoint(start, end), rounded toward start for integers.
+     * Equal computed bounds are retained as an empty interval.
+     *
+     * @throws std::invalid_argument If value is NaN or +-infinity for floating point types.
      */
     interval_t deflate(const T& value) const;
 
@@ -116,9 +153,10 @@ public:
     bool is_empty() const noexcept;
 
     /**
-     * @brief Returns true if the interval contains the given value.
-     * 
-     * Empty intervals do not contain any values.
+     * @brief Returns whether start <= value and value < end.
+     *
+     * Empty intervals do not contain any values. Floating point NaN and
+     * +-infinity return false without throwing.
      */
     bool contains(const T& value) const noexcept;
 
@@ -130,9 +168,10 @@ public:
     bool overlaps(const interval_t& other) const noexcept;
 
     /**
-     * @brief Returns the length of the interval (end - start).
-     * 
-     * Guaranteed to be non-negative and finite, no NaN or +-infinity for floating point types.
+     * @brief Returns end - start using saturating subtraction.
+     *
+     * Returns std::numeric_limits<T>::max() when the difference would overflow.
+     * The result is non-negative and finite, including for extreme bounds.
      */
     T length() const;
 

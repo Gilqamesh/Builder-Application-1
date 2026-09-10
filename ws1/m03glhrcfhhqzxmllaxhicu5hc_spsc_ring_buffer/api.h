@@ -15,6 +15,43 @@ namespace m03glhrcfhhqzxmllaxhicu5hc_spsc_ring_buffer {
 
 /**
  * @brief Provides a fixed-capacity ring buffer for one concurrent producer and one concurrent consumer.
+ *
+ * Only the producer calls either try_write() overload; only the consumer calls
+ * try_read(). Successful writes are read in FIFO order. Construct the buffer
+ * before either thread uses it and keep it alive until both have stopped.
+ * Calls on the same side must not overlap. Inspection through buffer(), head(),
+ * tail(), or std::format requires both sides to be idle.
+ *
+ * T must be default-constructible and satisfy std::vector<T>::resize() element
+ * requirements. Copy writes require assignment from const T&; move writes and
+ * reads require assignment from T&&. Storage contains live T objects for the
+ * entire buffer lifetime, including unused and consumed slots.
+ *
+ * @code{.cpp}
+ * #include <m03glhrcfhhqzxmllaxhicu5hc_spsc_ring_buffer/api.h>
+ *
+ * int main() {
+ *     using m03glhrcfhhqzxmllaxhicu5hc_spsc_ring_buffer::spsc_ring_buffer_t;
+ *     spsc_ring_buffer_t<int> spsc_ring_buffer(1); // Exponent 1 gives two usable slots.
+ *     // Sequential demonstration; concurrent use assigns each side to one thread.
+ *     const int first = 10;
+ *     if (!spsc_ring_buffer.try_write(first) || !spsc_ring_buffer.try_write(20)) {
+ *         return 1;
+ *     }
+ *     if (spsc_ring_buffer.try_write(30)) { // Full: returns false.
+ *         return 1;
+ *     }
+ *     int destination = -1;
+ *     if (!spsc_ring_buffer.try_read(destination) || destination != 10) {
+ *         return 1;
+ *     }
+ *     if (!spsc_ring_buffer.try_read(destination) || destination != 20) {
+ *         return 1;
+ *     }
+ *     return spsc_ring_buffer.try_read(destination) || destination != 20 ? 1 : 0;
+ *     // Empty: returns false and preserves destination == 20.
+ * }
+ * @endcode
  */
 template <typename T>
 class spsc_ring_buffer_t {
@@ -23,36 +60,63 @@ class spsc_ring_buffer_t {
 public:
     /**
      * @brief Constructs an empty ring buffer with capacity 1 << capacity_power_of_two.
+     *
+     * The argument is an exponent: zero gives one usable slot, one gives two,
+     * and so on; no slot is reserved. Throws std::invalid_argument if the exponent
+     * is at least std::numeric_limits<std::size_t>::digits, or std::length_error
+     * if the capacity exceeds the vector's max_size(). Allocation and element
+     * construction exceptions propagate.
      */
     explicit spsc_ring_buffer_t(std::size_t capacity_power_of_two);
 
     /**
      * @brief Attempts to copy the value into the buffer and returns whether it succeeded.
+     *
+     * Producer only. Returns false if full, without assigning any slot. Requires
+     * T to be assignable from const T&. Assignment exceptions propagate without
+     * publishing a new element; the producer position is unchanged.
      */
     bool try_write(const T& value);
 
     /**
      * @brief Attempts to move the value into the buffer and returns whether it succeeded.
+     *
+     * Producer only. Returns false if full, without moving from value. Requires
+     * T to be assignable from T&&. Assignment exceptions propagate without
+     * publishing a new element; the producer position is unchanged, but value
+     * may have been modified by the failed assignment.
      */
     bool try_write(T&& value);
 
     /**
      * @brief Attempts to move the oldest buffered value into the destination and returns whether it succeeded.
+     *
+     * Consumer only. Returns false if empty, leaving value unchanged. Requires
+     * T to be assignable from T&&. Assignment exceptions propagate without
+     * advancing the consumer position; the destination and oldest element may
+     * have been modified. Their recovery semantics are those of T's assignment.
      */
     bool try_read(T& value);
 
     /**
      * @brief Returns the underlying storage, which may only be inspected while no producer or consumer is accessing the buffer.
+     *
+     * Borrows the physical slots for this buffer's lifetime, including unused or
+     * moved-from slots; this is not a view of the queued elements in FIFO order.
      */
     const std::vector<T>& buffer() const;
 
     /**
      * @brief Returns the current producer position, which may only be inspected while no producer or consumer is accessing the buffer.
+     *
+     * Counts successful writes with unsigned wraparound; it is not a slot index.
      */
     std::size_t head() const;
 
     /**
      * @brief Returns the current consumer position, which may only be inspected while no producer or consumer is accessing the buffer.
+     *
+     * Counts successful reads with unsigned wraparound; it is not a slot index.
      */
     std::size_t tail() const;
 

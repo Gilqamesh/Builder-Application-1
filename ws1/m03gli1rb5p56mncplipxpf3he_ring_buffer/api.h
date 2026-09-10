@@ -43,6 +43,78 @@ enum class commit_policy_t {
 
 /**
  * @brief Stores a fixed-capacity single-threaded history with a mutable slot published by commit().
+ *
+ * History offsets run from newest (0) to oldest (history_size() - 1). A successful
+ * commit retains at most history_capacity() entries. T must be default constructible;
+ * copy_with_advance additionally requires copy assignment. All slots are constructed
+ * at creation, including the extra slot for dedicated staging.
+ *
+ * stage() and history() return borrowed references to physical slots, not snapshots.
+ * Staging and committing do not reallocate storage, but they change a slot's role,
+ * history offset and possibly its value. Reacquire by history offset after commits;
+ * do not retain borrows across assignment, moving the buffer or destruction.
+ * This is a single-threaded history; it provides no concurrent producer/consumer coordination.
+ *
+ * The capacity-two walkthrough below shows both staging policies. With advance,
+ * the next staging slot keeps its previous value. With copy_with_advance, it is
+ * seeded from the value just committed; overlapping staging can therefore overwrite
+ * the oldest retained entry as soon as history becomes full.
+ *
+ * @code{.cpp}
+ * #include <m03gli1rb5p56mncplipxpf3he_ring_buffer/api.h>
+ *
+ * #include <cassert>
+ *
+ * int main() {
+ *     using namespace m03gli1rb5p56mncplipxpf3he_ring_buffer;
+ *     using enum staging_policy_t;
+ *     using enum commit_policy_t;
+ *     ring_buffer_t<int, overlapping, advance> overlapping_ring_buffer(2);
+ *     ring_buffer_t<int, dedicated, advance> dedicated_ring_buffer(2);
+ *     overlapping_ring_buffer.stage() = 1;
+ *     dedicated_ring_buffer.stage() = 1;
+ *     overlapping_ring_buffer.commit();
+ *     dedicated_ring_buffer.commit(); // Both histories: [1].
+ *     overlapping_ring_buffer.stage() = 2;
+ *     dedicated_ring_buffer.stage() = 2;
+ *     overlapping_ring_buffer.commit();
+ *     dedicated_ring_buffer.commit(); // Both histories: [2, 1], newest first.
+ *     assert(overlapping_ring_buffer.history(0) == 2);
+ *     assert(dedicated_ring_buffer.history(0) == 2);
+ *     assert(overlapping_ring_buffer.stage() == 1); // Reuses the oldest slot.
+ *     assert(dedicated_ring_buffer.stage() == 0);   // Extra int slot, initially zero.
+ *     overlapping_ring_buffer.stage() = 3;
+ *     dedicated_ring_buffer.stage() = 3;
+ *     assert(overlapping_ring_buffer.history(1) == 3); // Changed BEFORE commit.
+ *     assert(dedicated_ring_buffer.history(1) == 1);   // History still [2, 1].
+ *     overlapping_ring_buffer.commit();
+ *     dedicated_ring_buffer.commit(); // Both histories: [3, 2].
+ *     assert(overlapping_ring_buffer.history(0) == 3);
+ *     assert(overlapping_ring_buffer.history(1) == 2);
+ *     assert(dedicated_ring_buffer.history(0) == 3);
+ *     assert(dedicated_ring_buffer.history(1) == 2);
+ *
+ *     ring_buffer_t<int, overlapping, copy_with_advance> seeded_overlapping_ring_buffer(2);
+ *     ring_buffer_t<int, dedicated, copy_with_advance> seeded_dedicated_ring_buffer(2);
+ *     seeded_overlapping_ring_buffer.stage() = 1;
+ *     seeded_dedicated_ring_buffer.stage() = 1;
+ *     seeded_overlapping_ring_buffer.commit();
+ *     seeded_dedicated_ring_buffer.commit();
+ *     assert(seeded_overlapping_ring_buffer.stage() == 1);
+ *     assert(seeded_dedicated_ring_buffer.stage() == 1); // Both next stages are seeded.
+ *     seeded_overlapping_ring_buffer.stage() = 2;
+ *     seeded_dedicated_ring_buffer.stage() = 2;
+ *     seeded_overlapping_ring_buffer.commit(); // History: [2, 2]; oldest was overwritten.
+ *     seeded_dedicated_ring_buffer.commit();   // History: [2, 1]; next stage is 2.
+ *     assert(seeded_overlapping_ring_buffer.history(1) == 2);
+ *     assert(seeded_dedicated_ring_buffer.history(1) == 1);
+ *     assert(seeded_overlapping_ring_buffer.stage() == 2);
+ *     assert(seeded_dedicated_ring_buffer.stage() == 2);
+ *     seeded_dedicated_ring_buffer.commit(); // Commits the seed without another write.
+ *     assert(seeded_dedicated_ring_buffer.history(0) == 2);
+ *     assert(seeded_dedicated_ring_buffer.history(1) == 2);
+ * }
+ * @endcode
  */
 template <typename T, staging_policy_t StagingPolicy, commit_policy_t CommitPolicy>
 class ring_buffer_t {
@@ -52,34 +124,48 @@ class ring_buffer_t {
 public:
     /**
      * @brief Constructs an empty ring buffer with the specified positive history capacity.
+     *
+     * Starts with history_size() == 0 and value-initialized slots (zero for int).
+     * @throws std::invalid_argument If history_capacity is zero.
+     * @throws std::length_error If the slot count, including a dedicated slot, is too large.
+     * Allocation and T construction exceptions propagate.
      */
     explicit ring_buffer_t(std::size_t history_capacity);
 
     /**
-     * @brief Returns the slot that will become current on the next call to commit().
+     * @brief Borrows the mutable slot that becomes the newest history entry on commit().
      *
      * With overlapping staging, this slot aliases the oldest history entry when the buffer is full.
+     * Writing it then changes that entry before commit(), including the sole entry at capacity one.
+     * Dedicated staging does not alias any current history entry.
      */
     T& stage();
 
     /**
      * @brief Publishes the staged slot, advances to the next slot, and increases the history size up to the history capacity.
      *
-     * Propagates exceptions thrown by copy assignment when using copy-and-advance commit.
+     * advance leaves the next staging value unchanged. copy_with_advance copies the
+     * current stage into the next staging slot before advancing; no assignment is
+     * needed for the single-slot overlapping buffer.
+     *
+     * Copy-assignment exceptions propagate without advancing the head or history size.
+     * The destination slot may already have been modified by T's assignment, so this
+     * does not guarantee unchanged stored values or history on failure.
      */
     void commit();
 
     /**
-     * @brief Returns the value at the specified history offset, where zero denotes the newest committed value.
+     * @brief Borrows a mutable history entry, where offset zero denotes the newest committed value.
      *
-     * Fails if the offset is not less than the history size.
+     * Writes change the retained entry and may also affect an overlapping staging slot.
+     * @throws std::out_of_range If offset >= history_size(), including all offsets when empty.
      */
     T& history(std::size_t offset);
 
     /**
-     * @brief Returns the value at the specified history offset, where zero denotes the newest committed value.
+     * @brief Borrows a read-only history entry, where offset zero denotes the newest committed value.
      *
-     * Fails if the offset is not less than the history size.
+     * @throws std::out_of_range If offset >= history_size(), including all offsets when empty.
      */
     const T& history(std::size_t offset) const;
 

@@ -13,28 +13,88 @@
 
 namespace m03ge9ij43jyxy821pda20jhwh_typesystem {
 
+/**
+ * @brief Registers value types and directed coercions to copy or convert live objects.
+ *
+ * Type IDs are zero-based registration positions local to this registry; do not
+ * exchange IDs between independently populated registries or persist them as type
+ * identities. Registration removes top-level cv-qualification, so `int` and
+ * `const int` share an ID, while `int*` and `const int*` remain distinct.
+ * Register every source, intermediate and destination type before registering
+ * coercions or converting values. Same-type conversion uses copy assignment;
+ * other conversions may compose registered procedures through intermediate values.
+ * No particular route among alternatives is guaranteed. Coercion updates timing
+ * state, so callers must synchronize concurrent use of the same registry.
+ *
+ * @code{.cpp}
+ * #include <m03ge9ij43jyxy821pda20jhwh_typesystem/typesystem.h>
+ *
+ * #include <cassert>
+ *
+ * int main() {
+ *     m03ge9ij43jyxy821pda20jhwh_typesystem::typesystem_t typesystem;
+ *     typesystem.register_type<int>();
+ *     typesystem.register_type<double>();
+ *     typesystem.register_coercion<int, double>(+[](int count) -> double {
+ *         return static_cast<double>(count) / 2.0;
+ *     });
+ *     int count = 7;
+ *     auto reader = typesystem.coerce(count);
+ *     double half = reader; // Both count and typesystem are still alive.
+ *     assert(half == 3.5);
+ *     count = 8;
+ *     half = reader; // Reads the current source each time.
+ *     assert(half == 4.0);
+ * }
+ * @endcode
+ */
 class typesystem_t {
 public:
+    /**
+     * @brief Borrows a source object and its registry for conversion to a caller-selected type.
+     *
+     * Keep both objects alive at the recorded addresses until the last conversion;
+     * moving or replacing the registry must not change the meaning of type_id_from.
+     * No source lifetime is extended: a reader saved from `coerce(7)` dangles after
+     * that full expression. Prefer obtaining readers through coerce(from).
+     */
     struct reader_t {
+        /// @brief Registry that owns the source ID and coercion graph; borrowed.
         typesystem_t* self;
+        /// @brief Live source of the registered type; borrowed, never copied into the reader.
         const void* from;
+        /// @brief Source type ID in self, which must match the actual source object.
         int type_id_from;
 
+        /// @brief Converts the current source to registered T, propagating coerce() failures.
         template <typename T>
         operator T() const {
             return self->coerce<T>(from, type_id_from);
         }
     };
 
+    /**
+     * @brief Invokes a type-erased assignment procedure with optional shared context ownership.
+     *
+     * For manually constructed coercions, caller defines the required source,
+     * destination and context types. Keep borrowed context alive through every
+     * invocation, or retain its owner in context_owner; setting the owner does not
+     * set context automatically. Copying a coercion shares context_owner.
+     */
     struct coercion_t {
+        /// @brief Procedure receiving source, live destination and context, in that order.
         void (*caller)(const void*, void*, const void*) = nullptr;
+        /// @brief Context passed unchanged to caller; may be null if caller supports it.
         const void* context = nullptr;
+        /// @brief Optional ownership keeping the procedure's context alive.
         std::shared_ptr<const void> context_owner;
 
+        /// @brief Tests only whether caller is non-null.
         constexpr operator bool() const {
             return caller != nullptr;
         }
 
+        /// @brief Invokes a non-null caller without validating pointers; its exceptions propagate.
         void operator()(const void* from, void* to) const {
             caller(from, to, context);
         }
@@ -42,43 +102,79 @@ public:
 
 public:
     /**
-     * Registers the unqualified form of a default-initializable, copy-assignable value type.
+     * @brief Registers the unqualified form of a default-initializable, copy-assignable value type.
+     * Re-registering a type is a no-op and preserves its ID. T must be a value
+     * type, not a reference type; these requirements are checked at instantiation.
      */
     template <typename T>
     void register_type();
 
+    /**
+     * @brief Registers a directed value conversion and updates reachability automatically.
+     * From and To must already be registered value types; the procedure accepts
+     * From by value and returns To, which is assigned to a live destination.
+     * No separate update_coercion_graph() call is needed for ordinary setup.
+     * @throws std::invalid_argument If the procedure is null.
+     * @throws std::runtime_error If a type is unregistered or this direct coercion already exists.
+     */
     template <typename From, typename To>
     void register_coercion(To (*coercion_procedure)(From));
 
+    /**
+     * @brief Creates a reader borrowing from and this registry without converting yet.
+     * @throws std::runtime_error If From is unregistered; the destination is checked when read.
+     */
     template <typename From>
     reader_t coerce(const From& from);
 
+    /**
+     * @brief Returns a default-constructed To assigned from a borrowed source through coerce().
+     * To must be default-initializable and registered. The pointer and ID must
+     * describe the same live source object; the raw coerce() preconditions apply.
+     */
     template <typename To>
     To coerce(const void* from, int id_from);
 
     /**
-     * Assigns a coerced value between live objects matching `id_from` and `id_to`.
+     * @brief Assigns a coerced value between live objects matching id_from and id_to.
      * The source is borrowed for the call and the destination must already be constructed.
-     * Fails for null objects, invalid type identifiers, or a missing coercion path.
+     * Both objects must have the registered types and alignment: IDs do not verify
+     * the pointed-to C++ types. Intermediate objects are constructed and destroyed
+     * internally. Allocation, construction, assignment and procedure exceptions
+     * propagate; destination rollback is not provided if assignment throws.
+     * @throws std::invalid_argument If either object pointer is null.
+     * @throws std::runtime_error If an ID is out of bounds or no coercion path exists.
      */
     void coerce(const void* from, int id_from, void* to, int id_to);
 
+    /// @brief Returns an opaque token for unqualified T without requiring registration.
     template <typename T>
     const void* type_addr();
 
+    /// @brief Returns the local ID for unqualified T, throwing std::runtime_error if unregistered.
     template <typename T>
     int type_id();
 
+    /// @brief Looks up a type_addr() token, throwing std::runtime_error if unregistered here.
     int type_id(const void* addr);
 
+    /// @brief Relaxes coercion routes using all currently stored costs.
     void update_coercion_graph();
+    /**
+     * @brief Relaxes routes through the specified edge using currently stored costs.
+     * @throws std::runtime_error If either ID is out of bounds.
+     */
     void update_coercion_graph(int id_from, int id_to);
 
+    /// @brief Returns sizeof(T) in bytes without requiring registration.
     template <typename T>
     size_t sizeof_type();
 
+    /// @brief Returns the registered size in bytes, throwing std::runtime_error for an invalid ID.
     size_t sizeof_type(int type_id);
+    /// @brief Returns the registered alignment in bytes, throwing std::runtime_error for an invalid ID.
     size_t alignof_type(int type_id);
+    /// @brief Returns the registered trivial-copyability trait, throwing std::runtime_error for an invalid ID.
     bool is_trivially_copyable(int type_id);
 
 private:

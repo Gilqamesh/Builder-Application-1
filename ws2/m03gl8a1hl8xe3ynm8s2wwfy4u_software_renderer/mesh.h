@@ -15,16 +15,42 @@
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
+/**
+ * @brief Owns vertex streams and matching storage descriptions indexed by shader input location.
+ *
+ * Stream i and attribute i describe vertex input location i, in the source
+ * structure_of_arrays_t template-argument order. Each row is one vertex. Storage
+ * is owned, and copies are independent; pass std::move(streams) to consume source
+ * columns. Accessors borrow this mesh; keep it alive and reacquire views after
+ * assigning or moving it. There are no per-stream mutation operations on a mesh.
+ *
+ * Construction checks one attribute per stream, equal row counts and exact element
+ * byte widths (component_count * vertex_attribute_type_size), including overflow.
+ * It does not infer a shader type from the original C++ type. Supply representations
+ * matching the attribute, such as std::array<float, 2> for R32 with two components.
+ * The erased storage's accepted C++ types are defined by
+ * m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays::erased_structure_of_arrays_t.
+ *
+ * Draw checks consumed locations against shader inputs: R32/I32/U32 map to
+ * float/int32_t/uint32_t scalars or vectors of 2..4 components with no conversion
+ * or normalization. Additional unconsumed streams are allowed. Other declared
+ * storage widths can form a mesh but cannot supply these shader inputs.
+ * Geometry owns index selection; software_renderer.h owns draw validation.
+ * See [headless triangle](docs/headless-triangle.md) for complete setup and drawing.
+ */
 class mesh_t {
 public:
+    /** @brief Constructs an empty mesh with no streams, attributes or vertices. */
     mesh_t();
 
+    /** @brief Owns and validates the supplied streams and their ordered attribute descriptions. */
     template <typename... Ts>
     mesh_t(m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays::structure_of_arrays_t<Ts...> vertex_streams, std::vector<vertex_attribute_t> vertex_attributes);
 
     const m03gjbxryz3suyoumjyd80j3r2_structure_of_arrays::erased_structure_of_arrays_t& vertex_streams() const&;
     std::span<const vertex_attribute_t> vertex_attributes() const&;
 
+    /** @brief Returns the shared row count, or zero when there are no streams. */
     std::size_t number_of_vertices() const;
 
 private:

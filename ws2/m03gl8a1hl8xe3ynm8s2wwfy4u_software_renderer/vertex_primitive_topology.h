@@ -6,6 +6,7 @@
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
+/** @brief Defines how the selected index sequence assembles points, lines or triangles. */
 enum class vertex_primitive_topology_t {
                         /* Vertex index interpretation of 6 vertices        */
     point,              /* {0}, {1}, {2}, {3}, {4}, {5}                     */

@@ -13,9 +13,50 @@
 namespace m03glv28yaiwc5hbnvz43r14zr_matrix {
 
 /**
- * @brief N-row by M-column matrix of type T.
+ * @brief Owns an N-row by M-column matrix with arithmetic and matrix/vector products.
  *
- * Storage is row-major.
+ * N and M must be positive. Elements are stored contiguously in row-major
+ * order: element (row, column) has offset row * M + column. Iterators visit
+ * all N * M elements in that order. References and iterators borrow this
+ * object's storage for its lifetime; mutation and assignment change the
+ * elements they observe. Array and initializer-list constructors copy their elements.
+ *
+ * Addition, subtraction, negation and scalar scaling operate elementwise.
+ * Arithmetic uses the underlying operators without saturation or checks for
+ * overflow, zero divisors or non-finite floating point values; callers must
+ * avoid undefined arithmetic and invalid conversions. Scalar results and
+ * each accumulated product sum are cast to T.
+ *
+ * @code{.cpp}
+ * #include <m03glv28yaiwc5hbnvz43r14zr_matrix/api.h>
+ * #include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
+ *
+ * #include <cassert>
+ * #include <stdexcept>
+ *
+ * int main() {
+ *     using matrix_t = m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t<int, 2, 3>;
+ *     const matrix_t zero_matrix(0); // Fills all six elements.
+ *     const matrix_t matrix{
+ *         1, 2, 3, // Row 0.
+ *         4, 5, 6  // Row 1.
+ *     };
+ *     const m03ginwy24ng8o487c4beoms6l_vector::vector_t<int, 3> column_vector{1, 2, 3};
+ *     const auto product_vector = matrix * column_vector;
+ *     assert(product_vector[0] == 14); // 1*1 + 2*2 + 3*3.
+ *     assert(product_vector[1] == 32); // 4*1 + 5*2 + 6*3.
+ *     assert(matrix(1, 0) == 4);
+ *     assert(zero_matrix(1, 2) == 0);
+ *
+ *     bool rejected = false;
+ *     try {
+ *         const matrix_t short_matrix{0}; // One element, not scalar fill.
+ *     } catch (const std::invalid_argument&) {
+ *         rejected = true;
+ *     }
+ *     assert(rejected);
+ * }
+ * @endcode
  */
 template <typename T, std::size_t N, std::size_t M>
 class matrix_t {
@@ -28,9 +69,26 @@ public:
     static constexpr std::size_t column_count = M;
 
 public:
+    /**
+     * @brief Default-initializes the elements without initializing scalar elements.
+     *
+     * Assign scalar elements before reading them, including through arithmetic
+     * or formatting. Empty braces also call this constructor.
+     */
     matrix_t();
+    /**
+     * @brief Fills every element with the supplied scalar.
+     *
+     * Use parentheses for scalar fill; nonempty braces of scalar elements
+     * select the list constructor.
+     */
     matrix_t(const T& value);
+    /** @brief Copies the array's N * M elements in row-major order. */
     matrix_t(const std::array<T, N * M>& data);
+    /**
+     * @brief Copies exactly N * M initializer-list elements in row-major order.
+     * @throws std::invalid_argument If list.size() is not N * M.
+     */
     matrix_t(std::initializer_list<T> list);
 
     matrix_t(const matrix_t&) = default;
@@ -39,33 +97,65 @@ public:
     matrix_t& operator=(const matrix_t&) = default;
     matrix_t& operator=(matrix_t&&) = default;
 
+    /** @brief Returns a read-only iterator to the first row-major element. */
     typename std::array<T, N * M>::const_iterator begin() const;
+    /** @brief Returns the read-only iterator past the N * M elements. */
     typename std::array<T, N * M>::const_iterator end() const;
+    /** @brief Returns a mutable iterator to the first row-major element. */
     typename std::array<T, N * M>::iterator begin();
+    /** @brief Returns the mutable iterator past the N * M elements. */
     typename std::array<T, N * M>::iterator end();
 
-    T& operator()(std::size_t row, std::size_t column); // does no bound checking
-    const T& operator()(std::size_t row, std::size_t column) const; // does no bound checking
+    /**
+     * @brief Borrows the element at the given row and column for mutation.
+     * @pre row < N and column < M; no bounds check is performed.
+     */
+    T& operator()(std::size_t row, std::size_t column);
+    /**
+     * @brief Borrows the element at the given row and column for reading.
+     * @pre row < N and column < M; no bounds check is performed.
+     */
+    const T& operator()(std::size_t row, std::size_t column) const;
 
+    /** @brief Returns whether all corresponding elements compare equal. */
     bool operator==(const matrix_t& other) const;
 
+    /** @brief Adds corresponding elements in place and returns *this. */
     matrix_t& operator+=(const matrix_t& other);
+    /** @brief Subtracts corresponding elements in place and returns *this. */
     matrix_t& operator-=(const matrix_t& other);
+    /** @brief Returns the elementwise sum. */
     matrix_t operator+(const matrix_t& other) const;
+    /** @brief Returns the elementwise difference. */
     matrix_t operator-(const matrix_t& other) const;
+    /** @brief Returns a matrix with every element negated. */
     matrix_t operator-() const;
 
+    /** @brief Multiplies every element by the scalar in place and returns *this. */
     template <typename U>
     matrix_t& operator*=(U value);
+    /** @brief Divides every element by the scalar in place and returns *this. */
     template <typename U>
     matrix_t& operator/=(U value);
+    /** @brief Returns a matrix with every element multiplied by the scalar. */
     template <typename U>
     matrix_t operator*(U value) const;
+    /** @brief Returns a matrix with every element divided by the scalar. */
     template <typename U>
     matrix_t operator/(U value) const;
 
+    /**
+     * @brief Multiplies by an M-component column vector to return an N-component vector.
+     *
+     * Result row r sums (*this)(r, c) * vector[c] in increasing column order.
+     */
     m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> operator*(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, M>& vector) const;
 
+    /**
+     * @brief Multiplies by an M-row by P-column matrix to return an N-row by P-column matrix.
+     *
+     * Result (r, c) sums (*this)(r, i) * other(i, c) in increasing i order.
+     */
     template <std::size_t P>
     matrix_t<T, N, P> operator*(const matrix_t<T, M, P>& other) const;
 

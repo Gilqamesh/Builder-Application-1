@@ -11,6 +11,11 @@
 namespace m03gilsfsv3k34ej14ytz8a29k_tower_defense_game {
 
 /**
+ * @brief Owns a Raylib window for the inactive legacy rendering path.
+ *
+ * This is legacy/experimental code, as specified in AGENTS.md. The active application
+ * uses the software renderer through game_t; see the entry point in api.h.
+ *
  * todo: remove window dependency from renderer_t, instead pass in a drawable surface to draw to, which can be a window or something else, like a texture.
  */
 class renderer_t {

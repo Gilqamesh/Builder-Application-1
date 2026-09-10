@@ -32,9 +32,11 @@ concept binding_provider = requires(const T& bindings, std::uint32_t location) {
 /**
  * @brief Owns two immutable compiled shader stages and their reflected interfaces.
  *
- * Compilation borrows the ASTs only during construction. Successful construction
+ * Construction consumes the AST values; compiled stages retain no AST references. Successful construction
  * establishes stage/link compatibility and executable code; expression evaluation
  * and invocation-dependent failures remain runtime behavior.
+ * See [location-based and prepared execution](docs/execution.md) for a complete
+ * caller using both stages, reusable IO/context and borrowed texture resources.
  */
 class program_t {
 public:
@@ -135,7 +137,9 @@ private:
  * Moving leaves the source unprepared. Failed preparation leaves this object
  * unprepared, with retained storage capacity.
  *
- * Inputs and numbered outputs follow their stage's reflection order. The caller
+ * Inputs and numbered outputs follow their stage's reflection order (defined by
+ * shader::shader_interface_t), with span sizes exactly matching the reflected
+ * input/output counts; mismatched sizes throw std::invalid_argument. The caller
  * supplies every input with its declared type; no location search or full input
  * validation is performed. Output entries are empty when unwritten. Built-ins and
  * special results use the supplied IO; its numbered inputs and outputs are unused.
@@ -156,7 +160,9 @@ public:
     void prepare(const program_t& program, const T& bindings);
     /** @brief Releases all borrows and retains binding storage for reuse. */
     void reset();
+    /** @brief Runs a prepared vertex invocation; an unprepared object clears results and throws std::logic_error. */
     void run(std::span<const value_t> inputs, std::span<std::optional<value_t>> outputs, vertex_io_t& io, execution_context_t& context) const;
+    /** @brief Runs a prepared fragment invocation under the same indexed IO and preparation requirements. */
     void run(std::span<const value_t> inputs, std::span<std::optional<value_t>> outputs, fragment_io_t& io, execution_context_t& context) const;
 
 private:

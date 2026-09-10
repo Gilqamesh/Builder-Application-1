@@ -19,6 +19,7 @@ namespace m03gsy25j4v7nccgmsdov9ioft_shader {
 using m03ginwy24ng8o487c4beoms6l_vector::vector_t;
 using m03glv28yaiwc5hbnvz43r14zr_matrix::matrix_t;
 
+/** @brief Distinguishes scalar, vector, matrix and resource shader types. */
 enum class shader_data_category_t {
     scalar,
     vector,
@@ -27,6 +28,7 @@ enum class shader_data_category_t {
     sampler
 };
 
+/** @brief Identifies the component scalar kind, with none for resources. */
 enum class shader_scalar_type_t {
     none,
     boolean,
@@ -35,6 +37,14 @@ enum class shader_scalar_type_t {
     floating_point
 };
 
+/**
+ * @brief Describes a shader value's shape or a texture/sampler resource kind.
+ *
+ * This descriptor stores its arguments without validation; AST/interface
+ * construction validates combinations. Use shader_data_type<T>() for supported
+ * C++ values: bool, int32_t, uint32_t, float, vectors of 2..4 such components,
+ * float matrices with 2..4 rows/columns, and the texture/sampler marker types.
+ */
 class shader_data_type_t {
 public:
     constexpr shader_data_type_t(shader_data_category_t category, shader_scalar_type_t scalar, std::uint8_t rows = 0, std::uint8_t columns = 0);
@@ -51,7 +61,9 @@ private:
     std::uint8_t m_columns;
 };
 
+/** @brief Marks a 2D texture binding in shader expressions without owning texture storage. */
 struct shader_texture_2d_t {};
+/** @brief Marks a sampler binding in shader expressions without owning sampling settings. */
 struct shader_sampler_t {};
 
 template <typename T>
@@ -185,12 +197,14 @@ enum class shader_call_operation_t { clamp, mix, smoothstep, sample, sample_lod 
 template <shader_type T>
 constexpr shader_data_type_t shader_data_type();
 
+/** @brief Stores literal boolean components as zero-or-one bytes. */
 struct shader_boolean_components_t {
     std::vector<std::uint8_t> values;
 };
 
 using shader_literal_data_t = std::variant<shader_boolean_components_t, std::vector<std::int32_t>, std::vector<std::uint32_t>, std::vector<float>>;
 
+/** @brief Owns a copied shader value flattened in vector order or matrix row-major order. */
 class shader_literal_t {
 public:
     template <shader_value T>
@@ -205,6 +219,15 @@ private:
     shader_literal_data_t m_data;
 };
 
+/**
+ * @brief Borrows a typed computation recorded in one shader builder.
+ *
+ * Copying a handle shares the same node; it does not copy or evaluate the shader.
+ * Operators append nodes to the owning builder. Keep that builder alive during
+ * construction and do not use its handles for construction after finalize().
+ * Handles from different builders cannot be combined. A local read observes the
+ * local's value when the expression executes, not when this host handle is created.
+ */
 template <shader_type T>
 class shader_expression_t {
 public:
@@ -221,6 +244,12 @@ private:
     const shader_expression_node_t* m_node;
 };
 
+/**
+ * @brief Borrows a mutable shader local whose writes are recorded with builder.assign().
+ *
+ * Local visibility ends with its declaring shader block; a C++ capture does not
+ * extend that scope. Finalization rejects reads or writes outside the local's scope.
+ */
 template <shader_value T>
 class shader_local_t : public shader_expression_t<T> {
 public:

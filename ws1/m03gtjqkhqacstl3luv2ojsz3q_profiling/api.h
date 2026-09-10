@@ -38,6 +38,7 @@ public:
     metric_t(metric_t&&) = delete;
     metric_t& operator=(metric_t&&) = delete;
 
+    /** @brief Returns whether this metric still has an active recorded measurement. */
     explicit operator bool() const noexcept;
     /**
      * @brief Opens a child identified by this node and T, inheriting recording from this measurement.
@@ -80,6 +81,58 @@ private:
  * Reads and reports require all metrics stopped. Returned data pointers remain
  * valid until profiler destruction; access requires all metrics stopped. Data
  * borrowed inside T must remain valid through deferred use.
+ *
+ * Keep application work outside update() callbacks so disabling profiling does
+ * not disable that work. The same metric type can label a root and its child;
+ * their counters are independent because their complete paths differ.
+ *
+ * @code{.cpp}
+ * #include <m03gtjqkhqacstl3luv2ojsz3q_profiling/api.h>
+ *
+ * #include <cstddef>
+ * #include <format>
+ * #include <iostream>
+ * #include <string_view>
+ *
+ * namespace app {
+ * struct work_t { std::size_t completed = 0; };
+ * } // namespace app
+ *
+ * template <>
+ * struct std::formatter<app::work_t> : std::formatter<std::string_view> {
+ *     auto format(const app::work_t& work, auto& ctx) const {
+ *         auto out = ctx.out();
+ *         out = std::format_to(out, "work completed={}", work.completed);
+ *         return out;
+ *     }
+ * };
+ *
+ * int main() {
+ *     std::size_t application_steps = 0;
+ *     std::size_t updates = 0;
+ *     m03gtjqkhqacstl3luv2ojsz3q_profiling::profiler_t profiler;
+ *     const auto process = [&] {
+ *         auto root = profiler.metric<app::work_t>();
+ *         {
+ *             auto child = root.metric<app::work_t>();
+ *             ++application_steps; // Application work always executes.
+ *             child.update<app::work_t>([&](app::work_t& work) {
+ *                 ++work.completed;
+ *                 ++updates;
+ *             });
+ *         } // Child finishes before root.
+ *         root.update<app::work_t>([&](app::work_t& work) {
+ *             ++work.completed;
+ *             ++updates;
+ *         });
+ *     };
+ *     process();
+ *     profiler.enabled() = false;
+ *     process(); // Inactive root/child skip both update callbacks.
+ *     profiler.report(std::cout); // All scopes finished; recorded results remain.
+ *     return application_steps == 2 && updates == 2 ? 0 : 1;
+ * }
+ * @endcode
  */
 class profiler_t {
 public:
@@ -90,7 +143,9 @@ public:
     profiler_t(profiler_t&&) = delete;
     profiler_t& operator=(profiler_t&&) = delete;
 
+    /** @brief Borrows the flag sampled when opening subsequent root measurements. */
     bool& enabled() noexcept;
+    /** @brief Reads the flag without changing existing measurements or stored results. */
     const bool& enabled() const noexcept;
     /**
      * @brief Opens a root measurement when enabled and idle.
@@ -118,8 +173,12 @@ public:
      * output. The latest exception exit adds [unwinding].
      * Nonempty reports start with the column headings. Empty reports say
      * "No measurements." or "Profiling disabled." according to enablement.
-     * Reporting preserves results even on failure. Repeated calls aggregate;
-     * first-use tree order is preserved rather than chronological event order.
+     * Reporting preserves results even on failure. Measurements on the same path
+     * accumulate; repeated reports do not reset results. First-use tree order is
+     * preserved rather than chronological event order. An active measurement
+     * causes std::logic_error. Allocation and metric formatter exceptions
+     * propagate; stream failures follow out's exception settings. Output may
+     * be partial.
      */
     void report(std::ostream& out) const;
 

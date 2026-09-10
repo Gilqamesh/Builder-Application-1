@@ -91,7 +91,48 @@ public:
     /**
      * @brief Returns the cumulative input history whose staging snapshot is updated by callbacks.
      *
-     * Copy the latest published snapshot into stage before processing events and publish stage afterwards.
+     * The returned buffer is borrowed from this window. A new window has empty history
+     * and an initialized stage: the queried cursor position, zero scroll and counters,
+     * and all buttons up. Commit that initial stage before the first event poll.
+     * Then poll events, commit, and compare history(1) with history(0).
+     *
+     * Dedicated staging does not alias committed history. The copy_with_advance policy
+     * already seeds the next stage from the snapshot just committed; no manual copy
+     * is needed. Preserve cumulative counters between polls. History offsets and slot
+     * reuse follow m03gli1rb5p56mncplipxpf3he_ring_buffer::ring_buffer_t.
+     *
+     * input_state_change_t borrows both snapshots: keep them alive and unchanged while
+     * using the view. Finish comparisons before another commit can reuse their slots,
+     * or keep independent snapshot copies for a longer-lived comparison.
+     *
+     * @code{.cpp}
+     * #include <m03gkcdy62bnz808pmk4uzkjra_glfw/glfw.h>
+     * #include <m03gkcdy62bnz808pmk4uzkjra_glfw/input.h>
+     * #include <m03gkcdy62bnz808pmk4uzkjra_glfw/window.h>
+     * #include <m03gkcdy62bnz808pmk4uzkjra_glfw/window_creation_settings.h>
+     *
+     * int main() {
+     *     using namespace m03gkcdy62bnz808pmk4uzkjra_glfw;
+     *     glfw_t glfw; // Main thread; destroyed after the window.
+     *     window_creation_settings_t window_creation_settings;
+     *     auto window = window_t::create("Input history", {100, 100, 640, 480}, window_creation_settings);
+     *     if (!window) {
+     *         return 1;
+     *     }
+     *     auto& input_states = window->input_states();
+     *     input_states.commit(); // Publish the initial state and seed the next stage.
+     *     while (!window->should_close()) {
+     *         poll_events();
+     *         input_states.commit();
+     *         const auto& previous_input_state = input_states.history(1);
+     *         const auto& current_input_state = input_states.history(0);
+     *         const input_state_change_t input_state_change(previous_input_state, current_input_state);
+     *         if (input_state_change.was_pressed(button_t::button_escape)) {
+     *             window->should_close(true);
+     *         }
+     *     } // The view ends before the next poll and commit.
+     * }
+     * @endcode
      */
     input_states_t& input_states();
     const input_states_t& input_states() const;

@@ -14,10 +14,44 @@
 namespace m03gtgtrh2smvh28qlwgm7gdl4_quaternion {
 
 /**
- * @brief Quaternion with freely mutable components ordered (w, x, y, z).
+ * @brief Represents quaternion arithmetic and active 3D rotations with mutable (w, x, y, z) components.
  *
  * Rotations are active and right-handed, acting on column vectors; q2 * q1
  * applies q1, then q2. Rotation conversions preserve orientation, not sign.
+ * Component construction and mutation do not normalize or validate. Rotation
+ * operations normalize a copy, leaving this quaternion unchanged. Invalid rotation
+ * inputs throw std::invalid_argument; unrepresentable inverse or rotated-vector
+ * results throw std::overflow_error.
+ *
+ * @code{.cpp}
+ * #include <m03gtgtrh2smvh28qlwgm7gdl4_quaternion/api.h>
+ *
+ * #include <cassert>
+ * #include <numbers>
+ *
+ * int main() {
+ *     using quaternion_t = m03gtgtrh2smvh28qlwgm7gdl4_quaternion::quaternion_t<double>;
+ *     using vector3_t = quaternion_t::vector3_t;
+ *     const double quarter_turn = std::numbers::pi / 2.0; // Radians.
+ *     const vector3_t along_x {1, 0, 0}, along_y {0, 1, 0}, along_z {0, 0, 1};
+ *     const auto around_z = quaternion_t::from_axis_angle(along_z, quarter_turn);
+ *     assert((around_z.rotate(along_x) - along_y).euclidean_length() < 1e-12);
+ *
+ *     const auto around_x = quaternion_t::from_axis_angle(along_x, quarter_turn);
+ *     const auto around_y = quaternion_t::from_axis_angle(along_y, quarter_turn);
+ *     const auto composed = around_y * around_x; // q2 * q1: X first, then Y.
+ *     assert((composed.rotate(along_y) - along_x).euclidean_length() < 1e-12);
+ *     assert(((around_x * around_y).rotate(along_y) - along_z).euclidean_length() < 1e-12);
+ *
+ *     const quaternion_t opposite(-composed.w(), -composed.x(), -composed.y(), -composed.z());
+ *     assert(!(composed == opposite)); // Different components, equivalent orientation.
+ *     assert((composed.rotate(along_y) - opposite.rotate(along_y)).euclidean_length() < 1e-12);
+ * }
+ * @endcode
+ *
+ * For nonzero finite quaternions, q and -q represent the same orientation, and
+ * non-unit magnitudes are removed by rotation operations. Component equality is
+ * exact scalar equality; it is neither an orientation test nor a tolerance test.
  */
 template <std::floating_point T>
 class quaternion_t {

@@ -5,6 +5,12 @@
 
 namespace m03gilsfsv3k34ej14ytz8a29k_tower_defense_game {
 
+/**
+ * @brief Experimental placeholder for OpenGL shader program resources with no public resource operations.
+ *
+ * This standalone wrapper is legacy/experimental, as specified in AGENTS.md.
+ * See api.h and game_t for the active software-renderer path.
+ */
 class opengl_shader_program_t {
 public:
 private:

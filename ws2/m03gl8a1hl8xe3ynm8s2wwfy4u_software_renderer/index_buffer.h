@@ -8,6 +8,13 @@
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
+/**
+ * @brief Owns a mutable sequence of unsigned 32-bit mesh vertex indices.
+ *
+ * Starts empty. Vector access and indexing do not validate geometry; operator[]
+ * requires an in-range element index. Vector mutation follows std::vector reference
+ * and iterator invalidation rules. geometry_t selects and validates a range at use.
+ */
 class index_buffer_t {
 public:
     using index_t = std::uint32_t;

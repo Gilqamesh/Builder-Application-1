@@ -17,19 +17,34 @@
 
 namespace m03gsy25j4v7nccgmsdov9ioft_shader {
 
+/** @brief Selects vertex or fragment invocation semantics. */
 enum class shader_stage_t { vertex, fragment };
+/** @brief Identifies an execution-supplied stage input outside numbered locations. */
 enum class shader_builtin_t { vertex_index, instance_index, object_to_world, world_to_clip, fragment_coordinate, front_facing };
+/** @brief Selects a numbered result or a stage-specific position/color result. */
 enum class shader_output_t { location, position, color };
 
 /** @brief Selects fragment-input interpolation; other interface elements use perspective. */
 enum class interpolation_t { perspective, noperspective, flat };
 
+/** @brief Describes one numbered input, output or binding and its declared shader type. */
 struct shader_interface_element_t {
     std::uint32_t index;
     shader_data_type_t type;
     interpolation_t interpolation = interpolation_t::perspective;
 };
 
+/**
+ * @brief Owns validated, canonical reflection for one shader stage.
+ *
+ * Inputs and outputs are sorted by location. Bindings are grouped as uniforms,
+ * textures, then samplers, each sorted by binding index; these are independent
+ * namespaces. Identical declarations coalesce; conflicting types or interpolation,
+ * invalid types/stages, and interpolation on anything except fragment inputs throw
+ * std::invalid_argument. Position and color are separate from numbered outputs.
+ * Accessor spans borrow this object's storage; reacquire after assignment or move
+ * and keep the owner alive. Copies own independent reflection storage.
+ */
 class shader_interface_t {
 public:
     shader_interface_t(
@@ -72,6 +87,13 @@ class shader_break_statement_t;
 class shader_continue_statement_t;
 class shader_discard_statement_t;
 
+/**
+ * @brief Describes a typed computation whose operands borrow other expression nodes.
+ *
+ * Nodes do not cache invocation values. Operand nodes must stay alive while used;
+ * a builder and then its finalized AST own the complete expression arena.
+ * accept() dispatches this node only; visitors choose whether to traverse operands.
+ */
 class shader_expression_node_t {
 public:
     virtual ~shader_expression_node_t() = default;
@@ -88,27 +110,33 @@ private:
     std::vector<const shader_expression_node_t*> m_operands;
 };
 
+/** @brief Owns the immutable expression nodes referenced by a shader. */
 using shader_expression_nodes_t = std::vector<std::unique_ptr<const shader_expression_node_t>>; // Immutable computations, not cached runtime values.
 
+/** @brief Restricts expression insertion to the supported concrete AST node types. */
 template <typename T>
 concept shader_expression_structure =
     std::same_as<T, shader_constant_node_t> || std::same_as<T, shader_input_node_t> || std::same_as<T, shader_uniform_node_t> || std::same_as<T, shader_resource_node_t> ||
     std::same_as<T, shader_builtin_node_t> || std::same_as<T, shader_local_node_t> || std::same_as<T, shader_unary_node_t> || std::same_as<T, shader_binary_node_t> ||
     std::same_as<T, shader_construct_node_t> || std::same_as<T, shader_swizzle_node_t> || std::same_as<T, shader_call_node_t>;
 
+/** @brief Dispatches an ordered shader action to a visitor without traversing its children. */
 class shader_statement_node_t {
 public:
     virtual ~shader_statement_node_t() = default;
     virtual void accept(shader_ast_visitor_t& visitor) const = 0;
 };
 
+/** @brief Owns statements in shader execution order. */
 using shader_statement_nodes_t = std::vector<std::unique_ptr<const shader_statement_node_t>>;
 
+/** @brief Owns an ordered statement sequence with a lexical scope for local declarations. */
 class shader_block_t {
 public:
     shader_statement_nodes_t statements;
 };
 
+/** @brief Restricts statement insertion to the supported concrete AST statement types. */
 template <typename T>
 concept shader_statement_structure =
     std::same_as<T, shader_local_statement_t> || std::same_as<T, shader_assignment_statement_t> ||
@@ -116,6 +144,19 @@ concept shader_statement_structure =
     std::same_as<T, shader_loop_statement_t> || std::same_as<T, shader_break_statement_t> ||
     std::same_as<T, shader_continue_statement_t> || std::same_as<T, shader_discard_statement_t>;
 
+/**
+ * @brief Owns an immutable, validated shader and reflection of its statement-reachable expressions.
+ *
+ * Construction takes ownership of expressions and the root block, validates node
+ * types, ownership, local scope and stage use, and throws std::invalid_argument on
+ * invalid ASTs. Unused expressions do not contribute reflection. Both branch arms
+ * and loop bodies are analyzed regardless of runtime conditions. Vertex shaders
+ * must contain a position write; fragment shaders must contain a numbered output,
+ * color write or discard. This does not prove every runtime path produces a result.
+ *
+ * root() and interface() borrow this AST; keep it alive and reacquire after moving
+ * or assigning it. Backend compilation/execution is outside this module.
+ */
 class shader_ast_t {
 public:
     shader_ast_t(shader_stage_t stage, shader_expression_nodes_t expressions, shader_block_t root);
@@ -133,6 +174,45 @@ private:
     shader_interface_t m_interface;
 };
 
+/**
+ * @brief Records typed expressions and ordered statements for a vertex or fragment shader.
+ *
+ * Use a stage-specific builder. It owns all expression nodes; handles borrow this
+ * nonmovable builder and do not extend its lifetime. Combining different builders'
+ * expressions throws std::invalid_argument. Host calls construct the shader;
+ * expressions are evaluated later by a backend against invocation state.
+ *
+ * branch() invokes each supplied callback once during construction, and loop()
+ * invokes its body once to record it. Captures need live only through that call.
+ * The shader condition controls execution later, not whether the host callback runs.
+ * Callbacks can record nested control flow; break_loop()/continue_loop() require a
+ * surrounding loop callback and otherwise throw std::logic_error. Build sequentially.
+ *
+ * @code{.cpp}
+ * #include <m03gsy25j4v7nccgmsdov9ioft_shader/shader_builder.h>
+ *
+ * #include <cassert>
+ * #include <utility>
+ *
+ * int main() {
+ *     namespace shader = m03gsy25j4v7nccgmsdov9ioft_shader;
+ *     using vector4f_t = shader::vector_t<float, 4>;
+ *     shader::fragment_shader_ast_builder_t fragment;
+ *     const auto tint = fragment.input<vector4f_t>(7);
+ *     const auto enabled = fragment.uniform<bool>(2);
+ *     int callbacks = 0;
+ *     fragment.branch(enabled,
+ *         [&] { ++callbacks; fragment.color(tint); },
+ *         [&] { ++callbacks; fragment.color(vector4f_t{0, 0, 0, 1}); });
+ *     assert(callbacks == 2); // Both arms were recorded, not executed as a shader.
+ *     const auto ast = std::move(fragment).finalize();
+ *     assert(ast.interface().inputs()[0].index == 7);
+ *     assert(ast.interface().bindings()[0].index == 2);
+ *     assert(ast.interface().outputs().empty()); // Color is a special output.
+ *     // ast now owns the nodes; do not build further expressions with these handles.
+ * }
+ * @endcode
+ */
 class shader_ast_builder_t {
 public:
     shader_ast_builder_t(const shader_ast_builder_t&) = delete;
@@ -140,11 +220,21 @@ public:
     shader_ast_builder_t(shader_ast_builder_t&&) = delete;
     shader_ast_builder_t& operator=(shader_ast_builder_t&&) = delete;
 
+    /**
+     * @brief Transfers the recorded shader into a validated immutable AST.
+     *
+     * Call std::move(builder).finalize() outside callbacks; unfinished control flow
+     * throws std::logic_error. AST validation can throw std::invalid_argument after
+     * ownership has transferred. Treat finalization as consuming construction state
+     * and start a new builder for another shader or after failed finalization.
+     */
     shader_ast_t finalize() &&;
 
+    /** @brief Takes ownership of a non-null node whose operands already belong to this builder. */
     template <shader_expression_structure Node>
     const shader_expression_node_t* expression(std::unique_ptr<Node> expression);
 
+    /** @brief Inserts a node and rejects a result type that differs from the requested handle type. */
     template <shader_type T, shader_expression_structure Node>
     shader_expression_t<T> expression(std::unique_ptr<Node> expression);
 
@@ -156,50 +246,65 @@ public:
     template <shader_value T>
     shader_expression_t<T> input(std::uint32_t location, interpolation_t interpolation);
 
+    /** @brief Appends a write to a numbered output; repeated writes must keep the same type. */
     template <shader_value T>
     void output(std::uint32_t location, shader_expression_t<T> expression);
 
+    /** @brief Appends a numbered output write of a copied constant. */
     template <shader_value T>
     void output(std::uint32_t location, T value);
 
+    /** @brief Records a typed uniform read in the uniform binding namespace. */
     template <shader_value T>
     shader_expression_t<T> uniform(std::uint32_t binding);
 
+    /** @brief Records a texture or sampler reference without binding or owning a CPU resource. */
     template <shader_resource T>
     shader_expression_t<std::remove_cvref_t<T>> resource(std::uint32_t binding);
 
+    /** @brief Copies a host value into an immutable shader literal. */
     template <shader_value T>
     shader_expression_t<std::remove_cvref_t<T>> constant(T value);
 
+    /** @brief Records a value construction from shader operands and copied host constants. */
     template <shader_value T, typename... Ts>
     requires (shader_operand<Ts> && ...)
     shader_expression_t<T> construct(Ts&&... expressions);
 
+    /** @brief Appends a local declaration initialized when execution reaches this statement. */
     template <shader_value T>
     shader_local_t<T> local(shader_expression_t<T> initial);
 
+    /** @brief Appends a local declaration initialized from a copied constant. */
     template <shader_value T>
     shader_local_t<std::remove_cvref_t<T>> local(T initial);
 
+    /** @brief Appends an assignment to a local visible in the current shader scope. */
     template <shader_value T>
     void assign(shader_local_t<T> local, shader_expression_t<T> value);
 
+    /** @brief Appends a constant assignment to a visible local. */
     template <shader_value T>
     void assign(shader_local_t<T> local, T value);
 
+    /** @brief Records a conditional block by invoking its callback once now. */
     template <typename Body>
     requires (std::invocable<Body>)
     void branch(shader_expression_t<bool> condition, Body&& body);
 
+    /** @brief Records both conditional arms by invoking the true callback and then the false callback. */
     template <typename TrueBody, typename FalseBody>
     requires (std::invocable<TrueBody> && std::invocable<FalseBody>)
     void branch(shader_expression_t<bool> condition, TrueBody&& true_body, FalseBody&& false_body);
 
+    /** @brief Records a while loop whose condition is reevaluated before each shader iteration. */
     template <typename Body>
     requires (std::invocable<Body>)
     void loop(shader_expression_t<bool> condition, Body&& body);
 
+    /** @brief Records an exit from the innermost shader loop. */
     void break_loop();
+    /** @brief Records a jump to the innermost shader loop condition. */
     void continue_loop();
 
 protected:
@@ -230,10 +335,13 @@ private:
     std::size_t m_loop_depth = 0;
 };
 
+/** @brief Records a vertex shader with index/transform built-ins and a homogeneous position output. */
 class vertex_shader_ast_builder_t : public shader_ast_builder_t {
 public:
     vertex_shader_ast_builder_t();
+    /** @brief Reads the backend-supplied signed vertex index. */
     shader_expression_t<std::int32_t> vertex_index();
+    /** @brief Reads the backend-supplied signed instance index. */
     shader_expression_t<std::int32_t> instance_index();
 
     /**
@@ -245,20 +353,29 @@ public:
      * @brief Reads the backend-supplied homogeneous float world-to-clip matrix.
      */
     shader_expression_t<matrix_t<float, 4, 4>> world_to_clip();
+    /** @brief Appends a homogeneous position write, separate from numbered outputs. */
     void position(shader_expression_t<vector_t<float, 4>> expression);
+    /** @brief Appends a constant homogeneous position write. */
     void position(vector_t<float, 4> value);
 };
 
+/** @brief Records a fragment shader with coordinate/facing built-ins, color writes and discard. */
 class fragment_shader_ast_builder_t : public shader_ast_builder_t {
 public:
     fragment_shader_ast_builder_t();
+    /** @brief Reads the backend-supplied fragment coordinate; the renderer defines its coordinate system. */
     shader_expression_t<vector_t<float, 4>> fragment_coordinate();
+    /** @brief Reads the facing flag supplied for this invocation by the backend. */
     shader_expression_t<bool> front_facing();
+    /** @brief Appends a color write, separate from numbered outputs. */
     void color(shader_expression_t<vector_t<float, 4>> expression);
+    /** @brief Appends a constant color write. */
     void color(vector_t<float, 4> value);
+    /** @brief Records termination of the fragment invocation with its results discarded. */
     void discard();
 };
 
+/** @brief Receives concrete AST nodes for inspection or lowering; implementations control traversal. */
 class shader_ast_visitor_t {
 public:
     virtual ~shader_ast_visitor_t() = default;
@@ -284,6 +401,7 @@ public:
     virtual void visit(const shader_discard_statement_t&) = 0;
 };
 
+/** @brief Owns a literal shader value. */
 class shader_constant_node_t final : public shader_expression_node_t {
 public:
     template <shader_value T>
@@ -297,6 +415,7 @@ private:
     shader_literal_t m_value;
 };
 
+/** @brief Reads a numbered stage input with its declared interpolation. */
 class shader_input_node_t final : public shader_expression_node_t {
 public:
     shader_input_node_t(shader_data_type_t type, std::uint32_t location);
@@ -310,6 +429,7 @@ private:
     interpolation_t m_interpolation;
 };
 
+/** @brief Reads a numbered uniform value. */
 class shader_uniform_node_t final : public shader_expression_node_t {
 public:
     shader_uniform_node_t(shader_data_type_t type, std::uint32_t binding);
@@ -320,6 +440,7 @@ private:
     std::uint32_t m_binding;
 };
 
+/** @brief Identifies a numbered texture or sampler binding. */
 class shader_resource_node_t final : public shader_expression_node_t {
 public:
     shader_resource_node_t(shader_data_type_t type, std::uint32_t binding);
@@ -330,6 +451,7 @@ private:
     std::uint32_t m_binding;
 };
 
+/** @brief Reads a stage-specific execution-supplied value. */
 class shader_builtin_node_t final : public shader_expression_node_t {
 public:
     shader_builtin_node_t(shader_data_type_t type, shader_builtin_t builtin);
@@ -340,12 +462,14 @@ private:
     shader_builtin_t m_builtin;
 };
 
+/** @brief Reads the current invocation value of a declared local. */
 class shader_local_node_t final : public shader_expression_node_t {
 public:
     explicit shader_local_node_t(shader_data_type_t type);
     void accept(shader_ast_visitor_t& visitor) const override;
 };
 
+/** @brief Applies a unary operation to a borrowed operand. */
 class shader_unary_node_t final : public shader_expression_node_t {
 public:
     shader_unary_node_t(shader_data_type_t type, shader_unary_operation_t operation, const shader_expression_node_t* expression);
@@ -357,6 +481,7 @@ private:
     shader_unary_operation_t m_operation;
 };
 
+/** @brief Applies an ordered binary operation to borrowed left and right operands. */
 class shader_binary_node_t final : public shader_expression_node_t {
 public:
     shader_binary_node_t(shader_data_type_t type, shader_binary_operation_t operation, const shader_expression_node_t* lhs, const shader_expression_node_t* rhs);
@@ -369,12 +494,14 @@ private:
     shader_binary_operation_t m_operation;
 };
 
+/** @brief Constructs a typed value from borrowed operands in argument order. */
 class shader_construct_node_t final : public shader_expression_node_t {
 public:
     shader_construct_node_t(shader_data_type_t type, std::vector<const shader_expression_node_t*> expressions);
     void accept(shader_ast_visitor_t& visitor) const override;
 };
 
+/** @brief Selects zero-based vector components in the stored order, allowing repetition. */
 class shader_swizzle_node_t final : public shader_expression_node_t {
 public:
     shader_swizzle_node_t(shader_data_type_t type, const shader_expression_node_t* expression, std::vector<std::uint8_t> components);
@@ -386,6 +513,7 @@ private:
     std::vector<std::uint8_t> m_components;
 };
 
+/** @brief Applies a built-in operation to borrowed arguments in call order. */
 class shader_call_node_t final : public shader_expression_node_t {
 public:
     shader_call_node_t(shader_data_type_t type, shader_call_operation_t operation, std::vector<const shader_expression_node_t*> arguments);
@@ -396,6 +524,7 @@ private:
     shader_call_operation_t m_operation;
 };
 
+/** @brief Declares a local and its initializer in the containing block. */
 class shader_local_statement_t final : public shader_statement_node_t {
 public:
     shader_local_statement_t(const shader_local_node_t* local, const shader_expression_node_t* initial);
@@ -410,6 +539,7 @@ private:
     const shader_expression_node_t* m_initial;
 };
 
+/** @brief Replaces a local with the current value of a borrowed expression. */
 class shader_assignment_statement_t final : public shader_statement_node_t {
 public:
     shader_assignment_statement_t(const shader_local_node_t* local, const shader_expression_node_t* value);
@@ -424,6 +554,7 @@ private:
     const shader_expression_node_t* m_value;
 };
 
+/** @brief Writes a borrowed expression to a numbered or special output. */
 class shader_output_statement_t final : public shader_statement_node_t {
 public:
     shader_output_statement_t(shader_output_t output, std::uint32_t location, const shader_expression_node_t* expression);
@@ -439,6 +570,7 @@ private:
     const shader_expression_node_t* m_expression;
 };
 
+/** @brief Owns true and false blocks selected by a borrowed boolean condition. */
 class shader_branch_statement_t final : public shader_statement_node_t {
 public:
     shader_branch_statement_t(const shader_expression_node_t* condition, shader_block_t true_block, shader_block_t false_block = {});
@@ -454,6 +586,7 @@ private:
     shader_block_t m_false_block;
 };
 
+/** @brief Owns a loop body guarded by a borrowed boolean condition. */
 class shader_loop_statement_t final : public shader_statement_node_t {
 public:
     shader_loop_statement_t(const shader_expression_node_t* condition, shader_block_t body);
@@ -467,16 +600,19 @@ private:
     shader_block_t m_body;
 };
 
+/** @brief Exits the innermost loop when executed. */
 class shader_break_statement_t final : public shader_statement_node_t {
 public:
     void accept(shader_ast_visitor_t& visitor) const override;
 };
 
+/** @brief Skips to the innermost loop condition when executed. */
 class shader_continue_statement_t final : public shader_statement_node_t {
 public:
     void accept(shader_ast_visitor_t& visitor) const override;
 };
 
+/** @brief Terminates a fragment invocation and discards its results. */
 class shader_discard_statement_t final : public shader_statement_node_t {
 public:
     void accept(shader_ast_visitor_t& visitor) const override;

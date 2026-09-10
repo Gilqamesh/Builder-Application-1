@@ -7,6 +7,7 @@
 
 namespace m03gl8a1hl8xe3ynm8s2wwfy4u_software_renderer {
 
+/** @brief Describes stored component width and kind: R floating point, I signed integer, U unsigned integer. */
 enum class vertex_attribute_type_t {
     R32,
     R64,
@@ -20,8 +21,16 @@ enum class vertex_attribute_type_t {
     U64,
 };
 
+/** @brief Returns component size in bytes, throwing std::runtime_error for an unknown enumerator. */
 std::size_t vertex_attribute_type_size(vertex_attribute_type_t type);
 
+/**
+ * @brief Describes one vertex stream's component representation and positive component count.
+ *
+ * Defaults to one R32 component. Construction and component_count() reject zero
+ * with std::runtime_error. Storage-type recognition and shader compatibility are
+ * checked when building a mesh and drawing it, respectively; see mesh_t.
+ */
 class vertex_attribute_t {
 public:
     vertex_attribute_t();

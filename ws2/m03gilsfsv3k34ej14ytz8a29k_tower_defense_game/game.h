@@ -14,11 +14,25 @@
 
 namespace m03gilsfsv3k34ej14ytz8a29k_tower_defense_game {
 
+/**
+ * @brief Owns the application's GLFW lifetime, scene and CPU framebuffer for software rendering.
+ *
+ * Construct, run and destroy on the main thread with no other glfw_t alive.
+ * Construction opens the window and loads ./assets using the environment described
+ * by this module's free run() entry point in api.h. The software-renderer module
+ * owns scene-resource semantics; the OpenGL renderer presents the resulting pixels.
+ */
 class game_t {
 public:
     game_t();
     ~game_t();
 
+    /**
+     * @brief Polls input and renders frames until this game's window is requested to close.
+     *
+     * Blocks on the calling thread and propagates exceptions. Returning leaves
+     * the window owned by this game; destruction releases the window and GLFW.
+     */
     void run();
 
 private:

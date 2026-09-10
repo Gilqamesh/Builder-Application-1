@@ -26,6 +26,40 @@ struct texture_description_t {
  *
  * Existing view(), bytes(), width() and height() access level zero.
  * Texel `(0, 0)` begins at byte zero and `x` varies fastest. The texture defines no image-space orientation or implicit vertical flip. Construction from texel bytes requires non-zero extent. A moved-from texture retains its format but has zero extent and no bytes.
+ * Copies own independent bytes at every level. Sequence writable view edits,
+ * mip generation and sampling so no operation reads storage while it is written.
+ * Sampling coordinates, filtering and LOD selection are defined in sampler.h.
+ *
+ * @code{.cpp}
+ * #include <m03gagbht2l61mj6qitacwbmea_byte_stream/byte_stream.h>
+ * #include <m03gt0l0q3l4b1k27eab5k7py1_texture/texture.h>
+ * #include <m03gt0l0q3l4b1k27eab5k7py1_texture/sampler.h>
+ *
+ * #include <cassert>
+ * #include <cstddef>
+ * #include <vector>
+ *
+ * int main() {
+ *     using namespace m03gt0l0q3l4b1k27eab5k7py1_texture;
+ *     using byte_stream_t = m03gagbht2l61mj6qitacwbmea_byte_stream::byte_stream_t;
+ *     texture_t texture(texture_description_t {format_t::rgba8_unorm, 2, 2, 2},
+ *         byte_stream_t(std::vector<std::byte>(2 * 2 * 4)));
+ *     const sampler_t sampler(sampler_description_t {});
+ *     const auto pixels = texture.view(0); // Writable borrow; texture stays alive.
+ *     for (std::size_t offset = 0; offset < pixels.bytes().size(); offset += 4) {
+ *         pixels.bytes()[offset] = std::byte{255}; // Opaque red base level.
+ *         pixels.bytes()[offset + 3] = std::byte{255};
+ *     }
+ *     // Allocated 1x1 level is still transparent black, despite the edits above.
+ *     assert(sample_lod(texture, sampler, {0.5F, 0.5F}, 1.0F) == color_t(0.0F));
+ *     texture.generate_mipmaps();
+ *     assert((sample_lod(texture, sampler, {0.5F, 0.5F}, 1.0F) == color_t{1, 0, 0, 1}));
+ *     pixels.bytes()[0] = std::byte{0}; // Existing view remains valid.
+ *     assert(sample_lod(texture, sampler, {0.5F, 0.5F}, 1.0F)[0] == 1.0F);
+ *     texture.generate_mipmaps(); // Now the lower level reflects the edit.
+ *     assert(sample_lod(texture, sampler, {0.5F, 0.5F}, 1.0F)[0] < 1.0F);
+ * }
+ * @endcode
  */
 class texture_t {
 public:

@@ -13,11 +13,45 @@
 namespace m03gintxczohr63y44o77b4pyj_hyperrectangle {
 
 /**
- * @brief N-dimensional hyperrectangle of type T.
- * 
- * Invariants:
- *   dimensions are represented as half-open intervals [start, end).
- *   operations always produce finite values, no NaN or +-infinity for floating point types.
+ * @brief Owns N half-open intervals defining an axis-aligned region of coordinates of type T.
+ *
+ * N must be positive. Dimension i corresponds to coordinate i in a vector.
+ * Each dimension follows m03gin6lte1az5kj36aj9suk6t_interval::interval_t for
+ * ordered finite bounds, saturation, clamping and inflation/deflation.
+ * Any empty dimension makes the hyperrectangle empty.
+ *
+ * Iterators visit the N stored intervals in dimension order. Iterators,
+ * indexed references and the array returned by bounds() borrow this object's
+ * storage for its lifetime; bound changes are visible through them. Mutable
+ * access allows updating or replacing individual intervals. Construction and
+ * bounds(intervals) copy their inputs; corner() and opposite_corner() return copies.
+ *
+ * @code{.cpp}
+ * #include <m03gintxczohr63y44o77b4pyj_hyperrectangle/api.h>
+ * #include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
+ *
+ * #include <cassert>
+ * #include <stdexcept>
+ *
+ * int main() {
+ *     using hyperrectangle_t = m03gintxczohr63y44o77b4pyj_hyperrectangle::hyperrectangle_t<int, 2>;
+ *     using vector_t = m03ginwy24ng8o487c4beoms6l_vector::vector_t<int, 2>;
+ *     const vector_t corner{1, 2};
+ *     const vector_t opposite_corner{5, 8};
+ *     const hyperrectangle_t hyperrectangle(corner, opposite_corner);
+ *     assert(hyperrectangle.contains(vector_t{1, 2}));
+ *     assert(hyperrectangle.contains(vector_t{4, 7}));
+ *     assert(!hyperrectangle.contains(vector_t{5, 7})); // Upper face excluded.
+ *
+ *     bool rejected = false;
+ *     try {
+ *         const hyperrectangle_t reversed_hyperrectangle(opposite_corner, corner);
+ *     } catch (const std::invalid_argument&) {
+ *         rejected = true; // Supply ordered corners before trying again.
+ *     }
+ *     assert(rejected);
+ * }
+ * @endcode
  */
 template <typename T, std::size_t N>
 class hyperrectangle_t {
@@ -36,120 +70,128 @@ public:
 
     /**
      * @brief Constructs a hyperrectangle with the given intervals.
-     * 
-     * Fails if the number of intervals is not equal to N.
+     *
+     * Copies the intervals in dimension order.
+     * @throws std::invalid_argument If the number of intervals is not N.
      */
     hyperrectangle_t(std::initializer_list<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>> list);
 
     /**
-     * @brief Constructs a hyperrectangle with the given corner and opposite corner.
-     * 
-     * Fails if any element of the corner or opposite corner is NaN or +-infinity for floating point types.
+     * @brief Constructs each dimension as [corner[i], opposite_corner[i]).
+     *
+     * Requires corner[i] <= opposite_corner[i] in every dimension; corners
+     * are not reordered. Equality in any dimension produces an empty region.
+     * @throws std::invalid_argument If any coordinate pair is reversed, or any
+     * floating point coordinate is NaN or +-infinity.
      */
     hyperrectangle_t(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& corner, const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& opposite_corner);
 
     /**
-     * @brief Returns the corner of the hyperrectangle.
+     * @brief Returns a vector copy of the start endpoint in each dimension.
      */
     m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> corner() const noexcept;
 
     /**
-     * @brief Returns the opposite corner of the hyperrectangle.
+     * @brief Returns a vector copy of the excluded end endpoint in each dimension.
      */
     m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> opposite_corner() const noexcept;
 
     /**
-     * @brief Sets the bounds of the hyperrectangle.
+     * @brief Copies the supplied intervals into the bounds in dimension order.
      */
     void bounds(const std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>& intervals) noexcept;
 
     /**
-     * @brief Returns the bounds of the hyperrectangle in each dimension.
+     * @brief Borrows the read-only array of intervals in dimension order.
      */
     const std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>& bounds() const;
 
+    /** @brief Returns a read-only iterator to the first dimension's interval. */
     std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::const_iterator begin() const noexcept;
+    /** @brief Returns the read-only iterator past the N dimension intervals. */
     std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::const_iterator end() const noexcept;
 
+    /** @brief Returns a mutable iterator to the first dimension's interval. */
     std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::iterator begin() noexcept;
+    /** @brief Returns the mutable iterator past the N dimension intervals. */
     std::array<m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>, N>::iterator end() noexcept;
 
     /**
      * @brief Returns a reference to the interval at the given index.
-     * 
-     * Does no bound checking.
+     *
+     * @pre index < N; no bounds check is performed.
      */
     m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>& operator[](std::size_t index) noexcept;
 
     /**
      * @brief Returns a const reference to the interval at the given index.
-     * 
-     * Does no bound checking.
+     *
+     * @pre index < N; no bounds check is performed.
      */
     const m03gin6lte1az5kj36aj9suk6t_interval::interval_t<T>& operator[](std::size_t index) const noexcept;
 
     /**
      * @brief Adds a vector to the hyperrectangle using saturating arithmetic.
-     * 
-     * Fails if any element of the vector is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If any vector element is NaN or +-infinity for floating point types.
      */
     hyperrectangle_t& operator+=(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& vector);
 
     /**
      * @brief Subtracts a vector from the hyperrectangle using saturating arithmetic.
-     * 
-     * Fails if any element of the vector is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If any vector element is NaN or +-infinity for floating point types.
      */
     hyperrectangle_t& operator-=(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& vector);
 
     /**
      * @brief Returns a new hyperrectangle that is the result of adding a vector to the hyperrectangle using saturating arithmetic.
-     * 
-     * Fails if any element of the vector is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If any vector element is NaN or +-infinity for floating point types.
      */
     hyperrectangle_t operator+(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& vector) const;
 
     /**
      * @brief Returns a new hyperrectangle that is the result of subtracting a vector from the hyperrectangle using saturating arithmetic.
-     * 
-     * Fails if any element of the vector is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If any vector element is NaN or +-infinity for floating point types.
      */
     hyperrectangle_t operator-(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& vector) const;
 
     /**
      * @brief Clamps the given vector to the hyperrectangle.
-     * 
+     *
      * If any element of the vector is greater or equal to the end of the corresponding interval, the end of the interval is returned, which is not part of the interval.
-     * 
-     * Fails if any element of the vector is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If any vector element is NaN or +-infinity for floating point types.
      */
     m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N> clamp(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& vector) const;
 
     /**
      * @brief Inflates the hyperrectangle by the given value in all dimensions using saturating arithmetic.
-     * 
-     * Fails if value is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If value is NaN or +-infinity for floating point types.
      */
     hyperrectangle_t inflate(const T& value) const;
 
     /**
      * @brief Inflates the hyperrectangle by the given values in each dimension using saturating arithmetic.
-     * 
-     * Fails if any element of the vector is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If any vector element is NaN or +-infinity for floating point types.
      */
     hyperrectangle_t inflate(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& values) const;
 
     /**
      * @brief Deflates the hyperrectangle by the given value in all dimensions using saturating arithmetic.
-     * 
-     * Fails if value is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If value is NaN or +-infinity for floating point types.
      */
     hyperrectangle_t deflate(const T& value) const;
 
     /**
      * @brief Deflates the hyperrectangle by the given values in each dimension using saturating arithmetic.
-     * 
-     * Fails if any element of the vector is NaN or +-infinity for floating point types.
+     *
+     * @throws std::invalid_argument If any vector element is NaN or +-infinity for floating point types.
      */
     hyperrectangle_t deflate(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& values) const;
 
@@ -166,7 +208,11 @@ public:
     bool is_empty() const;
 
     /**
-     * @brief Returns true if the hyperrectangle contains the given vector.
+     * @brief Returns whether every coordinate lies in its corresponding half-open interval.
+     *
+     * Start endpoints are included and end endpoints are excluded. Empty
+     * hyperrectangles contain no vectors. A floating point NaN or infinite
+     * coordinate returns false without throwing.
      */
     bool contains(const m03ginwy24ng8o487c4beoms6l_vector::vector_t<T, N>& vector) const;
 

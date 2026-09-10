@@ -24,6 +24,16 @@
 
 namespace m03gm33dj5xo77vegpbspger4r_cli {
 
+/**
+ * @brief Converts one command token to T for arguments_t::pop().
+ *
+ * Specializations provide static T parse(std::string_view token,
+ * std::string_view name); name labels diagnostics. Built-in numeric parsers
+ * require the whole token to fit T (decimal integers, finite floating-point
+ * values) and throw std::invalid_argument on failure. Booleans accept lowercase
+ * true/false, on/off, yes/no, and 1/0. String and path conversions do not validate
+ * content or filesystem existence; std::string_view borrows the token.
+ */
 template <typename T>
 struct argument_parser_t;
 
@@ -47,7 +57,10 @@ template <std::floating_point T>
 struct argument_parser_t<T>;
 
 /**
- * @brief Maintains a cursor over command arguments.
+ * @brief Consumes typed tokens from a borrowed sequence of command arguments.
+ *
+ * The source strings and their storage must outlive this cursor and any returned
+ * spans or string views. Copying a cursor copies its position, not the strings.
  */
 class arguments_t {
 public:
@@ -72,7 +85,11 @@ public:
     std::span<const std::string> remaining() const;
 
     /**
-     * @brief Pops the next argument as T.
+     * @brief Consumes the next token and converts it to T using argument_parser_t.
+     *
+     * Throws std::invalid_argument when no token remains. Conversion exceptions
+     * propagate after consuming the token. The default std::string_view result
+     * borrows the source string; name is used only for the call's diagnostics.
      */
     template <typename T = std::string_view>
     T pop(std::string_view name);
@@ -90,7 +107,11 @@ private:
 };
 
 /**
- * @brief Describes one command argument.
+ * @brief Defines a positional argument's validation, completion, and usage text.
+ *
+ * Owns its strings and callbacks; references captured by callbacks remain the
+ * caller's responsibility. Optional arguments follow required ones, and only
+ * the last argument may be variadic; application_t::add() checks this ordering.
  */
 class argument_t {
 public:
@@ -165,7 +186,9 @@ public:
     static argument_t boolean(std::string name);
 
     /**
-     * @brief Creates a filesystem path argument.
+     * @brief Creates a token argument with filesystem path completion.
+     *
+     * Does not require the supplied path to exist or validate its type.
      */
     static argument_t file(std::string name);
 
@@ -181,6 +204,11 @@ public:
 
     /**
      * @brief Creates an argument from custom completion and validation callbacks.
+     *
+     * Completion receives previously supplied argument tokens and the partial
+     * token; validation receives the token and its argument name. Inputs are
+     * borrowed for each synchronous call. Empty callbacks disable that operation;
+     * validation signals failure by throwing. Callback exceptions propagate.
      */
     static argument_t custom(
         std::string name,
@@ -198,7 +226,10 @@ private:
 };
 
 /**
- * @brief Provides command handlers with arguments and output streams.
+ * @brief Borrows command arguments and streams and carries a handler's stop request.
+ *
+ * A dispatched context is valid only during the handler call. Copy tokens that
+ * must survive dispatch; do not retain the context or views into its arguments.
  */
 class context_t {
 public:
@@ -223,7 +254,7 @@ public:
     std::ostream& err;
 
     /**
-     * @brief Requests application shutdown after the command returns.
+     * @brief Requests application shutdown after the handler returns normally.
      */
     void stop();
 
@@ -237,7 +268,10 @@ private:
 };
 
 /**
- * @brief Describes one command table entry.
+ * @brief Owns a command's dispatch paths, argument schema, help text, and handler.
+ *
+ * Construction stores the description; application_t::add() checks registration
+ * invariants. Callback captures must remain valid for their later invocations.
  */
 struct command_t {
     /**
@@ -302,7 +336,47 @@ struct command_t {
 };
 
 /**
- * @brief Stores a command table and dispatches tokenized input.
+ * @brief Owns registered commands and synchronously validates and dispatches input.
+ *
+ * Starts running. Dispatch borrows input and streams for the call; the stored
+ * handlers and fallback may capture caller-owned state, which must remain valid
+ * when invoked. Dispatch chooses the longest registered path before validating
+ * positional arguments. A trailing help token requests help without invoking
+ * the command handler. See run_arguments() for return and exception semantics.
+ *
+ * @code{.cpp}
+ * #include <m03gm33dj5xo77vegpbspger4r_cli/api.h>
+ *
+ * #include <exception>
+ * #include <iostream>
+ * #include <string>
+ * #include <vector>
+ *
+ * namespace cli = m03gm33dj5xo77vegpbspger4r_cli;
+ *
+ * int main() {
+ *     cli::application_t application;
+ *     application.add({
+ *         {"show"}, "Print a count.", {cli::argument_t::integer("count")},
+ *         [](cli::context_t& context) {
+ *             const int count = context.arguments.pop<int>("count");
+ *             context.out << count << '\n';
+ *         }
+ *     });
+ *     application.add({{"quit"}, "Stop the application.", [](cli::context_t& context) {
+ *         context.stop();
+ *     }});
+ *     try {
+ *         application.run_command("show 3", std::cout, std::cerr); // Returns true.
+ *         const std::vector<std::string> arguments{"quit"}; // No executable name.
+ *         const bool running = application.run_arguments(arguments, std::cout, std::cerr);
+ *         return running ? 1 : 0; // Successful quit returns false.
+ *     } catch (const std::exception& exception) {
+ *         std::cerr << exception.what() << '\n';
+ *         return 1;
+ *     }
+ * }
+ * @endcode
  */
 class application_t {
 public:
@@ -317,7 +391,11 @@ public:
     application_t& operator=(application_t&& other) = delete;
 
     /**
-     * @brief Adds a command table entry.
+     * @brief Takes ownership of a command after checking its registration invariants.
+     *
+     * Throws std::logic_error for an empty handler, empty path or path component,
+     * duplicate path/alias, empty argument name, nonfinal variadic argument, or
+     * required argument following an optional one. Allocation failures propagate.
      */
     void add(command_t command);
 
@@ -330,7 +408,9 @@ public:
      * @brief Sets a handler for unknown command lines.
      *
      * The handler receives the original tokens as arguments and should return
-     * true only when it handled the line.
+     * true only when it handled the line. This handled result is separate from
+     * the running state returned by dispatch. An empty handler clears fallback;
+     * exceptions propagate. The context's borrowing rules apply.
      */
     void fallback(std::function<bool(context_t&)> handler);
 
@@ -346,16 +426,39 @@ public:
 
     /**
      * @brief Tokenizes and runs one command line.
+     *
+     * Accepts whitespace-separated tokens with quotes, backslash escapes, and
+     * comments starting with # at a token boundary. Unterminated quotes or an
+     * incomplete final escape throw std::invalid_argument before dispatch.
+     * Returns the running state and otherwise follows run_arguments().
      */
     bool run_command(std::string_view command, std::ostream& out, std::ostream& err);
 
     /**
-     * @brief Runs already-tokenized command arguments.
+     * @brief Dispatches already-tokenized input and returns the application's running state.
+     *
+     * Supply the command path and positional arguments without an executable name.
+     * No tokenization is performed. Empty input only returns running(). The result
+     * is true while running and false after a stop request; it is not a command
+     * success flag. Callers control whether to dispatch again after stopping.
+     *
+     * Unknown commands not handled by fallback and built-in argument validation
+     * failures throw std::invalid_argument. Custom validator, handler, and fallback
+     * exceptions propagate unchanged. Dispatch does not print these exceptions to
+     * err; the caller reports or handles them. Handler output and other effects
+     * before an exception are not rolled back. context_t::stop() takes effect only
+     * after the callback returns normally.
      */
     bool run_arguments(std::span<const std::string> arguments, std::ostream& out, std::ostream& err);
 
     /**
-     * @brief Runs commands from a script file.
+     * @brief Dispatches script lines until EOF or a stop request and returns the running state.
+     *
+     * Echoes nonempty tokenized lines with path and line number when requested.
+     * Opening failure throws std::invalid_argument. A std::exception while
+     * processing a line stops the script and is rethrown as std::invalid_argument
+     * with path and line number; nonstandard exceptions propagate unchanged.
+     * Read failure throws std::ios_base::failure. Prior command effects remain.
      */
     bool run_script(const std::filesystem::path& path, std::ostream& out, std::ostream& err, bool echo_commands = true);
 

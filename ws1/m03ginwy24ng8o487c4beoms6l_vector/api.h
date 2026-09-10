@@ -17,23 +17,64 @@
 namespace m03ginwy24ng8o487c4beoms6l_vector {
 
 /**
- * @brief N-dimensional vector of type T.
- * 
- * Does no bound checking on its operations.
- * 
+ * @brief Owns N mutable components with componentwise arithmetic and vector lengths.
+ *
+ * Vector multiplication and division operate on corresponding components.
+ * Scalar operations apply to every component and cast each result to T.
+ * Arithmetic follows the underlying operators without saturation or checks
+ * for overflow, zero divisors or non-finite floating point values; callers
+ * must avoid undefined arithmetic and invalid conversions.
+ *
+ * Elements are stored contiguously in index order. References and iterators
+ * borrow this object's storage for its lifetime; mutation and assignment
+ * change the elements they observe. Array and initializer-list constructors
+ * copy their elements. Use parentheses for scalar fill. Nonempty braces of
+ * component values select the initializer-list constructor and require exactly
+ * N elements; empty braces select the default constructor, which does not
+ * initialize scalar elements.
+ *
  * @tparam T The type of the vector elements.
- * @tparam N The number of dimensions of the vector.
+ * @tparam N The positive number of dimensions of the vector.
+ *
+ * @code{.cpp}
+ * #include <m03ginwy24ng8o487c4beoms6l_vector/api.h>
+ *
+ * #include <cassert>
+ * #include <stdexcept>
+ *
+ * int main() {
+ *     using vector_t = m03ginwy24ng8o487c4beoms6l_vector::vector_t<float, 3>;
+ *     const vector_t zero_vector(0.0f); // Fills all three components.
+ *     const vector_t vector{1.0f, 2.0f, 3.0f};
+ *     const vector_t scale_vector{2.0f, 3.0f, 4.0f};
+ *     const auto product_vector = vector * scale_vector;
+ *     assert(zero_vector.is_zero());
+ *     assert((product_vector == vector_t{2.0f, 6.0f, 12.0f}));
+ *
+ *     bool rejected = false;
+ *     try {
+ *         const vector_t short_vector{0.0f}; // One element, not scalar fill.
+ *     } catch (const std::invalid_argument&) {
+ *         rejected = true;
+ *     }
+ *     assert(rejected);
+ * }
+ * @endcode
  */
 template <typename T, std::size_t N>
 class vector_t {
     static_assert(0 < N, "vector_t does not support 0-dimensional vectors.");
 
 public:
+    /** @brief Uses T for floating point lengths and double for other element types. */
     using length_t = std::conditional_t<std::is_floating_point_v<T>, T, double>;
 
 public:
     /**
-     * @brief Constructs a vector_t with uninitialized elements.
+     * @brief Default-initializes the elements without initializing scalar elements.
+     *
+     * Assign scalar elements before reading them, including through arithmetic,
+     * length queries or formatting. Empty braces also call this constructor.
      */
     vector_t();
 
@@ -45,17 +86,17 @@ public:
     vector_t(const T& value);
 
     /**
-     * @brief Constructs a vector_t with the given elements.
-     * 
+     * @brief Copies the array's elements into the vector in index order.
+     *
      * @param data The array of elements to initialize the vector with.
      */
     vector_t(const std::array<T, N>& data);
 
     /**
-     * @brief Constructs a vector_t with the given elements.
-     * 
-     * The number of elements in the initializer list must be equal to N.
-     * 
+     * @brief Copies exactly N initializer-list elements in index order.
+     *
+     * @throws std::invalid_argument If list.size() is not N.
+     *
      * @param list The initializer list of elements to initialize the vector with.
      */
     vector_t(std::initializer_list<T> list);
@@ -73,9 +114,11 @@ public:
 
     /**
      * @brief Returns a unit vector in the same direction as this vector.
-     * 
-     * Can only be called for floating point types.
-     * No bound checking is performed, so the caller must ensure that the vector is not zero.
+     *
+     * Can only be called for floating point types. Divides each component by
+     * euclidean_length(). For a meaningful unit result, the components and
+     * the computed length must be finite and the length nonzero; these
+     * conditions are not checked and invalid inputs are not rejected.
      */
     vector_t unit() const;
 
@@ -114,13 +157,25 @@ public:
      */
     length_t euclidean_length_squared() const;
 
+    /** @brief Returns a read-only iterator to the first component. */
     std::array<T, N>::const_iterator begin() const;
+    /** @brief Returns the read-only iterator past the N components. */
     std::array<T, N>::const_iterator end() const;
+    /** @brief Returns a mutable iterator to the first component. */
     std::array<T, N>::iterator begin();
+    /** @brief Returns the mutable iterator past the N components. */
     std::array<T, N>::iterator end();
 
-    T& operator[](std::size_t index); // does no bound checking
-    const T& operator[](std::size_t index) const; // does no bound checking
+    /**
+     * @brief Borrows the component at the given index for mutation.
+     * @pre index < N; no bounds check is performed.
+     */
+    T& operator[](std::size_t index);
+    /**
+     * @brief Borrows the component at the given index for reading.
+     * @pre index < N; no bounds check is performed.
+     */
+    const T& operator[](std::size_t index) const;
 
     /**
      * @brief Compares two vectors for equality.
@@ -129,32 +184,49 @@ public:
      */
     bool operator==(const vector_t& other) const;
 
-    vector_t& operator+=(const vector_t& other); // element-wise, does no bound checking
-    vector_t& operator-=(const vector_t& other); // element-wise, does no bound checking
-    vector_t& operator*=(const vector_t& other); // element-wise, does no bound checking
-    vector_t& operator/=(const vector_t& other); // element-wise, does no bound checking
-    vector_t operator+(const vector_t& other) const; // element-wise, does no bound checking
-    vector_t operator-(const vector_t& other) const; // element-wise, does no bound checking
-    vector_t operator-() const; // element-wise, does no bound checking
-    vector_t operator*(const vector_t& other) const; // element-wise, does no bound checking
-    vector_t operator/(const vector_t& other) const; // element-wise, does no bound checking
+    /** @brief Adds corresponding components in place and returns *this. */
+    vector_t& operator+=(const vector_t& other);
+    /** @brief Subtracts corresponding components in place and returns *this. */
+    vector_t& operator-=(const vector_t& other);
+    /** @brief Multiplies corresponding components in place and returns *this. */
+    vector_t& operator*=(const vector_t& other);
+    /** @brief Divides corresponding components in place and returns *this. */
+    vector_t& operator/=(const vector_t& other);
+    /** @brief Returns the componentwise sum. */
+    vector_t operator+(const vector_t& other) const;
+    /** @brief Returns the componentwise difference. */
+    vector_t operator-(const vector_t& other) const;
+    /** @brief Returns a vector with each component negated. */
+    vector_t operator-() const;
+    /** @brief Returns the componentwise product. */
+    vector_t operator*(const vector_t& other) const;
+    /** @brief Returns the componentwise quotient. */
+    vector_t operator/(const vector_t& other) const;
 
+    /** @brief Adds the scalar to every component in place and returns *this. */
     template <typename U>
-    vector_t& operator+=(U value); // element-wise, does no bound checking, operation relies on implicit conversion
+    vector_t& operator+=(U value);
+    /** @brief Subtracts the scalar from every component in place and returns *this. */
     template <typename U>
-    vector_t& operator-=(U value); // element-wise, does no bound checking, operation relies on implicit conversion
+    vector_t& operator-=(U value);
+    /** @brief Multiplies every component by the scalar in place and returns *this. */
     template <typename U>
-    vector_t& operator*=(U value); // element-wise, does no bound checking, operation relies on implicit conversion
+    vector_t& operator*=(U value);
+    /** @brief Divides every component by the scalar in place and returns *this. */
     template <typename U>
-    vector_t& operator/=(U value); // element-wise, does no bound checking, operation relies on implicit conversion
+    vector_t& operator/=(U value);
+    /** @brief Returns a vector with the scalar added to each component. */
     template <typename U>
-    vector_t operator+(U value) const; // element-wise, does no bound checking, operation relies on implicit conversion
+    vector_t operator+(U value) const;
+    /** @brief Returns a vector with the scalar subtracted from each component. */
     template <typename U>
-    vector_t operator-(U value) const; // element-wise, does no bound checking, operation relies on implicit conversion
+    vector_t operator-(U value) const;
+    /** @brief Returns a vector with each component multiplied by the scalar. */
     template <typename U>
-    vector_t operator*(U value) const; // element-wise, does no bound checking, operation relies on implicit conversion
+    vector_t operator*(U value) const;
+    /** @brief Returns a vector with each component divided by the scalar. */
     template <typename U>
-    vector_t operator/(U value) const; // element-wise, does no bound checking, operation relies on implicit conversion
+    vector_t operator/(U value) const;
 
 private:
     std::array<T, N> m_data;
